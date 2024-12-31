@@ -545,7 +545,7 @@ class QmApiWithDeprecations(QmApi):
             stacklevel=1,
         )
         job = self._strict_get_running_job()
-        return job.get_output_digital_buffer(element, digital_input)
+        return job.get_output_digital_delay(element, digital_input)
 
     def set_digital_delay(self, element: str, digital_input: str, delay: int) -> None:
         """Deprecated - This method is going to be moved to the job API, please use `job.set_output_digital_delay()`.

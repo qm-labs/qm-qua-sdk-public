@@ -76,6 +76,8 @@ SERVER_TO_QOP_VERSION_MAP = {
     "a6f8bc5": "3.1.0",
     "fcdfb69": "3.1.1",
     "3.0-beta-78b5e00": "3.2.0",
+    "3.0-beta-b43e229": "3.2.2",
+    "3.0-beta-ba2d179": "3.2.3",
 }
 
 

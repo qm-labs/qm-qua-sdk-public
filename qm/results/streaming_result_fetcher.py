@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple, Union, TypeVar, KeysView, Optional, Genera
 
 from qm.persistence import BaseStore
 from qm.utils import deprecation_message
+from qm.grpc.v2 import JobExecutionStatus
 from qm.api.v2.job_result_api import JobResultApi
 from qm.api.job_result_api import JobResultServiceApi
 from qm.api.models.capabilities import ServerCapabilities
@@ -199,15 +200,23 @@ class StreamingResultFetcher(Mapping[str, Optional[BaseStreamingResultFetcher]])
         Returns:
             True if all finished successfully, False if any result was closed before done
         """
+        if isinstance(self._service, JobResultApi):
+            # In the new API there is no separate stub for the result, so we can ask the job status directly
+            def on_iteration() -> bool:
+                status = self._service.get_job_execution_status()
+                return status in {JobExecutionStatus.CANCELED, JobExecutionStatus.COMPLETED, JobExecutionStatus.ERROR}
 
-        def on_iteration() -> bool:
-            all_job_states = [result.get_job_state() for result in self._all_results.values()]
-            all_done = all(state.done for state in all_job_states)
-            any_closed = any(state.closed for state in all_job_states)
-            return all_done or any_closed
+            on_complete = on_iteration
+        else:
 
-        def on_complete() -> bool:
-            return all(result.get_job_state().done for result in self._all_results.values())
+            def on_iteration() -> bool:
+                all_job_states = [result.get_job_state() for result in self._all_results.values()]
+                all_done = all(state.done for state in all_job_states)
+                any_closed = any(state.closed for state in all_job_states)
+                return all_done or any_closed
+
+            def on_complete() -> bool:
+                return all(result.get_job_state().done for result in self._all_results.values())
 
         return run_until_with_timeout(
             on_iteration_callback=on_iteration,

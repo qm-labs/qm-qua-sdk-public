@@ -4,7 +4,7 @@ import betterproto
 
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.job_api.element_api import ElementApi, JobElement
-from qm.grpc.qua_config import QuaConfigElementDec, QuaConfigMicrowaveOutputPortReference
+from qm.grpc.qua_config import QuaConfigElementDec, QuaConfigMicrowaveOutputPortReference, QuaConfigMultipleOutputs
 from qm.api.v2.job_api.element_input_api import InputConfigType, create_element_input_class
 from qm.api.v2.job_api.element_port_api import MwOutputApi, AnalogOutputApi, DigitalInputApi
 
@@ -37,7 +37,17 @@ class JobElementsDB(Dict[str, JobElement]):
     ) -> JobElement:
         input_config = cast(InputConfigType, betterproto.which_one_of(element_config, "element_inputs_one_of")[1])
         input_api_class = create_element_input_class(input_config)
-        output_names = list(element_config.multiple_outputs.port_references) or list(element_config.outputs)
+
+        mw_output_api = None
+        outputs = betterproto.which_one_of(element_config, "element_outputs_one_of")[1]
+        if isinstance(outputs, QuaConfigMultipleOutputs):
+            output_names = list(outputs.port_references)
+        elif isinstance(outputs, QuaConfigMicrowaveOutputPortReference):
+            output_names = list(element_config.outputs)
+            mw_output_api = MwOutputApi(connection_details, job_id, element_name)
+        else:
+            output_names = list(element_config.outputs)
+
         outputs_apis = {
             output_name: AnalogOutputApi(connection_details, job_id, element_name, output_name)
             for output_name in output_names
@@ -46,14 +56,6 @@ class JobElementsDB(Dict[str, JobElement]):
             input_name: DigitalInputApi(connection_details, job_id, element_name, input_name)
             for input_name in element_config.digital_inputs
         }
-        mw_output_api = (
-            MwOutputApi(connection_details, job_id, element_name)
-            if isinstance(
-                betterproto.which_one_of(element_config, "element_outputs_one_of"),
-                QuaConfigMicrowaveOutputPortReference,
-            )
-            else None
-        )
         return JobElement(
             api=ElementApi(connection_details, job_id, element_name),
             input_api=input_api_class(connection_details, job_id, element_name),

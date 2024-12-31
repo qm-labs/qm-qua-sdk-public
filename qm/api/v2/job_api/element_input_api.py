@@ -90,7 +90,7 @@ class SingleInputApi(ElementInputApi):
 
 
 class MwInputApi(ElementInputApi):
-    def set_oscillator_frequency(self, frequency_hz: float, set_also_output: bool = True) -> None:
+    def set_converter_frequency(self, frequency_hz: float, set_also_output: bool = True) -> None:
         request = SetOscillatorFrequencyRequest(
             job_id=self._id,
             qe=self._element_id,

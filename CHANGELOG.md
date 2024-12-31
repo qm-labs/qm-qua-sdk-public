@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
+## [1.2.2a2] - 2024-12-11
+
+### Fixed
+- Fixed the function `job.update_oscillator_frequency` to work on the latest QOP 3.2.
+- Fixed a bug for OPX1000 in which `qm.get_digital_delay()` would return the digital buffer instead.
+
+### Deprecated
+- The method `job.update_oscillator_frequency` is replaced by `job.set_converter_frequency` and will be removed in the future.
+
+### Changed
+- Improved the implementation of `wait_for_all_values` in OPX1000 to reduce latency.
+
 ## [1.2.2a1] - 2024-11-28
 
 ### Added

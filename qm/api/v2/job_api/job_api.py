@@ -902,18 +902,39 @@ class JobApi(JobGenericApi):
             frequency_hz (float): The frequency to set to the given element
             update_component (str): The component to update the frequency for: "upconverter", "downconverter", or "both"
         """
+        deprecation_message(
+            method="job.update_oscillator_frequency",
+            deprecated_in="1.2.2",
+            removed_in="1.3.0",
+            details="Use job.set_converter_frequency.",
+        )
+        self.set_converter_frequency(element, frequency_hz, update_component)
+
+    def set_converter_frequency(
+        self,
+        element: str,
+        frequency_hz: float,
+        update_component: Literal["upconverter", "downconverter", "both"] = "both",
+    ) -> None:
+        """Set the upconverter frequency or downconverter frequency of the microwave input of the element
+
+        Args:
+            element (str): The name of the element to update the correction for
+            frequency_hz (float): The frequency to set to the given element
+            update_component (str): The component to update the frequency for: "upconverter", "downconverter", or "both"
+        """
         if update_component == "upconverter":
             input_instance = self.elements[element].input
             if not isinstance(input_instance, MwInputApi):
                 raise ValueError(f"Element {element} does not have a microwave input")
-            input_instance.set_oscillator_frequency(frequency_hz, set_also_output=False)
+            input_instance.set_converter_frequency(frequency_hz, set_also_output=False)
         elif update_component == "downconverter":
             output_instance = self.elements[element].microwave_output
             output_instance.set_oscillator_frequency(frequency_hz)
         elif update_component == "both":
             input_instance = self.elements[element].input
             if isinstance(input_instance, MwInputApi):
-                input_instance.set_oscillator_frequency(
+                input_instance.set_converter_frequency(
                     frequency_hz, set_also_output=self.elements[element].has_mw_output
                 )
             else:

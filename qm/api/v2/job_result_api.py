@@ -6,10 +6,12 @@ from qm.api.models.server_details import ConnectionDetails
 from qm.StreamMetadata import StreamMetadata, StreamMetadataError, _get_stream_metadata_dict_from_proto_resp
 from qm.grpc.v2 import (
     JobServiceStub,
+    JobExecutionStatus,
     GetNamedResultRequest,
     GetJobResultStateRequest,
     GetJobResultSchemaRequest,
     GetProgramMetadataRequest,
+    JobServiceGetJobStatusRequest,
     GetJobNamedResultHeaderRequest,
     GetNamedResultResponseGetNamedResultResponseSuccess,
     GetJobResultStateResponseGetJobResultStateResponseSuccess,
@@ -115,3 +117,8 @@ class JobResultApi(BaseApiV2[JobServiceStub]):
         request = GetJobResultStateRequest(job_id=self._id)
         response = self._run(self._stub.get_job_result_state(request, timeout=self._timeout))
         return response
+
+    def get_job_execution_status(self) -> JobExecutionStatus:
+        request = JobServiceGetJobStatusRequest(job_id=self._id)
+        response = self._run(self._stub.get_job_status(request, timeout=self._timeout))
+        return response.status
