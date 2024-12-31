@@ -1,0 +1,151 @@
+[tool.poetry]
+name = "qm-qua"
+version = "0.0.0"
+description = "QUA language SDK to control a Quantum Computer"
+readme = "README.md"
+authors = ["Quantum Machines <info@quantum-machines.co>"]
+
+packages = [
+    { include = "qm" },
+    { include = "qm/py.typed" }
+]
+include = [
+    "CHANGELOG.md",
+    "LICENSE",
+    "qm/io/**/*",
+    "qm/grpc/**/*.py",
+]
+
+[tool.poetry.dependencies]
+python = ">=3.8, <3.12"
+grpcio = [
+    {version = "^1.39.0", python = ">=3.8,<3.11"},
+    {version = "^1.57", python = ">=3.11"}
+]
+protobuf = ">=3.17.3, <5"
+betterproto = [
+    {version = "2.0.0b5", python = ">=3.8,<3.11"},
+    {version = "2.0.0b6", python = "==3.11"}
+]
+marshmallow = "^3.20.1"
+marshmallow-polyfield = "^5.7"
+numpy = "^1.17.0"
+tinydb = "^4.6.1"
+certifi = { version = "*", optional = true }
+datadog-api-client = "^2.6.0"
+deprecation = "^2.1.0"
+dependency_injector = "^4.41.0"
+qm-octave = "2.1.0"
+typing-extensions = "^4.5"
+
+grpclib = { version = "^0.4.5", python = ">=3.10", allow-prereleases = true }
+plotly = "^5.13.0"
+httpx = { version = "^0.23.3", extras = ["http2"] }
+
+[tool.poetry.dev-dependencies]
+grpcio-tools = [
+    {version = "^1.39.0", python = ">=3.8,<3.11"},
+    {version = "^1.57", python = ">=3.11"}
+]
+coverage = "^7.0.1"
+pytest-asyncio = "^0.20.3"
+pytest-benchmark = { extras = ["aspect"], version = "^4.0.0" }
+
+black = "^22.6.0"
+flake8 = "^3.9.2"
+importlib-metadata = { version = "^4.0.0", python = "~3.7" }
+pytest = "^7.0.0"
+pytest-cov = "^4.0.0"
+flake8-bugbear = "^21.11.29"
+poethepoet = "^0.16.0"
+pytest-order = "^1.0.0"
+
+Sphinx = "^4.3.1"
+sphinx-rtd-theme = "^1.0.0"
+sphinxcontrib-redoc = "^1.6.0"
+apispec = "^5.1.1"
+sphinx-toolbox = "^2.15.2"
+poetry-dynamic-versioning = { extras = ["plugin"], version = "^0.21.2" }
+mypy = "^1.1.1"
+isort = "^5.11.5"
+tox = "^4.0.0"
+
+[tool.poetry.extras]
+simulation = ["certifi"]
+
+[tool.black]
+line-length = 120
+target-version = ["py38"]
+extend-exclude = '''
+/(
+  | qm/grpc/.*
+  | qm/io/.*
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 120
+length_sort = true
+skip_gitignore = true
+force_sort_within_sections = true
+extra_standard_library = ["typing_extensions"]
+
+
+[tool.poe.tasks]
+clean-grpc.sequence = [
+    { "script" = "shutil:rmtree('qm/grpc', ignore_errors=True)" },
+    { "script" = "shutil:rmtree('qm/pb', ignore_errors=True)" },
+    { "script" = "shutil:rmtree('qm/io', ignore_errors=True)" }
+]
+move-generated-grpc.sequence = [
+    { "script" = "shutil:move('io', 'qm/io')" },
+    { "script" = "os:remove('__init__.py')" }
+]
+create-grpc = "poetry run python -m grpc_tools.protoc -Iproto --python_betterproto_out=. proto/qm/pb/*.proto io/qualang/api/v1/info_service.proto"
+generate-grpc.sequence = [
+    "clean-grpc",
+    "create-grpc",
+    "move-generated-grpc",
+]
+check-grpc-breaking-changes = "buf breaking --against '.git#branch=main'"
+
+format-black = "poetry run black qm"
+format-isort = "poetry run isort qm"
+format.sequence = ["format-black", "format-isort"]
+format.ignore_fail = true
+
+check-links = "sphinx-build -b linkcheck docs_sphinx dist/check-links"
+
+lint-black = "black qm --check"
+lint-flake8 = "flake8 qm"
+lint-mypy = "mypy qm"
+lint.sequence = ["lint-black", "lint-flake8", "lint-mypy"]
+lint.ignore_fail = true
+
+test = "pytest tests"
+
+check.sequence = ["lint", "test"]
+check.ignore_fail = true
+
+pre-commit-hook.sequence = ["format", "lint"]
+pre-commit-hook.ignore_fail = true
+
+
+[tool.coverage.report]
+skip_empty = true
+
+[tool.coverage.run]
+branch = true
+
+[tool.poetry-dynamic-versioning]
+enable = true
+format-jinja = "{{ base }}{{ env['VERSION_SUFFIX'] }}"
+
+[tool.poetry-dynamic-versioning.substitution]
+files = ["qm/version.py"]
+patterns = ["(^__version__\\s*(?::.*?)?=\\s*['\"])[^'\"]*(['\"])"]
+
+[build-system]
+requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning"]
+build-backend = "poetry_dynamic_versioning.backend"
