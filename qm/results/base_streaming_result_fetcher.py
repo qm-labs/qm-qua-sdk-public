@@ -1,7 +1,6 @@
 import abc
 import json
 import logging
-import warnings
 from io import BytesIO
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Union, BinaryIO, Optional, Protocol, cast
@@ -11,7 +10,6 @@ import numpy.typing
 from numpy.lib import format as _format
 
 from qm.persistence import BaseStore
-from qm.utils import deprecation_message
 from qm.utils.async_utils import run_async
 from qm.type_hinting.general import PathLike
 from qm.api.v2.job_result_api import JobResultApi
@@ -138,43 +136,6 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
             raise InvalidStreamMetadataError(self._stream_metadata_errors)
         return self._stream_metadata
 
-    def save_to_store(
-        self,
-        writer: Optional[Union[BinaryIO, str]] = None,
-        flat_struct: bool = False,
-    ) -> int:
-        """Saving to persistent store the NPY data of this result handle
-
-        Args:
-            writer: An optional writer to override the store defined in
-                [QuantumMachinesManager][qm.quantum_machines_manager.QuantumMachinesManager]
-            flat_struct: results will have a flat structure - dimensions
-                will be part of the shape and not of the type
-
-        Returns:
-            The number of items saved
-        """
-        warnings.warn(
-            deprecation_message(
-                method="StreamingResultFetcher.save_to_store",
-                deprecated_in="1.1.1",
-                removed_in="1.2.0",
-                details="function no longer supported, will be removed.",
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        writer_opened = False
-        if writer is None or isinstance(writer, str):
-            writer_opened = True
-            writer = self._open_bytes_writer(writer)
-        try:
-            header = self._get_named_header(flat_struct=flat_struct)
-            return self._save_to_file(header, writer)
-        finally:
-            if writer_opened:
-                writer.close()
-
     def _open_bytes_writer(self, path: Optional[PathLike]) -> BinaryIO:
         if path is not None:
             return open(path, "wb+")
@@ -187,8 +148,6 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         Args:
             count: The number of items to wait for
             timeout: Timeout for waiting in seconds
-
-        Returns:
 
         """
         run_until_with_timeout(
@@ -207,13 +166,6 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
             True if job finished successfully and False if job has
             closed before done
         """
-        if timeout is None:
-            timeout = float("infinity")
-            warnings.warn(
-                "Parameter `timeout` can only be float since 1.1.0, please use `wait_for_all_values()` instead",
-                category=DeprecationWarning,
-                stacklevel=2,
-            )
 
         def on_iteration() -> bool:
             header = self.get_job_state()
@@ -247,8 +199,8 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         return self.count_so_far()
 
     def has_dataloss(self) -> bool:
-        """Returns:
-        if there was data loss during job execution
+        """
+        Returns: true if there was data loss during job execution
         """
         state = self.get_job_state()
         return state.has_dataloss

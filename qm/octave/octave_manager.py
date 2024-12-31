@@ -4,10 +4,12 @@ import contextlib
 import dataclasses
 from enum import Enum
 from time import perf_counter
+from abc import abstractmethod
 from functools import lru_cache
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Iterator, Optional, cast
+from typing import TYPE_CHECKING, Any, Set, Dict, List, Tuple, Union, Generic, TypeVar, Iterator, Optional, cast
 
+import betterproto
 from octave_sdk.octave import ClockInfo
 from octave_sdk._octave_client import MonitorResult
 from octave_sdk.grpc.quantummachines.octave.api.v1 import (
@@ -37,7 +39,7 @@ from qm.octave._calibration_config import _prep_config
 from qm.program._qua_config_to_pb import build_iw_sample
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
-from qm.exceptions import OpenQmException, OctaveLoopbackError
+from qm.exceptions import OpenQmException, OctaveLoopbackError, NoOutputPortDeclared
 from qm.octave._calibration_names import COMMON_OCTAVE_PREFIX, CalibrationElementsNames
 from qm.octave.octave_mixer_calibration import (
     AutoCalibrationParams,
@@ -54,6 +56,8 @@ from qm.grpc.qua_config import (
     QuaConfigSingleInput,
     QuaConfigWaveformDec,
     QuaConfigOctaveConfig,
+    QuaConfigControllerDec,
+    QuaConfigOctoDacFemDec,
     QuaConfigOctaveLoopback,
     QuaConfigCorrectionEntry,
     QuaConfigAdcPortReference,
@@ -91,16 +95,50 @@ class ClockMode(Enum):
     External_1000MHz = (ClockType.Buffered, ClockFrequency.MHZ_1000)
 
 
-@dataclasses.dataclass
-class _ControllerPorts:
-    I: QuaConfigDacPortReference
-    Q: QuaConfigDacPortReference
+_PortType = TypeVar("_PortType", QuaConfigDacPortReference, QuaConfigAdcPortReference)
 
-    def valid(self) -> bool:
+
+@dataclasses.dataclass
+class ControllerPorts(Generic[_PortType]):
+    I: _PortType
+    Q: _PortType
+
+    def valid(self, pb_config: QuaConfig) -> bool:
         if self.I is None or self.Q is None:
             return False
+        if self.I.controller != self.Q.controller:
+            return False
+        if self.I.fem != self.Q.fem:
+            return False
+        try:
+            controller_config = get_fem_config(pb_config, self.I)
+        except KeyError:
+            return False
+        relevant_ports = self._get_relevant_ports(controller_config)
+        return self.I.number in relevant_ports and self.Q.number in relevant_ports
 
-        return self.I.controller == self.Q.controller and self.I.fem == self.Q.fem
+    @abstractmethod
+    def _get_relevant_ports(self, controller_config: Union[QuaConfigControllerDec, QuaConfigOctoDacFemDec]) -> Set[int]:
+        pass
+
+
+class _ControllerDACPorts(ControllerPorts[QuaConfigDacPortReference]):
+    def _get_relevant_ports(self, controller_config: Union[QuaConfigControllerDec, QuaConfigOctoDacFemDec]) -> Set[int]:
+        return set(controller_config.analog_outputs)
+
+
+class _ControllerADCPorts(ControllerPorts[QuaConfigAdcPortReference]):
+    def _get_relevant_ports(self, controller_config: Union[QuaConfigControllerDec, QuaConfigOctoDacFemDec]) -> Set[int]:
+        return set(controller_config.analog_inputs)
+
+
+@dataclasses.dataclass
+class OctaveConnection:
+    dacs: _ControllerDACPorts
+    adcs: _ControllerADCPorts
+
+    def valid(self, pb_config: QuaConfig) -> bool:
+        return self.dacs.valid(pb_config) and self.adcs.valid(pb_config)
 
 
 @dataclasses.dataclass
@@ -360,8 +398,10 @@ class OctaveManager:
         Will reset the entire Octave HW to default off state
         Warning, will block the code until reset completes
 
-        :param octave_name: str
-        :return: True on success, False otherwise
+        Args:
+            octave_name: str
+        Returns:
+            True on success, False otherwise
         """
         if self._capabilities.supports_octave_reset:
             return cast(bool, self.get_client(octave_name).reset())
@@ -617,19 +657,12 @@ def get_loopbacks_from_pb(
     return loopbacks
 
 
-def _get_octave_channels_to_opx_ports(
-    pb_config: QuaConfig, octave_config: QmOctaveConfig
-) -> Dict[str, Dict[int, _ControllerPorts]]:
-    """# octave_id -> (channel -> _OpxPorts)"""
+OctaveConnectionsType = Dict[str, Dict[int, OctaveConnection]]
 
-    def is_dac_declared(dac: QuaConfigDacPortReference) -> bool:
-        try:
-            controller_config = get_fem_config(pb_config, dac)
-        except KeyError:
-            return False
-        return dac.number in controller_config.analog_outputs
 
-    all_octave_channels: Dict[str, Dict[int, _ControllerPorts]] = defaultdict(dict)
+def _add_octave_connections_from_octave_config(octave_config: QmOctaveConfig) -> OctaveConnectionsType:
+    all_octave_connections: OctaveConnectionsType = defaultdict(dict)
+
     opx_octave_port_mapping = octave_config.get_opx_octave_port_mapping()
     octave_opx_port_mapping = {v: k for k, v in opx_octave_port_mapping.items()}
     octave_names = {v[0] for v in octave_opx_port_mapping}
@@ -639,46 +672,90 @@ def _get_octave_channels_to_opx_ports(
             if i_key in octave_opx_port_mapping and q_key in octave_opx_port_mapping:
                 con_i, fem_i, idx_i = octave_opx_port_mapping[i_key]
                 con_q, fem_q, idx_q = octave_opx_port_mapping[q_key]
-                all_octave_channels[octave_name][channel_index] = _ControllerPorts(
+                dac_ports = _ControllerDACPorts(
                     I=QuaConfigDacPortReference(controller=con_i, fem=fem_i, number=idx_i),
                     Q=QuaConfigDacPortReference(controller=con_q, fem=fem_q, number=idx_q),
                 )
+                adc_ports = _ControllerADCPorts(
+                    I=QuaConfigAdcPortReference(controller=con_i, fem=fem_i, number=1),
+                    Q=QuaConfigAdcPortReference(controller=con_q, fem=fem_q, number=2),
+                )
+                all_octave_connections[octave_name][channel_index] = OctaveConnection(dacs=dac_ports, adcs=adc_ports)
+    return dict(all_octave_connections)
 
+
+def _add_octave_connections_from_pb_config(pb_config: QuaConfig) -> OctaveConnectionsType:
+    all_octave_connections: OctaveConnectionsType = defaultdict(dict)
     for octave_name, octave_pb_config in pb_config.v1_beta.octaves.items():
-        all_octave_channels[octave_name] = {}
-        for upconverter_index, upconverter_config in octave_pb_config.rf_outputs.items():
-            all_octave_channels[octave_name][upconverter_index] = _ControllerPorts(
-                I=upconverter_config.i_connection,
-                Q=upconverter_config.q_connection,
+        if betterproto.serialized_on_wire(octave_pb_config.if_outputs):
+            adc_ports = _ControllerADCPorts(
+                I=octave_pb_config.if_outputs.if_out1.port,
+                Q=octave_pb_config.if_outputs.if_out2.port,
             )
+            for upconverter_index, upconverter_config in octave_pb_config.rf_outputs.items():
+                dac_ports = _ControllerDACPorts(
+                    I=upconverter_config.i_connection,
+                    Q=upconverter_config.q_connection,
+                )
+                connections = OctaveConnection(dacs=dac_ports, adcs=adc_ports)
+                all_octave_connections[octave_name][upconverter_index] = connections
+    return dict(all_octave_connections)
 
-    to_return: Dict[str, Dict[int, _ControllerPorts]] = {}
-    for octave_name, octave_channels in all_octave_channels.items():
-        to_return[octave_name] = {}
-        for channel_index, opx_ports in octave_channels.items():
-            if is_dac_declared(opx_ports.I) and is_dac_declared(opx_ports.Q):
-                to_return[octave_name][channel_index] = opx_ports
 
-    return to_return
+def _filter_only_valid_connections(
+    octave_connections: OctaveConnectionsType, pb_config: QuaConfig
+) -> OctaveConnectionsType:
+    filtered_connections: OctaveConnectionsType = defaultdict(dict)
+    for octave_name, curr_connections in octave_connections.items():
+        for upconverter_index, connections in curr_connections.items():
+            if connections.valid(pb_config):
+                filtered_connections[octave_name][upconverter_index] = connections
+    return dict(filtered_connections)
+
+
+def _get_octave_channels_to_opx_ports(
+    pb_config: QuaConfig, octave_config: QmOctaveConfig
+) -> Dict[str, Dict[int, OctaveConnection]]:
+    all_octave_connections = _add_octave_connections_from_octave_config(octave_config)
+    all_octave_connections.update(_add_octave_connections_from_pb_config(pb_config))
+    return _filter_only_valid_connections(all_octave_connections, pb_config)
 
 
 def prep_config_for_calibration(
     pb_config: QuaConfig, octave_config: QmOctaveConfig, capabilities: ServerCapabilities
 ) -> QuaConfig:
-    all_octave_channels = _get_octave_channels_to_opx_ports(pb_config, octave_config)
-    for octave_channels in all_octave_channels.values():
-        for controller_ports in octave_channels.values():
-            if controller_ports.valid():
-                controller_config = get_fem_config(pb_config, controller_ports.I)
-                if set(controller_config.analog_inputs) != {1, 2}:
-                    logger.warning(
-                        f"Controller '{controller_ports.I.controller}', {controller_ports.I.fem} does not have exactly two input "
-                        f"channels declared in the QUA-config and is needed for the calibration, "
-                        f"not adding calibration elements"
-                    )
-                    return pb_config
+    all_octave_connections = _get_octave_channels_to_opx_ports(pb_config, octave_config)
+    if not all_octave_connections:
+        logger.warning(
+            "No valid channels found for calibration, make sure you connect I and Q to the same device, "
+            "and that you declare the relevant ports in the config."
+        )
+        return pb_config
 
-    dummy_lo_frequency: float = 6e9
+    return _add_calibration_entries_to_config(pb_config, capabilities, all_octave_connections)
+
+
+def _find_dummy_controller_outputs(
+    adc: QuaConfigAdcPortReference, pb_config: QuaConfig
+) -> Tuple[QuaConfigDacPortReference, QuaConfigDacPortReference]:
+    controller_config = get_fem_config(pb_config, adc)
+    if len(controller_config.analog_outputs) < 2:
+        raise NoOutputPortDeclared(
+            f"Could not find a controller outputs for input port {adc}. "
+            f"For now, at least two output ports of the measuring controller must be declared"
+        )
+    ports = list(controller_config.analog_outputs)[:2]
+    return (
+        QuaConfigDacPortReference(controller=adc.controller, fem=adc.fem, number=ports[0]),
+        QuaConfigDacPortReference(controller=adc.controller, fem=adc.fem, number=ports[1]),
+    )
+
+
+def _add_calibration_entries_to_config(
+    pb_config: QuaConfig, capabilities: ServerCapabilities, all_octave_connections: OctaveConnectionsType
+) -> QuaConfig:
+
+    dummy_lo_frequency = int(6e9)
     dummy_if_frequency: float = 50e6
 
     dummy_down_mixer_offset: float = 7e6
@@ -697,171 +774,162 @@ def prep_config_for_calibration(
 
     frequency_idx = int(capabilities.supports_double_frequency)  # This is to shorten many if-else in the code using
     # a trinary expression
+    dummy_mixer_name = f"{COMMON_OCTAVE_PREFIX}dummy_mixer"
+    dummy_lo_frequency_double = [0.0, float(dummy_lo_frequency)][frequency_idx]
 
-    any_valid_channels = False
-    for octave_name, octave_channels in all_octave_channels.items():
-        for channel_index, controller_ports in octave_channels.items():
-            names = CalibrationElementsNames(octave_name, channel_index)
-            if controller_ports.valid():
-                any_valid_channels = True
-                mix_inputs = QuaConfigMixInputs(
-                    i=controller_ports.I,
-                    q=controller_ports.Q,
-                    lo_frequency=int(dummy_lo_frequency),
-                    lo_frequency_double=[0.0, float(dummy_lo_frequency)][frequency_idx],
-                    mixer=f"{COMMON_OCTAVE_PREFIX}dummy_mixer",
+    for octave_name, octave_connections in all_octave_connections.items():
+        for upconverter_index, channel_connections in octave_connections.items():
+            names = CalibrationElementsNames(octave_name, upconverter_index)
+
+            def _create_mix_inputs(set_dummy_ports: bool) -> QuaConfigMixInputs:
+                if set_dummy_ports:
+                    i, q = _find_dummy_controller_outputs(channel_connections.adcs.I, pb_config)
+                else:
+                    i, q = channel_connections.dacs.I, channel_connections.dacs.Q
+
+                return QuaConfigMixInputs(
+                    i=i,
+                    q=q,
+                    lo_frequency=dummy_lo_frequency,
+                    lo_frequency_double=dummy_lo_frequency_double,
+                    mixer=dummy_mixer_name,
                 )
 
-                def create_analyzer_element(intermediate_frequency: float) -> QuaConfigElementDec:
-                    return QuaConfigElementDec(
-                        intermediate_frequency=abs(int(intermediate_frequency)),
-                        intermediate_frequency_double=[0.0, abs(float(intermediate_frequency))][frequency_idx],
-                        intermediate_frequency_negative=intermediate_frequency < 0,
-                        mix_inputs=mix_inputs,
-                        operations={"Analyze": f"{COMMON_OCTAVE_PREFIX}Analyze_pulse"},
-                        outputs={
-                            "out1": QuaConfigAdcPortReference(
-                                controller=controller_ports.I.controller, fem=controller_ports.I.fem, number=1
-                            ),
-                            "out2": QuaConfigAdcPortReference(
-                                controller=controller_ports.Q.controller, fem=controller_ports.Q.fem, number=2
-                            ),
-                        },
-                        time_of_flight=time_of_flight,
-                        smearing=0,
+            def create_analyzer_element(intermediate_frequency: float) -> QuaConfigElementDec:
+
+                return QuaConfigElementDec(
+                    intermediate_frequency=abs(int(intermediate_frequency)),
+                    intermediate_frequency_double=[0.0, abs(float(intermediate_frequency))][frequency_idx],
+                    intermediate_frequency_negative=intermediate_frequency < 0,
+                    mix_inputs=_create_mix_inputs(True),
+                    operations={"Analyze": f"{COMMON_OCTAVE_PREFIX}Analyze_pulse"},
+                    outputs={"out1": channel_connections.adcs.I, "out2": channel_connections.adcs.Q},
+                    time_of_flight=time_of_flight,
+                    smearing=0,
+                )
+
+            i_offset = QuaConfigElementDec(
+                single_input=QuaConfigSingleInput(port=channel_connections.dacs.I),
+                operations={"DC_offset": f"{COMMON_OCTAVE_PREFIX}DC_offset_pulse"},
+            )
+            q_offset = QuaConfigElementDec(
+                single_input=QuaConfigSingleInput(port=channel_connections.dacs.Q),
+                operations={"DC_offset": f"{COMMON_OCTAVE_PREFIX}DC_offset_pulse"},
+            )
+            pb_config.v1_beta.elements.update(
+                {
+                    names.iq_mixer: QuaConfigElementDec(
+                        mix_inputs=_create_mix_inputs(False),
+                        intermediate_frequency=abs(int(dummy_if_frequency)),
+                        intermediate_frequency_double=[0.0, abs(float(dummy_if_frequency))][frequency_idx],
+                        operations={"calibration": f"{COMMON_OCTAVE_PREFIX}calibration_pulse"},
+                        digital_inputs={},
+                    ),
+                    names.i_offset: i_offset,
+                    names.q_offset: q_offset,
+                    names.signal_analyzer: create_analyzer_element(dummy_if_frequency - dummy_down_mixer_offset),
+                    names.lo_analyzer: create_analyzer_element(-dummy_down_mixer_offset),
+                    names.image_analyzer: create_analyzer_element(-dummy_if_frequency - dummy_down_mixer_offset),
+                }
+            )
+
+    pb_config.v1_beta.pulses.update(
+        {
+            f"{COMMON_OCTAVE_PREFIX}calibration_pulse": QuaConfigPulseDec(
+                operation=QuaConfigPulseDecOperation.CONTROL,
+                length=calibration_pulse_length,
+                digital_marker=f"{COMMON_OCTAVE_PREFIX}ON",
+                waveforms={
+                    "I": f"{COMMON_OCTAVE_PREFIX}readout_wf",
+                    "Q": f"{COMMON_OCTAVE_PREFIX}zero_wf",
+                },
+            ),
+            f"{COMMON_OCTAVE_PREFIX}DC_offset_pulse": QuaConfigPulseDec(
+                operation=QuaConfigPulseDecOperation.CONTROL,
+                length=calibration_pulse_length,
+                waveforms={"single": f"{COMMON_OCTAVE_PREFIX}DC_offset_wf"},
+            ),
+            f"{COMMON_OCTAVE_PREFIX}Analyze_pulse": QuaConfigPulseDec(
+                operation=QuaConfigPulseDecOperation.MEASUREMENT,
+                length=integration_length,
+                waveforms={
+                    "I": f"{COMMON_OCTAVE_PREFIX}zero_wf",
+                    "Q": f"{COMMON_OCTAVE_PREFIX}zero_wf",
+                },
+                integration_weights={
+                    "integW_cos": f"{COMMON_OCTAVE_PREFIX}integW_cosine",
+                    "integW_sin": f"{COMMON_OCTAVE_PREFIX}integW_sine",
+                    "integW_minus_sin": f"{COMMON_OCTAVE_PREFIX}integW_minus_sine",
+                    "integW_zero": f"{COMMON_OCTAVE_PREFIX}integW_zero",
+                },
+                digital_marker=f"{COMMON_OCTAVE_PREFIX}ON",
+            ),
+        }
+    )
+    pb_config.v1_beta.waveforms.update(
+        {
+            f"{COMMON_OCTAVE_PREFIX}readout_wf": QuaConfigWaveformDec(
+                constant=QuaConfigConstantWaveformDec(sample=calibration_amp)
+            ),
+            f"{COMMON_OCTAVE_PREFIX}zero_wf": QuaConfigWaveformDec(constant=QuaConfigConstantWaveformDec(sample=0.0)),
+            f"{COMMON_OCTAVE_PREFIX}DC_offset_wf": QuaConfigWaveformDec(
+                constant=QuaConfigConstantWaveformDec(sample=offset_amp)
+            ),
+        }
+    )
+    pb_config.v1_beta.digital_waveforms.update(
+        {
+            f"{COMMON_OCTAVE_PREFIX}ON": QuaConfigDigitalWaveformDec(
+                samples=[QuaConfigDigitalWaveformSample(value=True, length=0)]
+            ),
+            f"{COMMON_OCTAVE_PREFIX}OFF": QuaConfigDigitalWaveformDec(
+                samples=[QuaConfigDigitalWaveformSample(value=False, length=0)]
+            ),
+        }
+    )
+    n_samples = integration_length // 4
+    pb_config.v1_beta.integration_weights.update(
+        {
+            f"{COMMON_OCTAVE_PREFIX}integW_cosine": QuaConfigIntegrationWeightDec(
+                cosine=build_iw_sample([weight_amplitude] * n_samples),
+                sine=build_iw_sample([0.0] * n_samples),
+            ),
+            f"{COMMON_OCTAVE_PREFIX}integW_sine": QuaConfigIntegrationWeightDec(
+                cosine=build_iw_sample([0.0] * n_samples),
+                sine=build_iw_sample([weight_amplitude] * n_samples),
+            ),
+            f"{COMMON_OCTAVE_PREFIX}integW_minus_sine": QuaConfigIntegrationWeightDec(
+                cosine=build_iw_sample([0.0] * n_samples),
+                sine=build_iw_sample([-weight_amplitude] * n_samples),
+            ),
+            f"{COMMON_OCTAVE_PREFIX}integW_zero": QuaConfigIntegrationWeightDec(
+                cosine=build_iw_sample([0.0] * n_samples),
+                sine=build_iw_sample([0.0] * n_samples),
+            ),
+        }
+    )
+    pb_config.v1_beta.mixers.update(
+        {
+            f"{COMMON_OCTAVE_PREFIX}dummy_mixer": QuaConfigMixerDec(
+                correction=[
+                    QuaConfigCorrectionEntry(
+                        frequency=abs(int(if_frequency)),
+                        frequency_double=[0.0, abs(float(if_frequency))][frequency_idx],
+                        lo_frequency=int(dummy_lo_frequency),
+                        lo_frequency_double=[0.0, float(dummy_lo_frequency)][frequency_idx],
+                        correction=QuaConfigMatrix(1.0, 0.0, 0.0, 1.0),
+                        frequency_negative=if_frequency < 0,
                     )
-
-                # 1. Add the required elements (IQmixer, [IQ]_offset, [signal/lo/image]_analyzer)
-                i_offset = QuaConfigElementDec(
-                    single_input=QuaConfigSingleInput(port=controller_ports.I),
-                    operations={"DC_offset": f"{COMMON_OCTAVE_PREFIX}DC_offset_pulse"},
-                )
-                q_offset = QuaConfigElementDec(
-                    single_input=QuaConfigSingleInput(port=controller_ports.Q),
-                    operations={"DC_offset": f"{COMMON_OCTAVE_PREFIX}DC_offset_pulse"},
-                )
-                # TODO - remove this and the capability once we fix the bug in the OPY of the CSF allocation
-                if capabilities.set_zero_frequency_in_calibration:
-                    i_offset.intermediate_frequency = 0
-                    q_offset.intermediate_frequency = 0
-                pb_config.v1_beta.elements.update(
-                    {
-                        names.iq_mixer: QuaConfigElementDec(
-                            mix_inputs=mix_inputs,
-                            intermediate_frequency=abs(int(dummy_if_frequency)),
-                            intermediate_frequency_double=[0.0, abs(float(dummy_if_frequency))][frequency_idx],
-                            operations={"calibration": f"{COMMON_OCTAVE_PREFIX}calibration_pulse"},
-                            digital_inputs={},  # This is being added afterward
-                        ),
-                        names.i_offset: i_offset,
-                        names.q_offset: q_offset,
-                        names.signal_analyzer: create_analyzer_element(dummy_if_frequency - dummy_down_mixer_offset),
-                        names.lo_analyzer: create_analyzer_element(-dummy_down_mixer_offset),
-                        names.image_analyzer: create_analyzer_element(-dummy_if_frequency - dummy_down_mixer_offset),
-                    }
-                )
-
-    if any_valid_channels:
-        pb_config.v1_beta.pulses.update(
-            {
-                f"{COMMON_OCTAVE_PREFIX}calibration_pulse": QuaConfigPulseDec(
-                    operation=QuaConfigPulseDecOperation.CONTROL,
-                    length=calibration_pulse_length,
-                    digital_marker=f"{COMMON_OCTAVE_PREFIX}ON",
-                    waveforms={
-                        "I": f"{COMMON_OCTAVE_PREFIX}readout_wf",
-                        "Q": f"{COMMON_OCTAVE_PREFIX}zero_wf",
-                    },
-                ),
-                f"{COMMON_OCTAVE_PREFIX}DC_offset_pulse": QuaConfigPulseDec(
-                    operation=QuaConfigPulseDecOperation.CONTROL,
-                    length=calibration_pulse_length,
-                    waveforms={"single": f"{COMMON_OCTAVE_PREFIX}DC_offset_wf"},
-                ),
-                f"{COMMON_OCTAVE_PREFIX}Analyze_pulse": QuaConfigPulseDec(
-                    operation=QuaConfigPulseDecOperation.MEASUREMENT,
-                    length=integration_length,
-                    waveforms={
-                        "I": f"{COMMON_OCTAVE_PREFIX}zero_wf",
-                        "Q": f"{COMMON_OCTAVE_PREFIX}zero_wf",
-                    },
-                    integration_weights={
-                        "integW_cos": f"{COMMON_OCTAVE_PREFIX}integW_cosine",
-                        "integW_sin": f"{COMMON_OCTAVE_PREFIX}integW_sine",
-                        "integW_minus_sin": f"{COMMON_OCTAVE_PREFIX}integW_minus_sine",
-                        "integW_zero": f"{COMMON_OCTAVE_PREFIX}integW_zero",
-                    },
-                    digital_marker=f"{COMMON_OCTAVE_PREFIX}ON",
-                ),
-            }
-        )
-        pb_config.v1_beta.waveforms.update(
-            {
-                f"{COMMON_OCTAVE_PREFIX}readout_wf": QuaConfigWaveformDec(
-                    constant=QuaConfigConstantWaveformDec(sample=calibration_amp)
-                ),
-                f"{COMMON_OCTAVE_PREFIX}zero_wf": QuaConfigWaveformDec(
-                    constant=QuaConfigConstantWaveformDec(sample=0.0)
-                ),
-                f"{COMMON_OCTAVE_PREFIX}DC_offset_wf": QuaConfigWaveformDec(
-                    constant=QuaConfigConstantWaveformDec(sample=offset_amp)
-                ),
-            }
-        )
-        pb_config.v1_beta.digital_waveforms.update(
-            {
-                f"{COMMON_OCTAVE_PREFIX}ON": QuaConfigDigitalWaveformDec(
-                    samples=[QuaConfigDigitalWaveformSample(value=True, length=0)]
-                ),
-                f"{COMMON_OCTAVE_PREFIX}OFF": QuaConfigDigitalWaveformDec(
-                    samples=[QuaConfigDigitalWaveformSample(value=False, length=0)]
-                ),
-            }
-        )
-        n_samples = integration_length // 4
-        pb_config.v1_beta.integration_weights.update(
-            {
-                f"{COMMON_OCTAVE_PREFIX}integW_cosine": QuaConfigIntegrationWeightDec(
-                    cosine=build_iw_sample([weight_amplitude] * n_samples),
-                    sine=build_iw_sample([0.0] * n_samples),
-                ),
-                f"{COMMON_OCTAVE_PREFIX}integW_sine": QuaConfigIntegrationWeightDec(
-                    cosine=build_iw_sample([0.0] * n_samples),
-                    sine=build_iw_sample([weight_amplitude] * n_samples),
-                ),
-                f"{COMMON_OCTAVE_PREFIX}integW_minus_sine": QuaConfigIntegrationWeightDec(
-                    cosine=build_iw_sample([0.0] * n_samples),
-                    sine=build_iw_sample([-weight_amplitude] * n_samples),
-                ),
-                f"{COMMON_OCTAVE_PREFIX}integW_zero": QuaConfigIntegrationWeightDec(
-                    cosine=build_iw_sample([0.0] * n_samples),
-                    sine=build_iw_sample([0.0] * n_samples),
-                ),
-            }
-        )
-        pb_config.v1_beta.mixers.update(
-            {
-                f"{COMMON_OCTAVE_PREFIX}dummy_mixer": QuaConfigMixerDec(
-                    correction=[
-                        QuaConfigCorrectionEntry(
-                            frequency=abs(int(if_frequency)),
-                            frequency_double=[0.0, abs(float(if_frequency))][frequency_idx],
-                            lo_frequency=int(dummy_lo_frequency),
-                            lo_frequency_double=[0.0, float(dummy_lo_frequency)][frequency_idx],
-                            correction=QuaConfigMatrix(1.0, 0.0, 0.0, 1.0),
-                            frequency_negative=if_frequency < 0,
-                        )
-                        for if_frequency in (
-                            dummy_if_frequency,
-                            dummy_if_frequency - dummy_down_mixer_offset,
-                            -dummy_down_mixer_offset,
-                            -dummy_if_frequency - dummy_down_mixer_offset,
-                        )
-                    ]
-                )
-            }
-        )
-
+                    for if_frequency in (
+                        dummy_if_frequency,
+                        dummy_if_frequency - dummy_down_mixer_offset,
+                        -dummy_down_mixer_offset,
+                        -dummy_if_frequency - dummy_down_mixer_offset,
+                    )
+                ]
+            )
+        }
+    )
     return pb_config
 
 

@@ -1,7 +1,6 @@
 import warnings
 import json as _json
 from io import BytesIO
-from dataclasses import dataclass
 from typing import Any, Dict, Union, BinaryIO, Callable, Optional
 
 import numpy
@@ -30,30 +29,11 @@ from qm.grpc.results_analyser import (
 )
 
 
-@dataclass
-class DensityMatrix:
-    timestamp: int
-    data: numpy.typing.NDArray[numpy.cdouble]
-
-
 class SimulatorOutput:
     def __init__(self, job_id: str, frontend: FrontendApi) -> None:
         super().__init__()
         self._id = job_id
         self._simulation_api = SimulationApi(frontend.connection_details)
-
-    def get_quantum_state(self) -> DensityMatrix:
-        state = self._simulation_api.get_simulated_quantum_state(self._id)
-        flatten = numpy.array([complex(item.re, item.im) for item in state.data])
-        n = int(numpy.sqrt(len(flatten)))
-        if len(flatten) != (n * n):
-            raise RuntimeError("Quantum state matrix is not correct")
-        else:
-            pass
-
-        matrix = flatten.reshape(n, n)
-        timestamp = state.time_stamp
-        return DensityMatrix(timestamp, matrix)
 
 
 def extract_value(value: Value) -> Any:
@@ -107,14 +87,14 @@ class SimulatedJob(RunningQmJob):
         self._simulation_api = SimulationApi(self._frontend.connection_details)
 
     def _initialize_from_job_status(self) -> None:
-        """
-        Overriding this for simulated jobs to do nothing
-        """
+        # Overriding this for simulated jobs to do nothing
         pass
 
     def get_simulated_waveform_report(self) -> Optional[WaveformReport]:
         """
-        Get this Job's Waveform report. If any error occurred, None will be returned.
+        Get this Job's Waveform report.
+        Returns:
+            The waveform report. `None` will be returned in case of an error.
         """
         return self._waveform_report
 
@@ -251,9 +231,13 @@ class SimulatedJob(RunningQmJob):
         return SimulatorOutput(self._id, self._frontend)
 
     def plot_waveform_report_with_simulated_samples(self) -> None:
+        if self._waveform_report is None:
+            raise QMSimulationError("Waveform report is not available")
         self._waveform_report.create_plot(self.get_simulated_samples())
 
     def plot_waveform_report_without_samples(self) -> None:
+        if self._waveform_report is None:
+            raise QMSimulationError("Waveform report is not available")
         self._waveform_report.create_plot()
 
 

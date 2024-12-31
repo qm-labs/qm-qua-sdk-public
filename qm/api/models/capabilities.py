@@ -23,10 +23,9 @@ class ServerCapabilities:
     supports_sticky_elements: bool
     supports_fast_frame_rotation: bool
     fem_number_in_simulator: int
-    set_zero_frequency_in_calibration: bool = False
-    # TODO - remove set_zero_frequency_in_calibration and once we fix the bug in the OPY of the CSF allocation
     supports_api_v2: bool = False
     supports_keeping_dc_offsets: bool = False
+    opx1000_fems_return_1_based: bool = True
 
     @staticmethod
     def build(qua_implementation: Optional[QuaMachineInfo] = None) -> "ServerCapabilities":
@@ -48,8 +47,8 @@ class ServerCapabilities:
                 supports_octave_reset=True,
                 supports_fast_frame_rotation=True,
                 fem_number_in_simulator=OPX_FEM_IDX,
-                set_zero_frequency_in_calibration=True,
                 supports_api_v2=True,
+                opx1000_fems_return_1_based="1_based_fem" in caps,
             )
         return ServerCapabilities(
             has_job_streaming_state="qm.job_streaming_state" in caps,

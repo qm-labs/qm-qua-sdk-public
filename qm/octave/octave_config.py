@@ -111,8 +111,20 @@ class QmOctaveConfig:
         Args:
             path (str): path to the calibration database
         """
+        warnings.warn(
+            "QmOctaveConfig is going to be deprecated, "
+            "please set the calibration db through the QuantumMachinesManager",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self._set_calibration_db(path)
+
+    def _set_calibration_db(self, path: PathLike) -> None:
         self._calibration_db_path = str(path)
         self._calibration_db = CalibrationDB(self._calibration_db_path)
+
+    def set_calibration_db_without_warning(self, path: PathLike) -> None:
+        self._set_calibration_db(path)
 
     @staticmethod
     def _check_connection_format(connection: Tuple[str, Union[int, str]]) -> bool:
@@ -127,7 +139,7 @@ class QmOctaveConfig:
             mappings: list of tuples of [OPX_name, octave_name] to connect
         """
         warnings.warn(
-            "OctaveConfig.set_opx_octave_mapping is deprecated as of 1.1.6 and will be removed in 1.2.0. "
+            "OctaveConfig.set_opx_octave_mapping is deprecated as of 1.1.6 and will be removed in 1.3.0. "
             "The port mapping was moved to the QUA-config. Please set the mapping there.",
             DeprecationWarning,
             stacklevel=2,
@@ -168,7 +180,7 @@ class QmOctaveConfig:
         # validate structure:
 
         warnings.warn(
-            "OctaveConfig.add_opx_octave_port_mapping is deprecated as of 1.1.6 and will be removed in 1.2.0. "
+            "OctaveConfig.add_opx_octave_port_mapping is deprecated as of 1.1.6 and will be removed in 1.3.0. "
             "The port mapping was moved to the QUA-config. Please set the mapping there.",
             DeprecationWarning,
             stacklevel=2,
@@ -206,7 +218,7 @@ class QmOctaveConfig:
             return {}
         warnings.warn(
             "Setting the mapping was move to the QUA-config. "
-            "It is deprecated since 1.1.6 and will be removed in 1.2.0."
+            "It is deprecated since 1.1.6 and will be removed in 1.3.0."
             "Please set the mapping there.",
             DeprecationWarning,
             stacklevel=2,
@@ -252,7 +264,7 @@ class QmOctaveConfig:
                 according to OctaveLOSource
         """
         warnings.warn(
-            "OctaveConfig.add_lo_loopback is deprecated as of 1.1.6 and will be removed in 1.2.0. "
+            "OctaveConfig.add_lo_loopback is deprecated as of 1.1.6 and will be removed in 1.3.0. "
             "Please set the loopbacks there.",
             DeprecationWarning,
             stacklevel=2,
@@ -280,7 +292,8 @@ class QmOctaveConfig:
             return {}
 
         warnings.warn(
-            "Loopbacks were moved to the QUA-config, move them there",
+            "Loopbacks were moved to the QUA-config, this function will be removed in 1.3.0,"
+            "please set the loopbacks there, and get them from there",
             DeprecationWarning,
             stacklevel=2,
         )

@@ -38,6 +38,7 @@ from qm.grpc.qua import (
     QuaProgramWaitForTriggerStatement,
     QuaProgramUpdateFrequencyStatement,
     QuaProgramAssignmentStatementTarget,
+    QuaProgramResetGlobalPhaseStatement,
     QuaProgramUpdateCorrectionStatement,
     QuaProgramFastFrameRotationStatement,
     QuaProgramAdvanceInputStreamStatement,
@@ -286,7 +287,7 @@ class StatementsCollection:
         self._check_serialised_on_wire(statement, "align")
         self._body.statements.append(statement)
 
-    def reset_phase(self, element: str) -> None:
+    def reset_if_phase(self, element: str) -> None:
         """TODO: document
 
         Args:
@@ -302,6 +303,12 @@ class StatementsCollection:
             )
         )
         self._check_serialised_on_wire(statement, "reset_phase")
+        self._body.statements.append(statement)
+
+    def reset_global_phase(self) -> None:
+        loc = _get_loc()
+        statement = QuaProgramAnyStatement(reset_global_phase=QuaProgramResetGlobalPhaseStatement(loc=loc))
+        self._check_serialised_on_wire(statement, "reset_global_phase")
         self._body.statements.append(statement)
 
     def wait(self, duration: "MessageExpressionType", *elements: str) -> None:
@@ -440,7 +447,7 @@ class StatementsCollection:
             element
             stream (_ResultSource)
             *processes: an iterable of analog processes
-        :param timestamp_label
+            timestamp_label
 
         Returns:
 

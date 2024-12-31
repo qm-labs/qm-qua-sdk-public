@@ -34,6 +34,11 @@ class PlayedWaveformType(TypedDict, total=False):
     quantumElements: str
 
 
+class PortToDucMap(TypedDict):
+    port: float
+    ducs: List[float]
+
+
 class PlayedAnalogWaveformType(PlayedWaveformType, total=False):
     currentFrame: List[float]
     currentCorrectionElements: List[float]
@@ -42,6 +47,7 @@ class PlayedAnalogWaveformType(PlayedWaveformType, total=False):
     currentDCOffsetByPort: Dict[int, float]
     currentPhase: float
     chirpInfo: ChirpInfoType
+    portToDuc: List[PortToDucMap]
 
 
 class AdcAcquisitionType(TypedDict, total=False):

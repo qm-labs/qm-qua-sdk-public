@@ -10,10 +10,10 @@ from qm.exceptions import QMSimulationError
 from qm.waveform_report import WaveformReport
 from qm.utils.config_utils import get_fem_config
 from qm.grpc.frontend import SimulatedResponsePart
-from qm.api.v2.job_api.job_api import OldJobApiMock
 from qm.jobs.simulated_job import extract_struct_value
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
+from qm.api.v2.job_api.job_api import JobApiWithDeprecations
 from qm.results.simulator_samples import SimulatorSamples, SimulatorControllerSamples
 from qm.grpc.qua_config import (
     QuaConfigControllerDec,
@@ -24,6 +24,8 @@ from qm.grpc.qua_config import (
 from qm.grpc.v2 import (
     PullSamplesRequest,
     PullSamplesResponsePullSamplesResponseSuccess,
+    PullSamplesResponsePullSamplesResponseSuccessLf,
+    PullSamplesResponsePullSamplesResponseSuccessMw,
     PullSamplesResponsePullSamplesResponseSuccessMode,
 )
 
@@ -81,15 +83,17 @@ class SimulatedJobApi(JobApi):
                     elif isinstance(fem_config, QuaConfigOctoDacFemDec):
                         analog_sampling_rate[key] = 2e9
                     elif isinstance(fem_config, QuaConfigMicrowaveFemDec):
-                        analog_sampling_rate[key] = fem_config.analog_outputs[response.port_id].sampling_rate
+                        analog_sampling_rate[key + "-1"] = fem_config.analog_outputs[response.port_id].sampling_rate
+                        analog_sampling_rate[key + "-2"] = fem_config.analog_outputs[response.port_id].sampling_rate
                     else:
                         raise QMSimulationError(f"Unknown FEM type: {fem_config}")
 
                     samples = response.double_data
-                    if len(samples.data) == 2:
-                        analog[key] = [x + 1j * y for x, y in zip(samples.data[0].item, samples.data[1].item)]
-                    else:
-                        analog[key] = samples.data[0].item
+                    _, data = betterproto.which_one_of(samples, "output")
+                    if isinstance(data, PullSamplesResponsePullSamplesResponseSuccessMw):
+                        analog[f"{key}-{data.duc_id}"] = [x + 1j * y for x, y in zip(data.i, data.q)]
+                    elif isinstance(data, PullSamplesResponsePullSamplesResponseSuccessLf):
+                        analog[key] = data.items
                 else:
                     digital[key] = response.boolean_data.data[0].item
             controller_to_samples[controller] = SimulatorControllerSamples(
@@ -104,5 +108,5 @@ class SimulatedJobApi(JobApi):
         self._waveform_report.create_plot()
 
 
-class OldSimulatedJobApiMock(OldJobApiMock, SimulatedJobApi):
+class SimulatedJobApiWithDeprecations(JobApiWithDeprecations, SimulatedJobApi):
     pass

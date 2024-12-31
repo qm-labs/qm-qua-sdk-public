@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "QUA language SDK to control a Quantum Computer"
 readme = "README.md"
 authors = ["Quantum Machines <info@quantum-machines.co>"]
+license = "Quantum Machines SDK License"
 
 packages = [
     { include = "qm" },
@@ -35,12 +36,12 @@ certifi = { version = "*", optional = true }
 datadog-api-client = "^2.6.0"
 deprecation = "^2.1.0"
 dependency_injector = "^4.41.0"
-qm-octave = "2.1.1"
+qm-octave = "2.1.2"
 typing-extensions = "^4.5"
 
 grpclib = { version = "^0.4.5", python = ">=3.10", allow-prereleases = true }
 plotly = "^5.13.0"
-httpx = { version = "^0.23.3", extras = ["http2"] }
+httpx = { version = ">=0.23.3,<1", extras = ["http2"] }
 
 [tool.poetry.dev-dependencies]
 grpcio-tools = [

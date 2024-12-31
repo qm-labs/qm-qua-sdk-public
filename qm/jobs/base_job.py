@@ -7,11 +7,11 @@ import betterproto
 from qm.type_hinting import Value
 from qm.persistence import BaseStore
 from qm.exceptions import QmQuaException
+from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
 from qm.grpc.frontend import JobExecutionStatus
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.job_manager_api import create_job_manager_from_api
-from qm.utils import deprecation_message, deprecate_to_property
 
 
 class JobStateProtocol(Protocol):
@@ -60,24 +60,23 @@ class QmBaseJob:
 
     @property
     def id(self) -> str:
-        """Returns:
-        The id of the job
         """
-        class_name = self.__class__.__name__
-        return deprecate_to_property(
-            self._id,
-            f"{class_name}.id()",
-            "1.1.0",
-            "1.2.0",
-            f"id moved to be property, use '{class_name}.id' instead",
-        )
+        Returns: The id of the job
+        """
+        return self._id
 
     @property
     def user_added(self) -> Optional[str]:
+        """
+        Returns: The id of the user who added the job
+        """
         return self._added_user_id
 
     @property
     def time_added(self) -> Optional[datetime.datetime]:
+        """
+        Returns: The time at which the job was added
+        """
         return self._time_added
 
     def insert_input_stream(
@@ -85,11 +84,12 @@ class QmBaseJob:
         name: str,
         data: List[Value],
     ) -> None:
+        """Deprecated - Please use `job.push_to_input_stream`."""
         warnings.warn(
             deprecation_message(
                 method="job.insert_input_stream",
-                deprecated_in="1.1.8",
-                removed_in="1.2.0",
+                deprecated_in="1.2.0",
+                removed_in="1.4.0",
                 details="This method was renamed to `job.push_to_input_stream`.",
             ),
             DeprecationWarning,
@@ -98,13 +98,13 @@ class QmBaseJob:
         self.push_to_input_stream(name, data)
 
     def push_to_input_stream(self, name: str, data: List[Value]) -> None:
-        """Insert data to the input stream declared in the QUA program.
+        """Push data to the input stream declared in the QUA program.
         The data is then ready to be read by the program using the advance
         input stream QUA statement.
 
         Multiple data entries can be inserted before the data is read by the program.
 
-        See [Input streams](/qm-qua-sdk/docs/Guides/features/#input-streams) for more information.
+        See [Input streams](../Guides/features.md#input-streams) for more information.
 
         -- Available from QOP 2.0 --
 
@@ -114,7 +114,7 @@ class QmBaseJob:
                 the size of the input stream.
         """
         if not self._capabilities.supports_input_stream:
-            raise QmQuaException("`insert_input_stream()` is not supported by the QOP version.")
+            raise QmQuaException("`push_to_input_stream()` is not supported by the QOP version.")
 
         if not isinstance(data, list):
             data = [data]

@@ -41,6 +41,7 @@ from qm.type_hinting.config_types import (
     ControllerConfigType,
     OscillatorConfigType,
     DigitalInputConfigType,
+    MwUpconverterConfigType,
     OctaveRFInputConfigType,
     OctaveRFOutputConfigType,
     AnalogInputPortConfigType,
@@ -101,12 +102,14 @@ from qm.grpc.qua_config import (
     QuaConfigGeneralPortReference,
     QuaConfigIntegrationWeightDec,
     QuaConfigOctaveRfOutputConfig,
+    QuaConfigUpConverterConfigDec,
     QuaConfigDigitalWaveformSample,
     QuaConfigOctaveIfOutputsConfig,
     QuaConfigOctaveSynthesizerPort,
     QuaConfigOutputPulseParameters,
     QuaConfigSingleInputCollection,
     QuaConfigAnalogOutputPortFilter,
+    QuaConfigDownConverterConfigDec,
     QuaConfigIntegrationWeightSample,
     QuaConfigOctaveOutputSwitchState,
     QuaConfigDigitalInputPortReference,
@@ -127,6 +130,7 @@ from qm.grpc.qua_config import (
 )
 
 ALLOWED_GAINES = {x / 2 for x in range(-40, 41)}
+DEFAULT_DUC_IDX = 1
 
 
 def _analog_input_port_to_pb(data: AnalogInputPortConfigType) -> QuaConfigAnalogInputPortDec:
@@ -145,6 +149,7 @@ def mw_fem_analog_input_port_to_pb(data: MwFemAnalogInputPortConfigType) -> QuaC
         gain_db=data.get("gain_db", 0),
         shareable=data.get("shareable", False),
         band=data["band"],
+        downconverter=QuaConfigDownConverterConfigDec(frequency=data["downconverter_frequency"]),
     )
     return analog_input
 
@@ -211,15 +216,33 @@ def _opx_1000_analog_output_port_to_pb(
     return item
 
 
+def upconverter_config_dec_to_pb(
+    data: Union[MwUpconverterConfigType, QuaConfigUpConverterConfigDec]
+) -> QuaConfigUpConverterConfigDec:
+    if isinstance(data, QuaConfigUpConverterConfigDec):
+        return data
+    return QuaConfigUpConverterConfigDec(frequency=data["frequency"])
+
+
 def mw_fem_analog_output_to_pb(
     data: MwFemAnalogOutputPortConfigType,
 ) -> QuaConfigMicrowaveAnalogOutputPortDec:
+    if "upconverter_frequency" in data and data.get("upconverters", {}):
+        raise ConfigValidationException("Use either 'upconverter_frequency' or 'upconverters' but not both")
+    if "upconverter_frequency" in data:
+        upconverters = {DEFAULT_DUC_IDX: QuaConfigUpConverterConfigDec(data["upconverter_frequency"])}
+    else:
+        upconverters = {k: upconverter_config_dec_to_pb(v) for k, v in data.get("upconverters", {}).items()}
+    if not upconverters:
+        raise ConfigValidationException("You should declare at least one upconverter.")
+
     item = QuaConfigMicrowaveAnalogOutputPortDec(
         sampling_rate=data.get("sampling_rate", 1e9),
         full_scale_power_dbm=data.get("full_scale_power_dbm", -11),
         band=data["band"],
         delay=data.get("delay", 0),
         shareable=data.get("shareable", False),
+        upconverters=upconverters,
     )
     return item
 
@@ -323,6 +346,10 @@ def _set_ports_in_config(
             for analog_input_idx, analog_input_data in data["analog_inputs"].items():
                 analog_input_data = cast(AnalogInputPortConfigType, analog_input_data)
                 config.analog_inputs[int(analog_input_idx)] = _analog_input_port_to_pb(analog_input_data)
+                if isinstance(config, QuaConfigControllerDec):
+                    sampling_rate = config.analog_inputs[int(analog_input_idx)].sampling_rate
+                    if sampling_rate != 1e9:
+                        raise ConfigValidationException(f"Sampling rate of {sampling_rate} is not supported for OPX")
         elif isinstance(config, QuaConfigMicrowaveFemDec):
             for analog_input_idx, analog_input_data_mw in data["analog_inputs"].items():
                 analog_input_data_mw = cast(MwFemAnalogInputPortConfigType, analog_input_data_mw)
@@ -651,15 +678,12 @@ def element_to_pb(
     if "MWInput" in data:
         element.microwave_input = QuaConfigMicrowaveInputPortReference(
             port=dac_port_ref_to_pb(*_get_port_reference_with_fem(data["MWInput"]["port"])),
-            oscillator_frequency_hz=data["MWInput"]["oscillator_frequency"],
+            upconverter=data["MWInput"].get("upconverter", DEFAULT_DUC_IDX),
         )
     if "MWOutput" in data:
         mw_output = data["MWOutput"]
         element.microwave_output = QuaConfigMicrowaveOutputPortReference(
             port=adc_port_ref_to_pb(*_get_port_reference_with_fem(mw_output["port"])),
-            oscillator_frequency_hz=mw_output.get(
-                "oscillator_frequency", element.microwave_input.oscillator_frequency_hz
-            ),
         )
 
     if "oscillator" in data:

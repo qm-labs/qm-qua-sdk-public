@@ -1,4 +1,3 @@
-import warnings
 import dataclasses
 from pathlib import Path
 from typing import List, Union, Optional
@@ -109,22 +108,14 @@ class Program:
     def qua_program(self) -> QuaProgram:
         return self._program
 
-    def build(self, config: QuaConfig) -> QuaProgram:
-        warnings.warn(
-            "Program.build() is deprecated and will be removed in 1.2.0, " "please use the property qua_program`",
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
-        copy = QuaProgram().from_dict(self._program.to_dict())
-        copy.config = QuaConfig().from_dict(config.to_dict())
-        return copy
-
     def to_protobuf(self, config: DictQuaConfig) -> bytes:
         """
         Serialize the program to a protobuf binary.
         """
         loaded_config = load_config(config)
-        return bytes(self.build(loaded_config))
+        copy = QuaProgram().from_dict(self._program.to_dict())
+        copy.config = QuaConfig().from_dict(loaded_config.to_dict())
+        return bytes(copy)
 
     @classmethod
     def from_protobuf(cls, binary: bytes) -> "Program":

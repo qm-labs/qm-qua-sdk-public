@@ -31,6 +31,7 @@ import plotly.graph_objects as go  # type: ignore[import-untyped]
 from qm.results.simulator_samples import SimulatorSamples, SimulatorControllerSamples
 from qm.type_hinting.simulator_types import (
     IqInfoType,
+    PortToDucMap,
     ChirpInfoType,
     AdcAcquisitionType,
     PlayedWaveformType,
@@ -42,7 +43,7 @@ from qm.type_hinting.simulator_types import (
 
 class HasPortsProtocol(Protocol):
     @property
-    def ports(self) -> List[int]:
+    def ports(self) -> List[str]:
         raise NotImplementedError
 
     @property
@@ -75,7 +76,7 @@ class PlayedWaveform(metaclass=ABCMeta):
     fem: int
 
     @staticmethod
-    def _build_initialization_dict(
+    def build_initialization_dict(
         dict_description: PlayedWaveformType, formatted_attribute_dict: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         attribute_dict: Dict[str, Any]
@@ -100,11 +101,11 @@ class PlayedWaveform(metaclass=ABCMeta):
 
     @classmethod
     def from_job_dict(cls: Type[T], dict_description: PlayedWaveformType) -> T:
-        return cls(**cls._build_initialization_dict(dict_description))
+        return cls(**cls.build_initialization_dict(dict_description))
 
     @property
-    def ports(self) -> List[int]:
-        return self.output_ports
+    def ports(self) -> List[str]:
+        return [str(p) for p in self.output_ports]
 
     @property
     def is_iq(self) -> bool:
@@ -146,7 +147,7 @@ class PlayedWaveform(metaclass=ABCMeta):
             f"Start Time={self.timestamp} ns",
             f"Length={self.length} ns",
             f"Element={self.element}",
-            f"Output Ports={self.output_ports}",
+            f"Output Ports={self.ports}",
             waveform_type_string,
         ]
 
@@ -182,22 +183,6 @@ class PlayedAnalogWaveform(PlayedWaveform):
     chirp_info: Optional[ChirpInfoType]
     current_phase: float
 
-    @classmethod
-    def from_job_dict(cls: Type[T], dict_description: PlayedWaveformType) -> T:
-        dict_description = cast(PlayedAnalogWaveformType, dict_description)
-        pulse_chirp_info = dict_description["chirpInfo"]
-        is_pulse_have_chirp = len(pulse_chirp_info["units"]) > 0 or len(pulse_chirp_info["rate"]) > 0
-        formatted_attribute_list = dict(
-            current_amp_elements=dict_description["currentGMatrixElements"],
-            current_dc_offset_by_port=dict_description["currentDCOffsetByPort"],
-            current_intermediate_frequency=dict_description["currentIntermediateFrequency"],
-            current_frame=dict_description["currentFrame"],
-            current_correction_elements=dict_description["currentCorrectionElements"],
-            chirp_info=pulse_chirp_info if is_pulse_have_chirp else None,
-            current_phase=dict_description.get("currentPhase", 0),
-        )
-        return cls(**cls._build_initialization_dict(dict_description, formatted_attribute_list))
-
     def to_custom_string(self, show_chirp: bool = True) -> str:
         _attributes = super()._common_attributes_to_printable_str_list()
         _attributes += (
@@ -223,11 +208,62 @@ class PlayedAnalogWaveform(PlayedWaveform):
         return self.to_custom_string()
 
 
+def _fix_duc_idx(duc_idx: int) -> int:
+    """This one is to overcome the returned 3 and 4 from the GW, when it's fixed, this one can be removed"""
+    return (duc_idx - 1) % 2 + 1
+
+
+@dataclass(frozen=True)
+class PlayedMwAnalogWaveform(PlayedAnalogWaveform):
+    port_to_duc: Dict[int, List[int]]
+
+    @staticmethod
+    def create_port_to_duc_mapping(port_to_duc: List[PortToDucMap]) -> Dict[int, List[int]]:
+        return {int(p["port"]): [_fix_duc_idx(int(d)) for d in p["ducs"]] for p in port_to_duc}
+
+    @property
+    def ports(self) -> List[str]:
+        to_return = []
+        for port in self.output_ports:
+            if port in self.port_to_duc:
+                assert (
+                    len(self.port_to_duc[port]) == 1
+                ), f"Number of DUCs per port must equal 1, got {len(self.port_to_duc[port])}"
+                to_return.append(f"{port}-{self.port_to_duc[port][0]}")
+            else:
+                to_return.append(str(port))
+        return to_return
+
+
+def _create_played_analog_waveform_from_job_dict(dict_description: PlayedWaveformType) -> PlayedAnalogWaveform:
+    dict_description = cast(PlayedAnalogWaveformType, dict_description)
+    pulse_chirp_info = dict_description["chirpInfo"]
+    is_pulse_have_chirp = len(pulse_chirp_info["units"]) > 0 or len(pulse_chirp_info["rate"]) > 0
+    formatted_attribute_list = dict(
+        current_amp_elements=dict_description["currentGMatrixElements"],
+        current_dc_offset_by_port=dict_description["currentDCOffsetByPort"],
+        current_intermediate_frequency=dict_description["currentIntermediateFrequency"],
+        current_frame=dict_description["currentFrame"],
+        current_correction_elements=dict_description["currentCorrectionElements"],
+        chirp_info=pulse_chirp_info if is_pulse_have_chirp else None,
+        current_phase=dict_description.get("currentPhase", 0),
+    )
+    if dict_description.get("portToDuc") and any(d["ducs"] for d in dict_description["portToDuc"]):
+        formatted_attribute_list["port_to_duc"] = PlayedMwAnalogWaveform.create_port_to_duc_mapping(
+            dict_description["portToDuc"]
+        )
+        class_to_init: Type[PlayedAnalogWaveform] = PlayedMwAnalogWaveform
+    else:
+        class_to_init = PlayedAnalogWaveform
+    initialization_dict = class_to_init.build_initialization_dict(dict_description, formatted_attribute_list)
+    return class_to_init(**initialization_dict)
+
+
 @dataclass(frozen=True)
 class PlayedDigitalWaveform(PlayedWaveform):
     @classmethod
     def from_job_dict(cls: Type[T], dict_description: PlayedWaveformType) -> T:
-        return cls(**cls._build_initialization_dict(dict_description))
+        return cls(**cls.build_initialization_dict(dict_description))
 
     def to_string(self) -> str:
         s = (
@@ -265,8 +301,8 @@ class AdcAcquisition:
         )
 
     @property
-    def ports(self) -> List[int]:
-        return self.adc_ports
+    def ports(self) -> List[str]:
+        return [str(p) for p in self.adc_ports]
 
     def to_string(self) -> str:
         return (
@@ -289,9 +325,9 @@ class AdcAcquisition:
 
 @dataclass
 class FemToWaveformMap:
-    analog_out: Dict[int, List[PlayedAnalogWaveform]]
-    digital_out: Dict[int, List[PlayedDigitalWaveform]]
-    analog_in: Dict[int, List[AdcAcquisition]]
+    analog_out: Dict[str, List[PlayedAnalogWaveform]]
+    digital_out: Dict[str, List[PlayedDigitalWaveform]]
+    analog_in: Dict[str, List[AdcAcquisition]]
 
 
 class _SingleControllerMapping(Dict[int, FemToWaveformMap]):
@@ -330,7 +366,7 @@ class WaveformReport:
     @classmethod
     def from_dict(cls, d: WaveformReportType, job_id: Union[int, str] = -1) -> "WaveformReport":
         return cls(
-            analog_waveforms=[PlayedAnalogWaveform.from_job_dict(awf) for awf in d["analogWaveforms"]],
+            analog_waveforms=[_create_played_analog_waveform_from_job_dict(awf) for awf in d["analogWaveforms"]],
             digital_waveforms=[PlayedDigitalWaveform.from_job_dict(dwf) for dwf in d["digitalWaveforms"]],
             adc_acquisitions=[AdcAcquisition.from_job_dict(acq) for acq in d.get("adcAcquisitions", [])],
             job_id=job_id,
@@ -439,13 +475,13 @@ class WaveformReport:
             for fem, report in fem_to_report_map.items():
                 analog_out, digital_out, analog_in = defaultdict(list), defaultdict(list), defaultdict(list)
                 for awf in report.analog_waveforms:
-                    for p in awf.output_ports:
+                    for p in awf.ports:
                         analog_out[p].append(awf)
                 for dwf in report.digital_waveforms:
-                    for p in dwf.output_ports:
+                    for p in dwf.ports:
                         digital_out[p].append(dwf)
                 for adc in report.adc_acquisitions:
-                    for p in adc.adc_ports:
+                    for p in adc.ports:
                         analog_in[p].append(adc)
                 per_controller[fem] = FemToWaveformMap(
                     analog_out=dict(analog_out), digital_out=dict(digital_out), analog_in=dict(analog_in)

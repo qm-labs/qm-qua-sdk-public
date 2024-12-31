@@ -1,5 +1,5 @@
 import logging
-from typing import List, Tuple, Union, Generic, TypeVar, Optional, Sequence, cast
+from typing import Tuple, Union, Generic, TypeVar, Optional, Sequence
 
 import numpy
 from dependency_injector.wiring import Provide, inject
@@ -35,16 +35,12 @@ def _set_single_output_port_dc_offset(
 
 
 def _create_taps_filter(
-    feedforward: Union[Sequence[NumpySupportedFloat], None], feedback: Union[Sequence[NumpySupportedFloat], None]
+    feedforward: Sequence[NumpySupportedFloat], feedback: Sequence[NumpySupportedFloat]
 ) -> AnalogOutputPortFilter:
     for name, instance in zip(["feedforward", "feedback"], [feedforward, feedback]):
-        if instance is not None and not isinstance(instance, (numpy.ndarray, List)):
-            raise TypeError(f"{name} must be None, a list, or a numpy array. Got {type(instance)}.")
-    if isinstance(feedforward, numpy.ndarray):
-        feedforward = feedforward.tolist()
-    if isinstance(feedback, numpy.ndarray):
-        feedback = feedback.tolist()
-    return AnalogOutputPortFilter(feedforward=cast(List[float], feedforward), feedback=cast(List[float], feedback))
+        if not isinstance(instance, (numpy.ndarray, list)):
+            raise TypeError(f"{name} must be a list, or a numpy array. Got {type(instance)}.")
+    return AnalogOutputPortFilter(feedforward=[float(x) for x in feedforward], feedback=[float(x) for x in feedback])
 
 
 @inject
@@ -127,8 +123,8 @@ class SingleInput(ElementInput[QuaConfigSingleInput]):
 
     def set_output_filter(
         self,
-        feedforward: Union[Sequence[NumpySupportedFloat], None],
-        feedback: Union[Sequence[NumpySupportedFloat], None],
+        feedforward: Sequence[NumpySupportedFloat],
+        feedback: Sequence[NumpySupportedFloat],
     ) -> None:
         analog_filter = _create_taps_filter(feedforward, feedback)
         self._frontend.set_output_filter_taps(self._id, self._name, "single", analog_filter)
@@ -185,8 +181,8 @@ class MixInputs(ElementInput[QuaConfigMixInputs]):
     def set_output_filter(
         self,
         input_name: str,
-        feedforward: Union[Sequence[NumpySupportedFloat], None],
-        feedback: Union[Sequence[NumpySupportedFloat], None],
+        feedforward: Sequence[NumpySupportedFloat],
+        feedback: Sequence[NumpySupportedFloat],
     ) -> None:
         analog_filter = _create_taps_filter(feedforward, feedback)
         self._frontend.set_output_filter_taps(

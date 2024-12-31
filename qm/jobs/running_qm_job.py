@@ -19,10 +19,8 @@ class AcquiringStatus(Enum):
 class RunningQmJob(QmBaseJob):
     @property
     def manager(self) -> None:
-        """The QM object where this job lives
-
-        Returns:
-
+        """
+        The QM object where this job lives
         """
         warnings.warn(
             deprecation_message(
@@ -38,7 +36,7 @@ class RunningQmJob(QmBaseJob):
 
     @property
     def result_handles(self) -> StreamingResultFetcher:
-        """:type: qm._results.JobResults
+        """
 
         Returns:
             The handles that this job generated
@@ -51,29 +49,35 @@ class RunningQmJob(QmBaseJob):
         )
 
     def cancel(self) -> bool:
+        """
+        Cancels the job
+        Sames as `job.halt()`
+
+        Returns:
+             `True` if the job was canceled successfully
+        """
         return self.halt()
 
     def halt(self) -> bool:
-        """Halts the job on the opx"""
+        """Halts the job on the opx
+
+        Returns:
+             `True` if the job was canceled successfully"""
         return self._job_manager.halt(self._id)
 
     def resume(self) -> bool:
-        """Resumes a program that was halted using the [qm.qua._dsl.pause][] statement"""
+        """Resumes a program that was halted using the [pause][qm.qua._dsl.pause] statement"""
         return self._job_manager.resume(self._id)
 
     def is_paused(self) -> bool:
         """Returns:
-            Returns ``True`` if the job is in a paused state.
-
-        see also:
-
-            ``resume()``
+        Returns `True` if the job was paused from QUA.
         """
         return self._job_manager.is_paused(self._id)
 
     def _is_job_running(self) -> bool:
         """Returns:
-        Returns ``True`` if the job is running
+        Returns `True` if the job is running
         """
         return self._job_manager.is_job_running(self._id)
 
@@ -88,7 +92,7 @@ class RunningQmJob(QmBaseJob):
         return AcquiringStatus(status.value)
 
     def execution_report(self) -> ExecutionReport:
-        """Get runtime errors report for this job. See [Runtime errors](../../Guides/error/#runtime-errors).
+        """Get runtime errors report for this job. See [Runtime errors](../Guides/error.md#runtime-errors).
 
         Returns:
             An object holding the errors that this job generated.
@@ -103,7 +107,7 @@ class RunningQmJob(QmBaseJob):
         self, element: str, correction: Tuple[float, float, float, float]
     ) -> Tuple[float, float, float, float]:
         r"""Sets the correction matrix for correcting gain and phase imbalances
-        of an IQ mixer associated with a element.
+        of an IQ mixer associated with an element.
 
         Changes will only be done to the current job!
 
@@ -131,10 +135,10 @@ class RunningQmJob(QmBaseJob):
 
     def get_element_correction(self, element: str) -> Tuple[float, float, float, float]:
         """Gets the correction matrix for correcting gain and phase imbalances
-        of an IQ mixer associated with a element.
+        of an IQ mixer associated with an element.
 
         Args:
-            element (str): the name of the element to update the
+            element (str): The name of the element to update the
                 correction for
 
         Returns:

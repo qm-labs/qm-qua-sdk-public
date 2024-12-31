@@ -33,8 +33,8 @@ class LoopbackInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInt
             2. Virtual connection between elements:
 
                 ``(fromQE: str, toQE: str, toQEInput: int)``
-    :param int latency: The latency between the OPX outputs and its input.
-    :param float noisePower: How much noise to add to the input.
+        latency: The latency between the OPX outputs and its input.
+        noisePower: How much noise to add to the input.
 
     Example::
 

@@ -18,7 +18,7 @@ class RawInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInterfac
             List of tuples with the connection. Each tuple should be:
 
                 ``(toController: str, toFEM: int, toPort: int, toSamples: List[float])``
-    :param float noisePower: How much noise to add to the input.
+        noisePower: How much noise to add to the input.
 
     Example:
         ```python

@@ -172,12 +172,11 @@ def _print_config(config_part: Mapping[str, Any], indent_level: int = 1) -> str:
     Unlike pretty print, it better supports nested dictionaries. Also, auto converts
     lists into a more compact form.
     Works recursively.
-    :param Dict[str, Any] config_part: The dictionary to format
 
     Args:
         indent_level (int): Internally used by the function to indicate
-            the current
-    indention
+            the current indention
+        config_part: The dictionary to format
     :returns str: The string representation of the dictionary.
     """
     if indent_level > 100:

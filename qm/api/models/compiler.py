@@ -34,7 +34,7 @@ def standardize_compiler_params(
 
     if (strict is not None) or (flags is not None):
         warnings.warn(
-            "Using **kwargs for the compiler arguments is deprecated. "
+            "Using **kwargs for the compiler arguments is deprecated, and will be removed in 1.3.0. "
             "Please set the options inside the object 'CompilerOptionArguments'.",
             DeprecationWarning,
             stacklevel=2,

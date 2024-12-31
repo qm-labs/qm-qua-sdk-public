@@ -1,19 +1,16 @@
 import json
 import logging
-import warnings
-from typing import Any, Dict, List, Tuple, Union, Mapping, Optional, Sequence, cast
+from typing import Dict, List, Tuple, Union, Mapping, Optional, Sequence, cast
 
 from qm.program import Program
 from qm.jobs.qm_job import QmJob
 from qm.octave import QmOctaveConfig
 from qm.persistence import BaseStore
 from qm.octave.qm_octave import QmOctave
-from qm.utils import deprecation_message
 from qm.api.models.devices import Polarity
 from qm.api.frontend_api import FrontendApi
 from qm.jobs.pending_job import QmPendingJob
 from qm.jobs.job_queue_old_api import QmQueue
-from qm.jobs.job_queue_mock import QmQueueMock
 from qm.jobs.simulated_job import SimulatedJob
 from qm.api.simulation_api import SimulationApi
 from qm.grpc.frontend import JobExecutionStatus
@@ -21,15 +18,16 @@ from qm.jobs.running_qm_job import RunningQmJob
 from qm.utils.config_utils import get_fem_config
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
-from qm.api.v2.job_api.job_api import OldJobApiMock
 from qm.elements_db import ElementsDB, init_elements
 from qm.utils.types_utils import convert_object_type
 from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.elements.up_converted_input import UpconvertedInput
 from qm._QmJobErrors import InvalidDigitalInputPolarityError
+from qm.api.v2.job_api.job_api import JobApiWithDeprecations
 from qm.octave._calibration_names import COMMON_OCTAVE_PREFIX
 from qm.api.job_manager_api import create_job_manager_from_api
 from qm.api.models.capabilities import OPX_FEM_IDX, ServerCapabilities
+from qm.jobs.job_queue_with_deprecations import QmQueueWithDeprecations
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
 from qm.type_hinting.config_types import StandardPort, DictQuaConfig, PortReferenceType
 from qm.elements.element_inputs import MixInputs, SingleInput, static_set_mixer_correction
@@ -96,26 +94,11 @@ class QuantumMachine:
         return ElementsDB({k: v for k, v in self._elements.items() if k.startswith(COMMON_OCTAVE_PREFIX)})
 
     @property
-    def manager(self) -> None:
-        """Returns the Quantum Machines Manager"""
-        warnings.warn(
-            deprecation_message(
-                method="QuantumMachine.manager",
-                deprecated_in="1.1.0",
-                removed_in="1.2.0",
-                details="QuantumMachine no longer has 'manager' property",
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return None
-
-    @property
     def id(self) -> str:
         return self._id
 
     @property
-    def queue(self) -> Union[QmQueue, QmQueueMock]:
+    def queue(self) -> Union[QmQueue, QmQueueWithDeprecations]:
         return self._queue
 
     @property
@@ -126,7 +109,7 @@ class QuantumMachine:
         """Closes the quantum machine.
 
         Returns:
-            ``True`` if the close request succeeded, raises an exception
+            `True` if the close request succeeded, raises an exception
             otherwise.
         """
         return self._frontend.close_quantum_machine(self._id)
@@ -147,28 +130,14 @@ class QuantumMachine:
         Note:
             A simulated job does not support calling QuantumMachine API functions.
 
-        The following example shows a simple execution of the simulator, where the
-        associated config object is omitted for brevity.
-
-        Example:
-            ```python
-            from qm.qua import *
-            from qm.simulate import SimulationConfig, QuantumMachinesManager
-
-            qmManager = QuantumMachinesManager()
-            qm1 = qmManager.open_qm(config)
-
-            with program() as prog:
-                play('pulse1', 'element1')
-
-            job = qm1.simulate(prog, SimulationConfig(duration=100))
-            ```
-
         Args:
             program: A QUA ``program()`` object to execute
-            simulate: A ``SimulationConfig`` configuration object
+            simulate: If given, will be simulated instead of executed.
+            compiler_options: Optional arguments for compilation.
+            strict: This parameter is deprecated, please use `compiler_options`
+            flags: This parameter is deprecated, please use `compiler_options`
         Returns:
-            a ``QmJob`` object (see QM Job API).
+            A ``QmJob`` object (see QM Job API).
         """
         standardized_compiler_options = standardize_compiler_params(compiler_options, strict, flags)
         job = cast(
@@ -193,20 +162,19 @@ class QuantumMachine:
         results.
 
         Note:
-
             Calling execute will halt any currently running program and clear the current
             queue. If you want to add a job to the queue, use qm.queue.add()
 
         Args:
             program: A QUA ``program()`` object to execute
-            duration_limit (int): This parameter is ignored as it is
-                obsolete
-            data_limit (int): This parameter is ignored as it is
-                obsolete
-            force_execution (bool): This parameter is ignored as it is
-                obsolete
-            dry_run (bool): This parameter is ignored as it is obsolete
-
+            duration_limit: This parameter is ignored and will be removed in future versions
+            data_limit: This parameter is ignored and will be removed in future versions
+            force_execution: This parameter is ignored and will be removed in future versions
+            dry_run: This parameter is ignored and will be removed in future versions
+            simulate: If given, will be simulated instead of executed.
+            compiler_options: Optional arguments for compilation.
+            strict: This parameter is deprecated, please use `compiler_options`
+            flags: This parameter is deprecated, please use `compiler_options`
         Returns:
             A ``QmJob`` object (see QM Job API).
         """
@@ -246,7 +214,7 @@ class QuantumMachine:
     ) -> str:
         """Compiles a QUA program to be executed later. The returned `program_id`
         can then be directly added to the queue. For a detailed explanation
-        see [Precompile Jobs](../../Guides/features/#precompile-jobs).
+        see [Precompile Jobs](../Guides/features.md#precompile-jobs).
 
         Args:
             program: A QUA program
@@ -340,13 +308,14 @@ class QuantumMachine:
         - If no frequencies are given calibration will occur according to LO & IF declared in the element
         - The function need to be run for each element separately
         - The results are saved to a database for later use
+
         Args:
             qe (str): The name of the element for calibration
             lo_if_dict ([Mapping[float, Tuple[float, ...]]]): a dictionary with LO frequency as the key and
-             a list of IF frequencies for every LO
+                a list of IF frequencies for every LO
             save_to_db (bool): If true (default), The calibration
                 parameters will be saved to the calibration database
-        Calibrate the mixer associated with an element for the given LO & IF frequencies.
+            params: Optional calibration parameters
         """
         inst = self._elements[qe]
         if not isinstance(inst.input, UpconvertedInput):
@@ -420,7 +389,7 @@ class QuantumMachine:
                     for an element with mixer inputs
 
         Returns:
-            the offset, in normalized output units
+            the offset, in volts
         """
         config = self._get_pb_config()
         input_instance = self._elements[element].input
@@ -466,7 +435,7 @@ class QuantumMachine:
                 `'I'` or `'Q'` or a tuple ('I', 'Q')
                     for an element with mixer inputs
             offset (Union[float, Tuple[float,float], List[float]]): The
-                dc value to set to, in normalized output units. Ranges
+                dc value to set to, in volts. Ranges
                 from -0.5 to 0.5 - 2^-16 in steps of 2^-16.
 
         Examples:
@@ -478,8 +447,8 @@ class QuantumMachine:
 
         Note:
 
-            If the sum of the DC offset and the largest waveform data-point exceed the normalized unit range specified
-            above, DAC output overflow will occur and the output will be corrupted.
+            If the sum of the DC offset and the largest waveform data-point exceed the range,
+            DAC output overflow will occur and the output will be corrupted.
         """
         element_inst = self._elements[element]
         if isinstance(element_inst.input, MixInputs):
@@ -551,20 +520,19 @@ class QuantumMachine:
             )
 
     def set_input_dc_offset_by_element(self, element: str, output: str, offset: float) -> None:
-        """set the current DC offset of the OPX analog input channel associated with an element.
+        """Set the current DC offset of the OPX analog input channel associated with an element.
 
         Args:
             element (str): the name of the element to update the
                 correction for
             output (str): the output key name as appears in the element
                 config under 'outputs'.
-            offset (float): the dc value to set to, in normalized input
-                units. Ranges from -0.5 to 0.5 - 2^-16 in steps of
+            offset (float): the dc value to set to, in volts. Ranges from -0.5 to 0.5 - 2^-16 in steps of
                 2^-16.
 
         Note:
-            If the sum of the DC offset and the largest waveform data-point exceed the normalized unit range specified
-            above, DAC output overflow will occur and the output will be corrupted.
+            If the sum of the DC offset and the largest waveform data-point exceed the range,
+            DAC output overflow will occur and the output will be corrupted.
         """
         element_instance = self._elements[element]
         element_instance.set_input_dc_offset(output, offset)
@@ -578,7 +546,7 @@ class QuantumMachine:
                 under 'outputs'.
 
         Returns:
-            the offset, in normalized output units
+            The offset, in volts
         """
         config = self._get_pb_config()
 
@@ -602,12 +570,12 @@ class QuantumMachine:
         """Gets the delay of the digital input of the element
 
         Args:
-            element: the name of the element to get the delay for
-            digital_input: the digital input name as appears in the
+            element: The name of the element to get the delay for
+            digital_input: The digital input name as appears in the
                 element's config
 
         Returns:
-            the delay
+            The delay
         """
         element_instance = self._elements[element]
         return element_instance.get_output_digital_delay(digital_input)
@@ -616,11 +584,10 @@ class QuantumMachine:
         """Sets the delay of the digital input of the element
 
         Args:
-            element (str): the name of the element to update delay for
-            digital_input (str): the digital input name as appears in
+            element (str): The name of the element to update delay for
+            digital_input (str): The digital input name as appears in
                 the element's config
-            delay (int): the delay value to set to, in nsec. Range: 0 to
-                255 - 2 * buffer, in steps of 1
+            delay (int): The delay value to set to, in ns.
         """
         element_instance = self._elements[element]
         element_instance.set_output_digital_delay(digital_input, delay)
@@ -629,12 +596,12 @@ class QuantumMachine:
         """Gets the buffer for digital input of the element
 
         Args:
-            element (str): the name of the element to get the buffer for
-            digital_input (str): the digital input name as appears in
+            element (str): The name of the element to get the buffer for
+            digital_input (str): The digital input name as appears in
                 the element's config
 
         Returns:
-            the buffer
+            The buffer
         """
         element_instance = self._elements[element]
         return element_instance.get_output_digital_buffer(digital_input_name=digital_input)
@@ -643,11 +610,10 @@ class QuantumMachine:
         """Sets the buffer for digital input of the element
 
         Args:
-            element (str): the name of the element to update buffer for
+            element (str): The name of the element to update buffer for
             digital_input (str): the digital input name as appears in
                 the element's config
-            buffer (int): the buffer value to set to, in nsec. Range: 0
-                to (255 - delay) / 2, in steps of 1
+            buffer (int): The buffer value to set to, in ns.
         """
         element_instance = self._elements[element]
         element_instance.set_output_digital_buffer(digital_input, buffer)
@@ -659,11 +625,11 @@ class QuantumMachine:
         and the time that the data is available to the controller for demodulation or streaming.
 
         Args:
-            element (str): the name of the element to get time of flight
+            element (str): The name of the element to get time of flight
                 for
 
         Returns:
-            the time of flight, in nsec
+            The time of flight, in ns
         """
         element_object = self._elements[element]
         return element_object.time_of_flight
@@ -676,10 +642,10 @@ class QuantumMachine:
         by this amount on both sides.
 
         Args:
-            element (str): the name of the element to get smearing for
+            element (str): The name of the element to get smearing for
 
         Returns:
-            the smearing, in nesc.
+            The smearing, in ns.
         """
         element_object = self._elements[element]
         return element_object.smearing
@@ -821,32 +787,6 @@ class QuantumMachine:
             },
         ]
 
-    def peek(self, address: Any) -> None:
-        warnings.warn(
-            deprecation_message(
-                method="QuantumMachine.peek", deprecated_in="1.1.0", removed_in="1.2.0", details="Not Implemented"
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        raise NotImplementedError()
-        # if you must use this, code below will work for a specific controller
-        # request = PeekRequest()
-        # request.controllerId = list(self._config["controllers"].keys())[0]
-        # request.address = address
-
-        # return self._frontend.Peek(request)
-
-    def poke(self, address: Any, value: Any) -> None:
-        warnings.warn(
-            deprecation_message(
-                method="QuantumMachine.poke", deprecated_in="1.1.0", removed_in="1.2.0", details="Not Implemented"
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        pass
-
     def _get_pb_config(self) -> QuaConfig:
         return self._frontend.get_quantum_machine_config(self._id)
 
@@ -873,7 +813,7 @@ class QuantumMachine:
         with open(filename, "w") as writer:
             writer.write(json_str)
 
-    def get_running_job(self) -> Optional[Union[QmJob, OldJobApiMock]]:
+    def get_running_job(self) -> Optional[Union[QmJob, JobApiWithDeprecations]]:
         """Gets the currently running job. Returns None if there isn't one."""
 
         job_id = self._job_manager.get_running_job(self._id)
@@ -894,7 +834,15 @@ class QuantumMachine:
             # wait for execution
             return None
 
-    def get_job(self, job_id: str) -> Union[QmJob, QmPendingJob, OldJobApiMock]:
+    def get_job(self, job_id: str) -> Union[QmJob, QmPendingJob, JobApiWithDeprecations]:
+        """
+        Get a job based on the job_id.
+
+        Args:
+            job_id: A list of jobs ids
+        Returns:
+            The job
+        """
         status: JobExecutionStatus = self._job_manager.get_job_execution_status(job_id, self._id)
         if status.running or status.completed:
             return QmJob(
@@ -920,6 +868,12 @@ class QuantumMachine:
         )
 
     def set_digital_input_threshold(self, port: PortReferenceType, threshold: float) -> None:
+        """Sets the threshold of the digital input
+
+        Args:
+            port: The port, in tuple form, to be updated
+            threshold: The threshold in volts
+        """
         controller_name, fem_number, port_number = _standardize_port(port)
         self._frontend.set_digital_input_threshold(self._id, controller_name, fem_number, port_number, threshold)
 
@@ -933,16 +887,44 @@ class QuantumMachine:
         raise InvalidConfigError("Digital input port not found")
 
     def get_digital_input_threshold(self, port: PortReferenceType) -> float:
+        """Gets the threshold of the digital input
+
+        Args:
+            port: The port, in tuple form, to be updated
+
+        Returns:
+            The threshold in volts
+        """
         return self._get_digital_input_port(port).threshold
 
     def set_digital_input_deadtime(self, port: PortReferenceType, deadtime: int) -> None:
+        """Sets the threshold of the digital input
+
+        Args:
+            port: The port, in tuple form, to be updated
+            deadtime: The deadtime in ns
+        """
         controller_name, fem_number, port_number = _standardize_port(port)
         self._frontend.set_digital_input_dead_time(self._id, controller_name, fem_number, port_number, deadtime)
 
     def get_digital_input_deadtime(self, port: PortReferenceType) -> int:
+        """Gets the deadtime of the digital input
+
+        Args:
+            port: The port, in tuple form, to be updated
+
+        Returns:
+            The deadtime in ns
+        """
         return self._get_digital_input_port(port).deadtime
 
     def set_digital_input_polarity(self, port: PortReferenceType, polarity: str) -> None:
+        """Sets the polarity of the digital input
+
+        Args:
+            port: The port, in tuple form, to be updated
+            polarity: The polarity: "RISING" or "FALLING"
+        """
         try:
             polarity_enum = Polarity[polarity]
         except KeyError:
@@ -954,6 +936,14 @@ class QuantumMachine:
         self._frontend.set_digital_input_polarity(self._id, controller_name, fem_number, port_number, polarity_enum)
 
     def get_digital_input_polarity(self, port: PortReferenceType) -> str:
+        """Gets the polarity of the digital input
+
+        Args:
+            port: The port, in tuple form, to be updated
+
+        Returns:
+            The polarity
+        """
         return QuaConfigDigitalInputPortDecPolarity(self._get_digital_input_port(port).polarity).name
 
 

@@ -57,10 +57,10 @@ class AnalogOutputPortConfigTypeOctoDac(TypedDict, total=False):
 
 class LfFemConfigType(TypedDict, total=False):
     type: Literal["LF"]
-    analog_outputs: Mapping[int, AnalogOutputPortConfigTypeOctoDac]
-    analog_inputs: Mapping[int, AnalogInputPortConfigType]
-    digital_outputs: Mapping[int, DigitalOutputPortConfigType]
-    digital_inputs: Mapping[int, DigitalInputPortConfigType]
+    analog_outputs: Mapping[Union[int, str], AnalogOutputPortConfigTypeOctoDac]
+    analog_inputs: Mapping[Union[int, str], AnalogInputPortConfigType]
+    digital_outputs: Mapping[Union[int, str], DigitalOutputPortConfigType]
+    digital_inputs: Mapping[Union[int, str], DigitalInputPortConfigType]
 
 
 Band = Literal[1, 2, 3]
@@ -71,6 +71,11 @@ class MwFemAnalogInputPortConfigType(TypedDict, total=False):
     gain_db: int
     shareable: bool
     band: Band
+    downconverter_frequency: float
+
+
+class MwUpconverterConfigType(TypedDict, total=False):
+    frequency: float
 
 
 class MwFemAnalogOutputPortConfigType(TypedDict, total=False):
@@ -79,22 +84,24 @@ class MwFemAnalogOutputPortConfigType(TypedDict, total=False):
     band: Band
     delay: int
     shareable: bool
+    upconverters: Mapping[int, MwUpconverterConfigType]
+    upconverter_frequency: float
 
 
 class MwFemConfigType(TypedDict, total=False):
     type: Literal["MW"]
-    analog_outputs: Mapping[int, MwFemAnalogOutputPortConfigType]
-    analog_inputs: Mapping[int, MwFemAnalogInputPortConfigType]
-    digital_outputs: Mapping[int, DigitalOutputPortConfigType]
-    digital_inputs: Mapping[int, DigitalInputPortConfigType]
+    analog_outputs: Mapping[Union[int, str], MwFemAnalogOutputPortConfigType]
+    analog_inputs: Mapping[Union[int, str], MwFemAnalogInputPortConfigType]
+    digital_outputs: Mapping[Union[int, str], DigitalOutputPortConfigType]
+    digital_inputs: Mapping[Union[int, str], DigitalInputPortConfigType]
 
 
 class ControllerConfigType(TypedDict, total=False):
     type: Literal["opx", "opx1"]
-    analog_outputs: Mapping[int, AnalogOutputPortConfigType]
-    analog_inputs: Mapping[int, AnalogInputPortConfigType]
-    digital_outputs: Mapping[int, DigitalOutputPortConfigType]
-    digital_inputs: Mapping[int, DigitalInputPortConfigType]
+    analog_outputs: Mapping[Union[int, str], AnalogOutputPortConfigType]
+    analog_inputs: Mapping[Union[int, str], AnalogInputPortConfigType]
+    digital_outputs: Mapping[Union[int, str], DigitalOutputPortConfigType]
+    digital_inputs: Mapping[Union[int, str], DigitalInputPortConfigType]
 
 
 class OctaveRFOutputConfigType(TypedDict, total=False):
@@ -198,12 +205,11 @@ class SingleInputConfigType(TypedDict, total=False):
 
 class MwInputConfigType(TypedDict, total=False):
     port: PortReferenceType
-    oscillator_frequency: float
+    upconverter: int
 
 
 class MwOutputConfigType(TypedDict, total=False):
     port: PortReferenceType
-    oscillator_frequency: float
 
 
 class HoldOffsetConfigType(TypedDict, total=False):

@@ -16,6 +16,7 @@ from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
 from qm.program import Program, load_config
 from qm.utils.general_utils import is_debug
+from qm.type_hinting.general import PathLike
 from qm.api.v2.job_api.job_api import JobData
 from qm.quantum_machine import QuantumMachine
 from qm.results import StreamingResultFetcher
@@ -33,10 +34,10 @@ from qm.program._qua_config_to_pb import load_config_pb
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm._octaves_container import load_config_from_calibration_db
 from qm.program._qua_config_schema import validate_config_capabilities
-from qm.api.v2.qmm_api import Controller, OldQmmApiMock, ControllerBase
 from qm.api.simulation_api import SimulationApi, create_simulation_request
 from qm.containers.capabilities_container import create_capabilities_container
 from qm.octave.octave_manager import OctaveManager, prep_config_for_calibration
+from qm.api.v2.qmm_api import Controller, ControllerBase, QmmApiWithDeprecations
 from qm.exceptions import QmmException, ConfigSchemaError, ConfigValidationException
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
 
@@ -67,6 +68,9 @@ SERVER_TO_QOP_VERSION_MAP = {
     "2.60-b62e6b6": "2.2.1",
     "2.60-0b17cac": "2.2.2",
     "2.70-7abf0e0": "2.4.0",
+    "2.70-ed75211": "2.4.1",
+    "a6f8bc5": "3.1.0",
+    "fcdfb69": "3.1.1",
 }
 
 
@@ -91,6 +95,7 @@ class QuantumMachinesManager:
         store: Optional[BaseStore] = None,
         file_store_root: str = ".",
         octave: Optional[QmOctaveConfig] = None,
+        octave_calibration_db_path: Optional[PathLike] = None,
     ):
         """
         Args:
@@ -98,11 +103,16 @@ class QuantumMachinesManager:
                 ``None``, local settings are used
             port: Port where to find the QM orchestrator. If None, local
                 settings are used
+            cluster_name (string): The name of the cluster, allows redirection between devices
+            timeout (float): The timeout, in seconds, for detecting the qmm. Default is 60
+            log_level(string): The logging level for the connection instance. Defaults to `INFO`. Please check `logging` for available options
+            octave_calibration_db_path (PathLike): The path for storing the Octave's calibration database
         """
         set_logging_level(log_level)
         self._user_config = UserConfig.create_from_file()
         self._port = port
         host = host or self._user_config.manager_host or ""
+        octave_calibration_db_path = octave_calibration_db_path or self._user_config.octave_calibration_db_path
         if host is None:
             message = "Failed to connect to QuantumMachines server. No host given."
             logger.error(message)
@@ -143,7 +153,7 @@ class QuantumMachinesManager:
         self._octave_manager = OctaveManager(self._octave_config, self, self._caps)
         self._api = None
         if self._caps.supports_api_v2:
-            self._api = OldQmmApiMock(
+            self._api = QmmApiWithDeprecations(
                 self._server_details.connection_details,
                 store=self._store,
                 capabilities=self._caps,
@@ -153,6 +163,14 @@ class QuantumMachinesManager:
 
         raise_on_error = self._user_config.strict_healthcheck is not False
         self.perform_healthcheck(raise_on_error)
+        if octave_calibration_db_path is not None:
+            if self._octave_config:
+                if self._octave_config.calibration_db is not None:
+                    raise QmmException(
+                        "Duplicate calibration_db path detected, please set the calibration db only through the QMM."
+                    )
+                else:
+                    self._octave_config.set_calibration_db_without_warning(octave_calibration_db_path)
 
     def _initialize_connection(
         self,
@@ -232,21 +250,9 @@ class QuantumMachinesManager:
             A dictionary with the qm-qua and QOP versions
         """
         if self._api is None:
-            warnings.warn(
-                deprecation_message(
-                    "QuantumMachineManager.version()",
-                    "1.1.4",
-                    "1.2.0",
-                    "QuantumMachineManager.version() will have a different return type in 1.2.0. Use `QuantumMachineManager.version_dict()` instead",
-                ),
-                category=DeprecationWarning,
-                stacklevel=2,
+            raise NotImplementedError(
+                "QuantumMachineManager.version() has a different return type in 1.2.0. Use `QuantumMachineManager.version_dict()` instead"
             )
-            output_dict = self.version_dict()
-
-            output_dict["client"] = output_dict["qm-qua"]
-            output_dict["server"] = self._server_details.server_version
-            return output_dict
         else:
             from qm.version import __version__
 
@@ -268,15 +274,6 @@ class QuantumMachinesManager:
             self._api.reset_data_processing()
         else:
             self._frontend.reset_data_processing()
-
-    def close(self) -> None:
-        """Closes the Quantum machine manager"""
-        warnings.warn(
-            deprecation_message("QuantumMachineManager.close()", "1.1.0", "1.2.0", "close will be removed."),
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
-        pass
 
     def open_qm(
         self,
@@ -301,6 +298,9 @@ class QuantumMachinesManager:
             validate_with_protobuf (bool): Validates config with
                 protobuf instead of marshmallow. It is usually faster
                 when working with large configs. Defaults to False.
+            add_calibration_elements_to_config: Automatically adds config entries to allow Octave calibration.
+            use_calibration_data: Automatically load updated calibration data from calibration database into the config.
+            keep_dc_offsets_when_closing: Available in QOP 2.4.2 - When closing the QM, do not change the DC offsets.
 
         Returns:
             A quantum machine obj that can be used to execute programs
@@ -384,8 +384,8 @@ class QuantumMachinesManager:
         warnings.warn(
             deprecation_message(
                 "qmm.open_qm_from_file",
-                "1.1.8",
                 "1.2.0",
+                "1.3.0",
                 "This method is going to be removed.",
             ),
             DeprecationWarning,
@@ -474,8 +474,8 @@ class QuantumMachinesManager:
         warnings.warn(
             deprecation_message(
                 "qmm.list_open_quantum_machines",
-                "1.1.8",
                 "1.2.0",
+                "1.4.0",
                 "This method was renamed to `qmm.list_open_qms()`",
             )
         )
@@ -508,9 +508,13 @@ class QuantumMachinesManager:
 
     def get_job_result_handles(self, job_id: str) -> StreamingResultFetcher:
         """
+        -- Available in QOP 2.x --
+
         Returns the result handles for a job.
-        :param job_id: The job id
-        :return: The handles that this job generated
+        Args:
+            job_id: The job id
+        Returns:
+            The handles that this job generated
         """
         if self._api is not None:
             raise NotImplementedError(
@@ -535,8 +539,8 @@ class QuantumMachinesManager:
         warnings.warn(
             deprecation_message(
                 "qmm.close_all_quantum_machines",
-                "1.1.8",
                 "1.2.0",
+                "1.4.0",
                 "This function is going to change its name to `qmm.close_all_qms()`",
             ),
             category=DeprecationWarning,
@@ -550,8 +554,8 @@ class QuantumMachinesManager:
             warnings.warn(
                 deprecation_message(
                     "get_controllers",
-                    "1.1.8",
                     "1.2.0",
+                    "1.3.0",
                     "This will have a different return type",
                 ),
                 category=DeprecationWarning,
@@ -585,8 +589,8 @@ class QuantumMachinesManager:
             warnings.warn(
                 deprecation_message(
                     "clear_all_job_results",
-                    "1.1.8",
                     "1.2.0",
+                    "1.3.0",
                     "This method is going to be removed.",
                 ),
                 category=DeprecationWarning,
@@ -604,6 +608,20 @@ class QuantumMachinesManager:
         description: str = "",
         status: Iterable[JobStatus] = tuple(),
     ) -> List[JobData]:
+        """
+        -- Available in QOP 3.x --
+
+        Get jobs based on filtering criteria. All fields are optional.
+
+        Args:
+            qm_ids: A list of qm ids
+            job_ids: A list of jobs ids
+            user_ids: A list of user ids
+            description: Jobs' description
+            status: A list of job statuses
+        Returns:
+            A list of jobs
+        """
         if self._api is None:
             raise NotImplementedError("This method is not available in the current QOP version")
         return self._api.get_jobs(
@@ -611,6 +629,16 @@ class QuantumMachinesManager:
         )
 
     def get_job(self, job_id: str) -> JobApi:
+        """
+        -- Available in QOP 3.x --
+
+        Get a job based on the job_id.
+
+        Args:
+            job_id: A list of jobs ids
+        Returns:
+            The job
+        """
         if self._api is None:
             raise NotImplementedError("This method is not available in the current QOP version")
         return self._api.get_job(job_id)

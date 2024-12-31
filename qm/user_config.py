@@ -20,6 +20,7 @@ class UserConfigType(TypedDict, total=False):
     upload_logs: bool
     datadog_token: str
     organization: str
+    octave_calibration_db_path: Optional[str]
 
 
 @dataclass
@@ -35,6 +36,7 @@ class UserConfig:
     upload_logs: bool = field(default=False)
     datadog_token: str = field(default="")
     organization: str = field(default="Unknown")
+    octave_calibration_db_path: Optional[str] = field(default=None)
 
     @property
     def manager_port(self) -> Optional[int]:

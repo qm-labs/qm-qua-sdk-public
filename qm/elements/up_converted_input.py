@@ -53,8 +53,9 @@ class UpconvertedInput(MixInputs):
         """
         Sets the LO frequency of the synthesizer associated to element
 
-        :param lo_frequency:
-        :param set_source:
+        Args:
+            lo_frequency:
+            set_source:
         """
         # if self.lo_source != OctaveLOSource.Internal and self.lo_source not in self._client._port_mapping:
         #     raise SetFrequencyException(f"Cannot set frequency to an external lo source {self.lo_source.name}")
@@ -75,7 +76,8 @@ class UpconvertedInput(MixInputs):
         """
         Allow using the 10dB attenuators in front of the up converter IQ ports (or not).
 
-        :param use_input_attenuators: False means: never use the attenuators. True means: used it based on the desired gain.
+        Args:
+            use_input_attenuators: False means: never use the attenuators. True means: used it based on the desired gain.
         """
         self._use_input_attenuators = use_input_attenuators
         if self._gain is not None:
@@ -86,7 +88,8 @@ class UpconvertedInput(MixInputs):
     def set_lo_source(self, lo_port: OctaveLOSource) -> None:
         """
         Sets the source of LO going to the upconverter associated with element.
-        :param lo_port:
+        Args:
+            lo_port:
         """
         self._client.set_lo_source(lo_port, ignore_shared_errors=True)
 
@@ -99,7 +102,8 @@ class UpconvertedInput(MixInputs):
         When in 'always_on' the switch will be permanently on. When in 'always_off' mode the switch will
         be permanently off.
 
-        :param switch_mode:
+        Args:
+            switch_mode:
         """
         self._client.set_output(switch_mode)
 
@@ -111,7 +115,8 @@ class UpconvertedInput(MixInputs):
         for example, an IF signal coming from the OPX at max power (4dBm) will be
         upconverted and come out of Octave at -20dBm
 
-        :param gain_in_db:
+        Args:
+            gain_in_db:
         """
         # a. use value custom set in qm.octave.update_external
         # b. use value from config

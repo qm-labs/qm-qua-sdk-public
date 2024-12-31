@@ -1,9 +1,10 @@
 import logging
-import zipfile
-from collections.abc import Mapping
-from typing import Dict, List, Tuple, Union, BinaryIO, KeysView, Optional, Generator, ItemsView, ValuesView, cast
+import warnings
+from typing_extensions import Mapping  # Mapping in 3.8 does not support class indexing
+from typing import Dict, List, Tuple, Union, TypeVar, KeysView, Optional, Generator, ItemsView, ValuesView
 
 from qm.persistence import BaseStore
+from qm.utils import deprecation_message
 from qm.api.v2.job_result_api import JobResultApi
 from qm.api.job_result_api import JobResultServiceApi
 from qm.api.models.capabilities import ServerCapabilities
@@ -21,7 +22,10 @@ from qm.results.base_streaming_result_fetcher import (
 logger = logging.getLogger(__name__)
 
 
-class StreamingResultFetcher(Mapping):
+_T = TypeVar("_T")
+
+
+class StreamingResultFetcher(Mapping[str, Optional[BaseStreamingResultFetcher]]):
     """Access to the results of a QmJob
 
     This object is created by calling [QmJob.result_handles][qm.jobs.running_qm_job.RunningQmJob.result_handles]
@@ -56,14 +60,13 @@ class StreamingResultFetcher(Mapping):
         self._job_id = job_id
         self._service = service
         self._store = store
-        self._schema = JobResultSchema({})
+        self._schema = StreamingResultFetcher._load_schema(self._service)
         self._capabilities = capabilities
 
-        self._all_results: Dict[str, BaseStreamingResultFetcher] = {}
-        self._add_job_results()
+        self._all_results = self._get_job_results()
 
-    def _add_job_results(self) -> None:
-        self._schema = StreamingResultFetcher._load_schema(self._service)
+    def _get_job_results(self) -> Dict[str, BaseStreamingResultFetcher]:
+        _all_results = {}
         stream_metadata_errors, stream_metadata_dict = self._get_stream_metadata()
         for name, item_schema in self._schema.items.items():
             stream_metadata = stream_metadata_dict.get(name)
@@ -87,7 +90,8 @@ class StreamingResultFetcher(Mapping):
                     stream_metadata=stream_metadata,
                     capabilities=self._capabilities,
                 )
-            self._all_results[name] = result
+            _all_results[name] = result
+        return _all_results
 
     def __len__(self) -> int:
         return len(self._all_results)
@@ -105,7 +109,21 @@ class StreamingResultFetcher(Mapping):
     def _get_stream_metadata(self) -> Tuple[List[StreamMetadataError], Dict[str, StreamMetadata]]:
         return self._service.get_program_metadata()
 
-    def __iter__(self) -> Generator[Tuple[str, Optional[BaseStreamingResultFetcher]], None, None]:
+    def __iter__(self) -> Generator[Tuple[str, Optional[BaseStreamingResultFetcher]], None, None]:  # type: ignore[override]
+        warnings.warn(
+            deprecation_message(
+                method="streaming_result_fetcher.__iter__",
+                deprecated_in="1.2.0",
+                removed_in="1.4.0",
+                details="This function is going to change its API to be similar to this of a dictionary, "
+                "Use `iterate_results` for the old API.",
+            ),
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.iterate_results()
+
+    def iterate_results(self) -> Generator[Tuple[str, Optional[BaseStreamingResultFetcher]], None, None]:
         for item in self._schema.items.values():
             yield item.name, self.get(item.name)
 
@@ -136,37 +154,6 @@ class StreamingResultFetcher(Mapping):
         key = list(self._all_results.keys())[0]
         return self._all_results[key].is_processing()
 
-    def save_to_store(
-        self,
-        writer: Optional[BinaryIO] = None,
-        flat_struct: bool = False,
-    ) -> None:
-        """Save all results to store (file system by default) in a single NPZ file
-
-        Args:
-            writer: An optional writer to be used instead of the pre-populated
-            store passed to [qm.quantum_machines_manager.QuantumMachinesManager][]
-            flat_struct: results will have a flat structure - dimensions
-                will be part of the shape and not of the type
-
-        """
-        own_writer = False
-        if writer is None:
-            own_writer = True
-            writer = self._store.all_job_results(self._job_id).for_writing()
-        zipf = None
-        try:
-            zipf = zipfile.ZipFile(writer, allowZip64=True, mode="w", compression=zipfile.ZIP_DEFLATED)
-            for name, result in self:
-                if result is not None:
-                    with zipf.open(f"{name}.npy", "w") as entry:
-                        result.save_to_store(cast(BinaryIO, entry), flat_struct)
-        finally:
-            if zipf is not None:
-                zipf.close()
-            if own_writer:
-                writer.close()
-
     @staticmethod
     def _load_schema(service: Union[JobResultServiceApi, JobResultApi]) -> JobResultSchema:
         response = service.get_job_result_schema()
@@ -183,11 +170,14 @@ class StreamingResultFetcher(Mapping):
             }
         )
 
-    def get(self, name: str, /) -> Optional[BaseStreamingResultFetcher]:
+    def get(
+        self, name: str, /, default: Optional[Union[BaseStreamingResultFetcher, _T]] = None
+    ) -> Optional[Union[BaseStreamingResultFetcher, _T]]:
         """Get a handle to a named result from [stream_processing][qm.qua._dsl.stream_processing]
 
         Args:
             name: The named result using in [stream_processing][qm.qua._dsl.stream_processing]
+            default: The default value to return if the named result is unknown
 
 
         Returns:

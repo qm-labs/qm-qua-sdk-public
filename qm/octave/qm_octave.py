@@ -214,7 +214,7 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
 
         Args:
             element (str): The name of the element
-            use_iq_attenuators (bool): True to use IQ attenuators, False otherwise
+            use_input_attenuators (bool): True to use IQ attenuators, False otherwise
         """
         input_inst = self._get_upconverted_input(element)
         input_inst.set_use_input_attenuators(use_input_attenuators)
@@ -234,16 +234,11 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
 
         - If close_open_quantum_machines is set to True one must open a new quantum machine after calibration ends
         Args:
-            close_open_quantum_machines (bool): If true (default) all
-                running QMs will be closed for the calibration.
-                Otherwise, calibration might fail if there are not
-                enough resources for the calibration
             element (str): The name of the element for calibration
             lo_if_frequencies_tuple_list (list): a list of tuples that
                 consists of all the (LO,IF) pairs for calibration
             save_to_db (boolean): If true (default), The calibration
                 parameters will be saved to the calibration database
-        Calibrate the mixer associated with an element for the given LO & IF frequencies.
         """
         warnings.warn(
             "Calibrate element was moved to the QuantumMachine instance, please use it from there", DeprecationWarning
@@ -393,8 +388,8 @@ def create_dc_offset_octave_update(qe_input: UpconvertedInput, i_offset: float, 
     con_i, fem_i, port_i = qe_input.i_port.controller, qe_input.i_port.fem, qe_input.i_port.number
     con_q, fem_q, port_q = qe_input.q_port.controller, qe_input.q_port.fem, qe_input.q_port.number
     controllers: Dict[str, OPX1000ControllerConfigType] = {con_i: {"fems": {}}, con_q: {"fems": {}}}
-    controllers[con_i]["fems"][fem_i] = {"analog_outputs": {}}  # type: ignore[index]
-    controllers[con_q]["fems"][fem_q] = {"analog_outputs": {}}  # type: ignore[index]
+    controllers[con_i]["fems"][fem_i] = {"analog_outputs": {}, "type": "LF"}  # type: ignore[index]
+    controllers[con_q]["fems"][fem_q] = {"analog_outputs": {}, "type": "LF"}  # type: ignore[index]
     controllers[con_i]["fems"][fem_i]["analog_outputs"][port_i] = {"offset": i_offset}  # type: ignore[index]
     controllers[con_q]["fems"][fem_q]["analog_outputs"][port_q] = {"offset": q_offset}  # type: ignore[index]
     update: DictQuaConfig = {"version": 1, "controllers": controllers}

@@ -64,7 +64,7 @@ from qm.qua import (
     measure,
     program,
     dual_demod,
-    reset_phase,
+    reset_if_phase,
     update_correction,
 )
 
@@ -210,9 +210,9 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         def read_lo_and_image_power() -> None:
             align()
 
-            reset_phase(elements_names.iq_mixer)
-            reset_phase(elements_names.lo_analyzer)
-            reset_phase(elements_names.image_analyzer)
+            reset_if_phase(elements_names.iq_mixer)
+            reset_if_phase(elements_names.lo_analyzer)
+            reset_if_phase(elements_names.image_analyzer)
 
             play("DC_offset" * amp(i0_curr), elements_names.i_offset)
             play("DC_offset" * amp(q0_curr), elements_names.q_offset)
@@ -648,7 +648,6 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         octave_port = element_input.port
 
         port_idx = octave_port[1]
-
         self._names = CalibrationElementsNames(self._low_level_client.octave_name, port_idx)
 
         restore_params = self._set_octave_for_calibration(port_idx, params, element_input)

@@ -4,7 +4,6 @@ from typing import List, Type, Tuple, Union, Literal, Mapping, Iterable, Optiona
 from qm.utils import LOG_LEVEL_MAP
 from qm.octave import QmOctaveConfig
 from qm.persistence import BaseStore
-from qm.api.v2.job_api import JobStatus
 from qm.grpc.qua_config import QuaConfig
 from qm.utils.async_utils import run_async
 from qm.api.v2.base_api_v2 import BaseApiV2
@@ -21,7 +20,7 @@ from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.api.simulation_api import create_simulation_request
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.elements.up_converted_input import UpconvertedInputNewApi
-from qm.api.v2.job_api.job_api import JobApi, JobData, transfer_statuses_to_enum
+from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, transfer_statuses_to_enum
 from qm.exceptions import QopResponseError, CompilationException, FailedToExecuteJobException
 from qm.octave.qm_octave import QmOctaveForNewApi, create_mixer_correction, create_dc_offset_octave_update
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params, get_request_compiler_options
@@ -92,6 +91,14 @@ class QmApi(BaseApiV2[QmServiceStub]):
         return QmServiceStub
 
     def update_config(self, config: DictQuaConfig) -> None:
+        """Updates the physical config in the QM.
+        The physical config includes the "controllers", "octaves" & "mixers" sections.
+        Updating the config will only update future jobs that were not executed or compiled yet.
+        It will also update the idle values (e.g. DC Offset) which will be active between programs.
+
+        Args:
+            config: The physical config
+        """
         config_pb = load_config(config)
         request = UpdateConfigRequest(quantum_machine_id=self._id, config=config_pb)
         run_async(self._stub.update_config(request, timeout=self._timeout))
@@ -103,6 +110,17 @@ class QmApi(BaseApiV2[QmServiceStub]):
         description: str = "",
         status: Union[JobStatus, Iterable[JobStatus]] = tuple(),
     ) -> List[JobData]:
+        """
+        Get jobs based on filtering criteria. All fields are optional.
+
+        Args:
+            job_ids: A list of jobs ids
+            user_ids: A list of user ids
+            description: Jobs' description
+            status: A list of job statuses
+        Returns:
+            A list of jobs
+        """
         query_params = JobsQueryParams(
             quantum_machine_ids=[self._id],
             job_ids=list(job_ids),
@@ -120,9 +138,32 @@ class QmApi(BaseApiV2[QmServiceStub]):
         return response.config
 
     def get_config(self) -> DictQuaConfig:
+        """Gets the current config of the qm
+
+        Returns:
+            A dictionary with the QMs config
+        """
         return convert_msg_to_config(self._get_pb_config())
 
     def compile(self, program: Program, compiler_options: Optional[CompilerOptionArguments] = None) -> str:
+        """Compiles a QUA program to be executed later. The returned `program_id`
+        can then be directly added to the queue. For a detailed explanation
+        see [Precompile Jobs](../Guides/features.md#precompile-jobs).
+
+        Args:
+            program: A QUA program
+            compiler_options: Optional arguments for compilation
+
+        Returns:
+            a program_id str
+
+        Example:
+            ```python
+            program_id = qm.compile(program)
+            job = qm.add_to_queue(program_id)
+            job.wait_until("running")
+            ```
+        """
         if compiler_options is None:
             compiler_options = CompilerOptionArguments()
         program.qua_program.compiler_options = get_request_compiler_options(compiler_options)
@@ -178,6 +219,16 @@ class QmApi(BaseApiV2[QmServiceStub]):
     def add_to_queue(
         self, program: Union[Program, str], *, compiler_options: Optional[CompilerOptionArguments] = None
     ) -> JobApi:
+        """
+        Adds a QmJob to the queue.
+        Programs in the queue will play as soon as possible.
+
+        Args:
+            program: A QUA program or a compiled program id
+            compiler_options: Optional arguments for compilation
+        Returns:
+            A job object
+        """
         logger.info("Adding program to queue.")
         if isinstance(program, str):
             if compiler_options:
@@ -190,6 +241,14 @@ class QmApi(BaseApiV2[QmServiceStub]):
             return self._add_program(program)
 
     def get_job(self, job_id: str) -> JobApi:
+        """
+        Get a job based on the job_id.
+
+        Args:
+            job_id: A list of jobs ids
+        Returns:
+            The job
+        """
         return self._get_job(job_id, self._store)
 
     def _get_job(self, job_id: str, store: BaseStore) -> JobApi:
@@ -209,6 +268,22 @@ class QmApi(BaseApiV2[QmServiceStub]):
         strict: Optional[bool] = None,
         flags: Optional[List[str]] = None,
     ) -> SimulatedJobApi:
+        """Simulates the outputs of a deterministic QUA program.
+
+        Equivalent to ``execute()`` with ``simulate=SimulationConfig`` (see example).
+
+        Note:
+            A simulated job does not support calling QuantumMachine API functions.
+
+        Args:
+            program: A QUA ``program()`` object to execute
+            simulate: If given, will be simulated instead of executed.
+            compiler_options: Optional arguments for compilation.
+            strict: This parameter is deprecated, please use `compiler_options`
+            flags: This parameter is deprecated, please use `compiler_options`
+        Returns:
+            A ``QmJob`` object (see QM Job API).
+        """
         standardized_compiler_options = standardize_compiler_params(compiler_options, strict, flags)
         standard_request = create_simulation_request(
             self._get_pb_config(), program, simulate, standardized_compiler_options
@@ -230,7 +305,22 @@ class QmApi(BaseApiV2[QmServiceStub]):
         return self._get_simulated_job(response.job_id, response.simulated)
 
     def execute(self, program: Program, *, compiler_options: Optional[CompilerOptionArguments] = None) -> JobApi:
-        return self.add_to_queue(program, compiler_options=compiler_options)
+        """Closes all running jobs in the QM, clears the queue, executes a program, wait for it to start,
+        and returns a job object.
+
+        Note:
+
+            Calling execute will halt any currently running program and clear the current
+            queue. If you want to add a job to the queue, use qm.queue.add()
+
+        Args:
+            program: A QUA ``program()`` object to execute
+            compiler_options: Optional arguments for compilation.
+        Returns:
+            A ``QmJob`` object (see QM Job API).
+        """
+        # todo: change to an API call that stops programs, clears queue, executes, and returns job once it's running
+        raise NotImplementedError()
 
     def clear_queue(
         self,
@@ -238,7 +328,18 @@ class QmApi(BaseApiV2[QmServiceStub]):
         user_ids: Iterable[str] = tuple(),
         description: str = "",
         status: Union[JobStatus, Iterable[JobStatus]] = tuple(),
-    ) -> int:
+    ) -> List[str]:
+        """
+        Clears jobs from the queue based on filtering criteria. All fields are optional.
+
+        Args:
+            job_ids: A list of jobs ids
+            user_ids: A list of user ids
+            description: Jobs' description
+            status: A list of job statuses
+        Returns:
+            A list of the removed jobs ids
+        """
         query_params = JobsQueryParams(
             quantum_machine_ids=[self._id],
             job_ids=list(job_ids),
@@ -247,12 +348,21 @@ class QmApi(BaseApiV2[QmServiceStub]):
             status=transfer_statuses_to_enum(status),
         )
         response = self._run(self._stub.remove_jobs(RemoveJobsRequest(query_params), timeout=self._timeout))
-        return len(response.removed_job_ids)
+        return response.removed_job_ids
 
     def close(self) -> None:
+        """
+        Closes the quantum machine.
+        """
         self._run(self._stub.close(QmServiceCloseRequest(quantum_machine_id=self._id), timeout=self._timeout))
 
     def get_queue_count(self) -> int:
+        """
+        Get the number of jobs currently on the queue
+
+        Returns:
+            The number of jobs in the queue
+        """
         jobs = self.get_jobs(status=["In queue"])
         return len(jobs)
 
@@ -263,6 +373,21 @@ class QmApi(BaseApiV2[QmServiceStub]):
         save_to_db: bool = True,
         params: Optional[AutoCalibrationParams] = None,
     ) -> MixerCalibrationResults:
+        """Calibrate the up converters associated with a given element for the given LO & IF frequencies.
+
+        - Frequencies can be given as a dictionary with LO frequency as the key and a list of IF frequencies for every LO
+        - If no frequencies are given calibration will occur according to LO & IF declared in the element
+        - The function need to be run for each element separately
+        - The results are saved to a database for later use
+
+        Args:
+            qe (str): The name of the element for calibration
+            lo_if_dict ([Mapping[float, Tuple[float, ...]]]): a dictionary with LO frequency as the key and
+                a list of IF frequencies for every LO
+            save_to_db (bool): If true (default), The calibration
+                parameters will be saved to the calibration database
+            params: Optional calibration parameters
+        """
 
         inst = self._elements[qe]
 

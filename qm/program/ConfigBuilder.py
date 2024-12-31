@@ -285,6 +285,7 @@ def _convert_mw_analog_outputs(
             "band": cast(Literal[1, 2, 3], output.band),
             "delay": output.delay,
             "shareable": output.shareable,
+            "upconverters": {k: {"frequency": v.frequency} for k, v in output.upconverters.items()},
         }
         for idx, output in outputs.items()
     }
@@ -299,6 +300,7 @@ def _convert_mw_analog_inputs(
             "shareable": _input.shareable,
             "gain_db": _input.gain_db,
             "sampling_rate": _input.sampling_rate,
+            "downconverter_frequency": _input.downconverter.frequency,
         }
         for idx, _input in inputs.items()
     }
@@ -455,14 +457,13 @@ def _convert_sticky(sticky: QuaConfigSticky) -> StickyConfigType:
 def _convert_element_mw_input(data: QuaConfigMicrowaveInputPortReference) -> MwInputConfigType:
     return {
         "port": _port_reference(data.port),
-        "oscillator_frequency": data.oscillator_frequency_hz,
+        "upconverter": data.upconverter,
     }
 
 
 def _convert_element_mw_output(data: QuaConfigMicrowaveOutputPortReference) -> MwOutputConfigType:
     return {
         "port": _port_reference(data.port),
-        "oscillator_frequency": data.oscillator_frequency_hz,
     }
 
 
@@ -521,6 +522,8 @@ def _convert_controller_analog_inputs(
             "gain_db": data.gain_db if data.gain_db is not None else 0,
             "shareable": data.shareable,
         }
+        if data.sampling_rate is not None:
+            port_info["sampling_rate"] = data.sampling_rate
         ret[idx] = port_info
     return ret
 

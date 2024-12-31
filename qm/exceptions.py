@@ -202,6 +202,10 @@ class OctaveLoopbackError(OctaveConnectionError):
         super().__init__("lo loopback between different octave devices are not supported.")
 
 
+class NoOutputPortDeclared(OctaveConnectionError):
+    pass
+
+
 class OctaveCableSwapError(OctaveConnectionError):
     def __init__(self) -> None:
         super().__init__("Cable swap detected. Please check your connections.")

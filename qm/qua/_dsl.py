@@ -1,4 +1,5 @@
 import logging
+import warnings
 import dataclasses
 import math as _math
 from enum import Enum
@@ -23,7 +24,7 @@ from qm.program.StatementsCollection import PortConditionedStatementsCollection
 from qm.qua.DigitalMeasureProcess import RawTimeTagging as DigitalRawTimeTagging
 from qm.qua.DigitalMeasureProcess import Counting as DigitalMeasureProcessCounting
 from qm.program.StatementsCollection import StatementsCollection as _StatementsCollection
-from qm.utils import collection_has_type_int, collection_has_type_bool, collection_has_type_float
+from qm.utils import deprecation_message, collection_has_type_int, collection_has_type_bool, collection_has_type_float
 from qm.qua._dsl_specific_type_hints import (
     ChirpType,
     AmpValuesType,
@@ -113,8 +114,7 @@ def program():
     and to different elements will be played in parallel.
     An exception is that pulses will be implicitly aligned at the end of each [`for_`][qm.qua._dsl.for_] loop iteration.
 
-    The generated ``program_name`` object is used as an input to the execute function of a
-    [qm.QuantumMachine][] object.
+    The generated ``program_name`` object is used as an input to the execution or compilation functions.
 
     Example:
         ```python
@@ -122,10 +122,10 @@ def program():
             play('pulse1', 'element1')
             wait('element1')
 
+        qmm = QuantumMachinesManager(...)
+        qm = qmm.open_qm(...)
         qm.execute(program_name)
         ```
-
-    where ``qm`` is an instance of a [qm.QuantumMachine][]
     """
     return _ProgramScope(Program())
 
@@ -173,27 +173,27 @@ def play(
             will play only up to the given time in units of the clock
             cycle (4ns).
         condition (A logical expression to evaluate.): Will play the operation only if the condition is true.
-        Prior to QOP 2.2, only the analog part was conditioned, i.e., any digital pulses associated
-        with the operation would always play.
+            Prior to QOP 2.2, only the analog part was conditioned, i.e., any digital pulses associated
+            with the operation would always play.
         timestamp_stream (Union[str, _ResultSource]): (Supported from
             QOP 2.2) Adding a `timestamp_stream` argument will save the
             time at which the operation occurred to a stream. If the
             `timestamp_stream` is a string ``label``, then the timestamp
             handle can be retrieved with
-            [`qm._results.JobResults.get`][qm.results.streaming_result_fetcher.StreamingResultFetcher] with the same
+            [`JobResults.get`][qm.results.streaming_result_fetcher.StreamingResultFetcher.get] with the same
             ``label``.
 
     Note:
         Arbitrary waveforms cannot be compressed and can only be expanded up to
         $2^{24}-1$ clock cycles (67ms). Unexpected output will occur if a duration
         outside the range is given.
-        See [Dynamic pulse duration](../../../Guides/features/#dynamic-pulse-duration)
+        See [Dynamic pulse duration](../../Guides/features.md#dynamic-pulse-duration)
         in the documentation for further information.
 
     Note:
         When using chirp, it is possible to add a flag "continue_chirp=True" to the play command.
         When this flag is set, the internal oscillator will continue the chirp even after the play command had ended.
-        See the `chirp documentation [chirp documentation](../../../Guides/features/#frequency-chirp)
+        See the `chirp documentation [chirp documentation](../../Guides/features.md#frequency-chirp)
         for more information.
 
     Example:
@@ -305,7 +305,7 @@ def update_frequency(
     This changes the frequency from the value defined in the quantum machine configuration.
 
     The behavior of the phase (continuous vs. coherent) is controlled by the ``keep_phase`` parameter and
-    is discussed in [the documentation](../../../Introduction/qua_overview/#frequency-and-phase-transformations).
+    is discussed in [the documentation](../../Introduction/qua_overview.md#frequency-and-phase-transformations).
 
     Args:
         element (str): The element associated with the oscillator whose
@@ -316,8 +316,8 @@ def update_frequency(
             precision is required. Allowed units are "Hz", "mHz", "uHz",
             "nHz", "pHz"
         keep_phase (bool): Determine whether phase will be continuous
-            through the change (if ``True``) or it will be coherent,
-            only the frequency will change (if ``False``).
+            through the change (if `True`) or it will be coherent,
+            only the frequency will change (if `False`).
 
     Example:
         ```python
@@ -422,7 +422,7 @@ def measure(
         including Demodulation, Integration and Time Tagging.
 
     For a more detailed description of the measurement operation, see
-    [Measure Statement Features](../../../Guides/features#measure-statement-features)
+    [Measure Statement Features](../../Guides/features.md#measure-statement-features)
 
     Args:
         pulse (str): The name of an `operation` to be performed, as
@@ -549,6 +549,20 @@ def align(*elements: str):
 
 
 def reset_phase(element: str):
+    warnings.warn(
+        deprecation_message(
+            method="reset_phase",
+            deprecated_in="1.2.2",
+            removed_in="1.4.0",
+            details="reset_if_phase instead.",
+        ),
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    reset_if_phase(element)
+
+
+def reset_if_phase(element: str) -> None:
     r"""
     Resets the phase of the oscillator associated with `element`,
     setting the phase of the next pulse to absolute zero.
@@ -564,7 +578,15 @@ def reset_phase(element: str):
         element: an element
     """
     body = _get_scope_as_blocks_body()
-    body.reset_phase(element)
+    body.reset_if_phase(element)
+
+
+def reset_global_phase() -> None:
+    """
+    Resets global phase of all the elements in the program (IF, and DUC if exists).
+    """
+    body = _get_scope_as_blocks_body()
+    body.reset_global_phase()
 
 
 def ramp_to_zero(element: str, duration: Optional[QuaNumberType] = None):
@@ -641,7 +663,7 @@ def wait_for_trigger(
         In the OPX+ and with the OPD - The maximum allowed voltage is 3.3V.
 
     Note:
-        Read more about triggering with the OPD [here](../../../Hardware/dib/#wait-for-trigger)
+        Read more about triggering with the OPD [here](../../Hardware/dib.md#wait-for-trigger)
     """
     body = _get_scope_as_blocks_body()
     if time_tag_target is not None:
@@ -651,7 +673,7 @@ def wait_for_trigger(
 
 def save(var: AllQuaTypes, stream_or_tag: Union[str, "_ResultStream"]):
     """Stream a QUA variable, a QUA array cell, or a constant scalar.
-    the variable is streamed and not immediately saved (see [Stream processing](../../../Guides/stream_proc#stream-processing)).
+    the variable is streamed and not immediately saved (see [Stream processing](../../Guides/stream_proc.md#stream-processing)).
     In case ``result_or_tag`` is a string, the data will be immediately saved to a result handle under the same name.
 
     If result variable is used, it can be used in results analysis scope see [stream_processing][qm.qua._dsl.stream_processing]
@@ -1393,7 +1415,7 @@ def declare(
             ``fixed``
                 a signed 4.28 fixed point number
             ``bool``
-                either ``True`` or ``False``
+                either `True` or `False`
         value: An initial value for the variable or a list of initial
             values for a vector
         size: If declaring a vector without explicitly specifying a
@@ -1427,10 +1449,10 @@ def declare_input_stream(t: VariableDeclarationType, name: str, **kwargs) -> Qua
 
     Declaration is performed by declaring a python variable with the return value of this function.
 
-    Declaration is similar to the normal QUA variable declaration. See [declare](qm.qua._dsl.declare) for available
+    Declaration is similar to the normal QUA variable declaration. See [qm.qua._dsl.declare][] for available
     parameters.
 
-    See [Input streams](../../../Guides/features/#input-streams) for more information.
+    See [Input streams](../../Guides/features.md#input-streams) for more information.
 
     -- Available from QOP 2.0 --
 
@@ -1453,7 +1475,7 @@ def advance_input_stream(input_stream: QuaExpressionType):
 
     The variable/vector can then be used as a normal QUA variable.
 
-    See [Input streams](../../../Guides/features/#input-streams) for more information.
+    See [Input streams](../../Guides/features.md#input-streams) for more information.
 
     -- Available from QOP 2.0 --
     """
@@ -1564,7 +1586,7 @@ def amp(
 
     Note that scaling in this manner, rather than in the configuration, might result
     in a computational overhead.
-    See [QUA Best Practice Guide](../../../Guides/best_practices/#general) for more information.
+    See [QUA Best Practice Guide](../../Guides/best_practices.md#general) for more information.
 
     Args:
         v1: If only this variable is given, it is the scaler amplitude
@@ -1732,7 +1754,7 @@ class _SwitchScope(_BaseScope):
 def strict_timing_() -> _BodyScope:
     """Any QUA command written within the strict timing block will be required to play without gaps.
 
-    See [the documentation](../../../Guides/timing_in_qua/#strict-timing) for further information and examples.
+    See [the documentation](../../Guides/timing_in_qua.md#strict-timing) for further information and examples.
 
     To be used with a context manager.
 
@@ -2048,7 +2070,7 @@ class RealAccumulationMethod(AccumulationMethod):
         return object.__new__(cls)
 
     def full(self, iw: str, target: QuaVariableType, element_output: str = ""):
-        """Perform an ordinary demodulation/integration. See [Full demodulation](../../../Guides/features/#full-demodulation).
+        """Perform an ordinary demodulation/integration. See [Full demodulation](../../Guides/features.md#full-demodulation).
 
         Args:
             iw (str): integration weights
@@ -2067,7 +2089,7 @@ class RealAccumulationMethod(AccumulationMethod):
         element_output: str = "",
     ):
         """Perform a demodulation/integration in which the demodulation/integration process is split into chunks
-        and the value of each chunk is saved in an array cell. See [Sliced demodulation](../../../Guides/features/#sliced-demodulation).
+        and the value of each chunk is saved in an array cell. See [Sliced demodulation](../../Guides/features.md#sliced-demodulation).
 
         Args:
             iw (str): integration weights
@@ -2087,7 +2109,7 @@ class RealAccumulationMethod(AccumulationMethod):
         element_output: str = "",
     ):
         """Same as ``sliced()``, however the accumulated result of the demodulation/integration
-        is saved in each array cell. See [Accumulated demodulation](../../../Guides/features/#accumulated-demodulation).
+        is saved in each array cell. See [Accumulated demodulation](../../Guides/features.md#accumulated-demodulation).
 
         Args:
             iw (str): integration weights
@@ -2113,7 +2135,7 @@ class RealAccumulationMethod(AccumulationMethod):
         element_output: str = "",
     ):
         """Same as ``sliced()``, however the several chunks are accumulated and saved to each array cell.
-        See [Moving window demodulation](../../../Guides/features/#moving-window-demodulation).
+        See [Moving window demodulation](../../Guides/features.md#moving-window-demodulation).
 
         Args:
             iw (str): integration weights
@@ -2155,6 +2177,16 @@ class DualAccumulationMethod(AccumulationMethod):
         iw2: str,
         target: QuaVariableType,
     ):
+        """Perform an ordinary dual demodulation/integration. See [Dual demodulation](../../Guides/demod.md#dual-demodulation).
+
+        Args:
+            iw1 (str): integration weights to be applied to
+                the I quadrature (or 'out1')
+            iw2 (str): integration weights to be applied to
+                the Q quadrature (or 'out2')
+            target (QUA variable): variable to which demod result is
+                saved
+        """
         pass
 
     @overload
@@ -2166,10 +2198,7 @@ class DualAccumulationMethod(AccumulationMethod):
         element_output2: str,
         target: QuaVariableType,
     ):
-        pass
-
-    def full(self, *args, **kwargs):
-        """Perform an ordinary dual demodulation/integration. See [Dual demodulation](../../../Guides/demod/#dual-demodulation).
+        """Perform an ordinary dual demodulation/integration. See [Dual demodulation](../../Guides/demod.md#dual-demodulation).
 
         Args:
             iw1 (str): integration weights to be applied to
@@ -2183,6 +2212,9 @@ class DualAccumulationMethod(AccumulationMethod):
             target (QUA variable): variable to which demod result is
                 saved
         """
+        pass
+
+    def full(self, *args, **kwargs):
         if len(args) + len(kwargs) == 3:
             kwargs.update(_make_dict_from_args(args, ["iw1", "iw2", "target"]))
             kwargs["element_output1"] = DEFAULT_OUT1
@@ -2402,7 +2434,7 @@ class TimeTagging:
         targetLen: Optional[QuaNumberType] = None,
         element_output: str = "",
     ):
-        """Performs time tagging. See [Time tagging](../../../Guides/features/#time-tagging).
+        """Performs time tagging. See [Time tagging](../../Guides/features.md#time-tagging).
 
         Args:
             target (QUA array of type int): The QUA array into which the
@@ -2424,7 +2456,7 @@ class TimeTagging:
         element_output: str = "",
     ):
         """Performs time tagging from the attached OPD.
-         See [Time tagging](../../../Guides/features/#time-tagging).
+         See [Time tagging](../../Guides/features.md#time-tagging).
 
         -- Available with the OPD addon --
 
@@ -2447,7 +2479,7 @@ class TimeTagging:
         targetLen: Optional[QuaNumberType] = None,
         element_output: str = "",
     ):
-        """Performs high resolution time tagging. See [Time tagging](../../../Guides/features/#time-tagging).
+        """Performs high resolution time tagging. See [Time tagging](../../Guides/features.md#time-tagging).
 
         -- Available from QOP 2.0 --
 
@@ -2480,7 +2512,7 @@ class Counting:
         max_time: int,
         element_outputs: str = "",
     ):
-        """Performs counting from the attached OPD. See [Time tagging](../../../Guides/features/#time-tagging).
+        """Performs counting from the attached OPD. See [Time tagging](../../Guides/features.md#time-tagging).
 
         -- Available with the OPD addon --
 
@@ -2504,7 +2536,7 @@ counting = Counting()
 
 
 def stream_processing() -> _RAScope:
-    """A context manager for the creation of [Stream processing pipelines](../../../Guides/stream_proc/#overview)
+    """A context manager for the creation of [Stream processing pipelines](../../Guides/stream_proc.md#overview)
 
     Each pipeline defines an analysis process that is applied to every stream item.
     A pipeline must be terminated with a save/save_all terminal, and then can be retrieved with
@@ -2683,7 +2715,8 @@ class _Functions:
         """
         Converts boolean to integer number - 1 for true and 0 for false
 
-        :return: stream object
+        Returns:
+            stream object
         """
         return ["booleancast"]
 
@@ -2887,7 +2920,6 @@ class _ResultStream:
 
     def save_all(self, tag: str):
         """Save all items received in stream.
-        This will add to [qm._results.JobResults][] a [qm._results.SingleNamedJobResult][] object.
 
         Args:
             tag: result name
@@ -2897,7 +2929,6 @@ class _ResultStream:
 
     def save(self, tag: str):
         """Save only the last item received in stream
-        This will add to [qm._results.JobResults][] a [qm._results.MultipleNamedJobResult][] object.
 
         Args:
             tag: result name

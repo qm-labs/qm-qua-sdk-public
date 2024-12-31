@@ -27,10 +27,11 @@ class DownconvertedOutput(ElementOutput):
         Sets the LO source for the downconverters.
         The LO source will be the one associated with the upconversion of element
 
-        :param lo_source:
-        :param lo_frequency:
-        :param if_mode_i:
-        :param if_mode_q:
+        Args:
+            lo_source:
+            lo_frequency:
+            if_mode_i:
+            if_mode_q:
         """
         self._set_downconversion_lo(lo_source, lo_frequency)
         self._set_downconversion_if_mode(if_mode_i, if_mode_q)
@@ -45,8 +46,9 @@ class DownconvertedOutput(ElementOutput):
         If no value is given the LO source will be the one associated with the
         upconversion of element
 
-        :param lo_frequency:
-        :param lo_source:
+        Args:
+            lo_frequency:
+            lo_source:
         """
         self._client.set_lo_source(lo_source, ignore_shared_errors=True)
         self._client.set_rf_source(RFInputRFSource.RF_in)

@@ -69,7 +69,6 @@ class QmQueue(QmQueueBase[QmPendingJob]):
         """
         if compiler_options is None:
             compiler_options = CompilerOptionArguments()
-
         job = self._insert(program, InsertDirection.end, compiler_options)
         return job
 
@@ -78,7 +77,7 @@ class QmQueue(QmQueueBase[QmPendingJob]):
         overriding the values of analog waveforms defined in the program.
         Programs in the queue will play as soon as possible.
         For a detailed explanation see
-        [Precompile Jobs](../../Guides/features/#precompile-jobs).
+        [Precompile Jobs](../Guides/features.md#precompile-jobs).
 
         Args:
             program_id: A QUA program ID returned from the compile

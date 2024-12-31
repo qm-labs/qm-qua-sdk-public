@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Union, BinaryIO, Optional, cast
+from typing import TYPE_CHECKING, List, Union, Optional, cast
 
 import numpy
 
@@ -103,46 +103,3 @@ class MultipleStreamingResultFetcher(BaseStreamingResultFetcher):
                 ]
                 combined = numpy.rec.fromarrays([values_result, timestamps_result], dtype=dtype)
                 return cast(numpy.typing.NDArray[numpy.generic], combined.view(numpy.ndarray).astype(dtype))
-
-    def save_to_store(
-        self,
-        writer: Optional[Union[BinaryIO, str]] = None,
-        flat_struct: bool = False,
-    ) -> int:
-        """Saving to persistent store the NPY data of this result handle
-
-        Args:
-            writer: An optional writer to override the store defined in
-                [QuantumMachinesManager][qm.quantum_machines_manager.QuantumMachinesManager]
-            flat_struct: results will have a flat structure - dimensions will be part of the shape and not of the type
-
-        Returns:
-            The number of items saved
-        """
-        if flat_struct:
-            return super().save_to_store(writer, flat_struct)
-        else:
-            # legacy support - reconstruct the old structure
-            name = self._schema.name
-            timestamps_name = name + TIMESTAMPS_LEGACY_EXT
-            timestamps_result_handle = self.job_results.get(timestamps_name)
-            if timestamps_result_handle is None:
-                return super().save_to_store(writer, flat_struct)
-            else:
-                final_result = self.fetch_all(flat_struct=flat_struct)
-                if final_result is None:
-                    raise QmNoResultsError("Failed to fetch results, please wait until results are ready")
-
-                writer_opened = False
-                if writer is None or isinstance(writer, str):
-                    writer_opened = True
-                    writer = self._open_bytes_writer(writer)
-
-                try:
-                    self._write_header(writer, (len(final_result),), final_result.dtype.descr)
-                    writer.write(final_result.tobytes())
-
-                finally:
-                    if writer_opened:
-                        writer.close()
-                return len(final_result)

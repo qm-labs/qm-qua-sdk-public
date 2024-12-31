@@ -40,6 +40,7 @@ from qm.program._validate_config_schema import (
     validate_timetagging_parameters,
 )
 from qm.program._qua_config_to_pb import (
+    DEFAULT_DUC_IDX,
     IF_OUT1_DEFAULT,
     IF_OUT2_DEFAULT,
     rf_input_to_pb,
@@ -53,6 +54,7 @@ from qm.program._qua_config_to_pb import (
     digital_output_port_to_pb,
     mw_fem_analog_output_to_pb,
     _get_port_reference_with_fem,
+    upconverter_config_dec_to_pb,
     mw_fem_analog_input_port_to_pb,
     validate_inputs_or_outputs_exist,
     set_non_existing_mixers_in_mix_input_elements,
@@ -63,7 +65,9 @@ from qm.program._qua_config_to_pb import (
 from qm.type_hinting.config_types import (
     LoopbackType,
     DictQuaConfig,
+    LfFemConfigType,
     MixerConfigType,
+    MwFemConfigType,
     PulseConfigType,
     StickyConfigType,
     ElementConfigType,
@@ -74,6 +78,7 @@ from qm.type_hinting.config_types import (
     OscillatorConfigType,
     SingleInputConfigType,
     DigitalInputConfigType,
+    MwUpconverterConfigType,
     OctaveRFInputConfigType,
     OctaveRFOutputConfigType,
     AnalogInputPortConfigType,
@@ -128,6 +133,7 @@ from qm.grpc.qua_config import (
     QuaConfigGeneralPortReference,
     QuaConfigIntegrationWeightDec,
     QuaConfigOctaveRfOutputConfig,
+    QuaConfigUpConverterConfigDec,
     QuaConfigDigitalWaveformSample,
     QuaConfigOctaveIfOutputsConfig,
     QuaConfigSingleInputCollection,
@@ -462,6 +468,14 @@ class AnalogOutputPortDefSchema(Schema):
         return item
 
 
+class MwUpconverterSchema(Schema):
+    frequency = fields.Float()
+
+    @post_load(pass_many=False)
+    def build(self, data: MwUpconverterConfigType, **kwargs: Any) -> QuaConfigUpConverterConfigDec:
+        return upconverter_config_dec_to_pb(data)
+
+
 class AnalogOutputPortDefSchemaMwFem(Schema):
     sampling_rate = fields.Number(
         metadata={"description": "Sampling rate of the port, can be 1e9 (default) or 2e9 Hz"},
@@ -483,6 +497,12 @@ class AnalogOutputPortDefSchemaMwFem(Schema):
         dump_default=False,
         metadata={"description": "Whether the port is shareable with other QM instances"},
     )
+    upconverters = fields.Dict(
+        keys=fields.Int(),
+        values=fields.Nested(MwUpconverterSchema),
+        metadata={"description": "A mapping between the upconverters and their frequencies"},
+    )
+    upconverter_frequency = fields.Float(metadata={"description": "A short for using only one upconverter (1)"})
 
     class Meta:
         title = "Analog output port of the MW-FEM"
@@ -499,7 +519,7 @@ class AnalogInputPortDefSchemaMwFem(Schema):
     )
     gain_db = fields.Int(
         strict=True,
-        metadata={"description": "Gain of the pre-ADC amplifier, in dB. Accepts integers in the range: -12 to 20"},
+        metadata={"description": "Gain of the pre-ADC amplifier, in dB. Accepts integers, the range is decided by the device."},
     )
     shareable = fields.Bool(
         dump_default=False,
@@ -508,6 +528,9 @@ class AnalogInputPortDefSchemaMwFem(Schema):
     band = fields.Int(
         required=True,
         metadata={"description": "The frequency band of the oscillator, can be 1, 2 or 3"},
+    )
+    downconverter_frequency = fields.Float(
+        required=True, metadata={"description": "The frequency of the downconverter attached to this port"}
     )
 
     class Meta:
@@ -557,7 +580,7 @@ class AnalogInputPortDefSchema(Schema):
 
     gain_db = fields.Int(
         strict=True,
-        metadata={"description": "Gain of the pre-ADC amplifier, in dB. Accepts integers in the range: -12 to 20"},
+        metadata={"description": "Gain of the pre-ADC amplifier, in dB. Accepts integers, the range is decided by the device."},
     )
 
     shareable = fields.Bool(
@@ -878,12 +901,12 @@ def _append_data_to_controller(data: _SemiBuiltControllerType, controller: Contr
     return controller
 
 
-class OctoDacControllerSchema(Schema):
-    type = fields.String(
-        description="controller type",
-        validate=validate.Equal("LF", error=FEM_NAME_ERROR + "Must equal 'LF' or not exist, got '{input}'."),
-        default="LF",
-    )
+class FemSchema(Schema):
+    pass
+
+
+class OctoDacControllerSchema(FemSchema):
+    type = fields.String(description="controller type", validate=validate_string_is_one_of({"LF"}), required=True)
     analog_outputs = fields.Dict(
         fields.Int(),
         fields.Nested(AnalogOutputPortDefSchemaOPX1000),
@@ -915,11 +938,12 @@ class OctoDacControllerSchema(Schema):
         return _append_data_to_controller(data, controller)
 
 
-class MwFemSchema(Schema):
+class MwFemSchema(FemSchema):
     type = fields.String(
         strict=True,
         description="controller type",
-        validate=validate.Equal("MW", error=FEM_NAME_ERROR + "Must equal 'MW', got '{input}'."),
+        validate=validate_string_is_one_of({"MW"}),
+        required=True,
     )
     analog_outputs = fields.Dict(
         fields.Int(),
@@ -961,6 +985,25 @@ class SemiBuiltControllerConfig(TypedDict, total=False):
     digital_inputs: Dict[int, QuaConfigDigitalInputPortDec]
 
 
+def _fem_schema_deserialization_disambiguation(
+    object_dict: Union[LfFemConfigType, MwFemConfigType], data: Any
+) -> FemSchema:
+    type_to_schema = {
+        "LF": OctoDacControllerSchema,
+        "MW": MwFemSchema,
+    }
+    try:
+        return type_to_schema[object_dict["type"].upper()]()
+    except KeyError:
+        raise ValidationError("Could not detect FEM type, please specify the type you are using (LF or MW).")
+
+
+_fem_poly_field = PolyField(
+    deserialization_schema_selector=_fem_schema_deserialization_disambiguation,
+    required=True,
+)
+
+
 class ControllerSchema(Schema):
     type = fields.String(description="controller type")
     analog_outputs = fields.Dict(
@@ -985,8 +1028,8 @@ class ControllerSchema(Schema):
     )
     fems = fields.Dict(
         fields.Int(),
-        UnionField([fields.Nested(OctoDacControllerSchema), fields.Nested(MwFemSchema)]),
-        metadata={"description": """"The FEMs. """},
+        _fem_poly_field,
+        metadata={"description": """The Front-End-Modules (FEMs) in the controller."""},
     )
 
     class Meta:
@@ -1010,11 +1053,19 @@ class ControllerSchema(Schema):
                     elif isinstance(v, QuaConfigOctoDacFemDec):
                         item.fems[k] = QuaConfigFemTypes(octo_dac=v)
                     else:
+                        for analog_input in v.analog_inputs.values():
+                            if analog_input.sampling_rate != 1e9:
+                                raise ValidationError(
+                                    f"Sampling rate of {analog_input.sampling_rate} is not supported for OPX"
+                                )
                         item.fems[k] = QuaConfigFemTypes(opx=v)
 
         else:
             controller = QuaConfigControllerDec(type=data.get("type", "opx1"))
             item.fems[OPX_FEM_IDX] = QuaConfigFemTypes(opx=_append_data_to_controller(data, controller))
+            for analog_input in item.fems[OPX_FEM_IDX].opx.analog_inputs.values():
+                if analog_input.sampling_rate != 1e9:
+                    raise ValidationError(f"Sampling rate of {analog_input.sampling_rate} is not supported for OPX")
 
         return item
 
@@ -1323,8 +1374,8 @@ class SingleInputSchema(Schema):
 
 class MWInputSchema(Schema):
     port = PortReferenceSchema
-    oscillator_frequency = fields.Float(
-        metadata={"description": "The frequency of the oscillator which drives the mixer [Hz]"}
+    upconverter = fields.Int(
+        metadata={"description": "The index of the upconverter to use. Default is 1"},
     )
 
     class Meta:
@@ -1336,16 +1387,13 @@ class MWInputSchema(Schema):
         controller, fem, number = _get_port_reference_with_fem(data["port"])
         item = QuaConfigMicrowaveInputPortReference(
             port=QuaConfigDacPortReference(controller=controller, fem=fem, number=number),
-            oscillator_frequency_hz=data["oscillator_frequency"],
+            upconverter=data.get("upconverter", DEFAULT_DUC_IDX),
         )
         return item
 
 
 class MWOutputSchema(Schema):
     port = PortReferenceSchema
-    oscillator_frequency = fields.Float(
-        metadata={"description": "The frequency of the oscillator which drives the mixer [Hz]"}
-    )
 
     class Meta:
         title = "MW output"
@@ -1357,8 +1405,6 @@ class MWOutputSchema(Schema):
         item = QuaConfigMicrowaveOutputPortReference(
             port=QuaConfigAdcPortReference(controller=controller, fem=fem, number=number),
         )
-        if "oscillator_frequency" in data:
-            item.oscillator_frequency_hz = data["oscillator_frequency"]
         return item
 
 
@@ -1639,8 +1685,6 @@ class ElementSchema(Schema):
             el.microwave_input = data["MWInput"]
         if "MWOutput" in data:
             el.microwave_output = data["MWOutput"]
-            if el.microwave_output.oscillator_frequency_hz == 0:
-                el.microwave_output.oscillator_frequency_hz = el.microwave_input.oscillator_frequency_hz
         if "measurement_qe" in data:
             el.measurement_qe = data["measurement_qe"]
         if "time_of_flight" in data:

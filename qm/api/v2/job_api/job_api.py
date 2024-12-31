@@ -3,7 +3,21 @@ import logging
 import warnings
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import Dict, List, Type, Tuple, Union, Literal, TypeVar, Iterable, Optional, Sequence, Collection, overload
+from typing import (
+    Dict,
+    List,
+    Type,
+    Tuple,
+    Union,
+    Literal,
+    TypeVar,
+    Iterable,
+    Optional,
+    Sequence,
+    Collection,
+    cast,
+    overload,
+)
 
 import numpy as np
 
@@ -165,6 +179,10 @@ class JobApi(JobGenericApi):
         return self._id
 
     def get_job_id(self) -> str:
+        """
+        Returns:
+             The job's ID
+        """
         return self.id
 
     def _create_elements(self) -> JobElementsDB:
@@ -177,9 +195,26 @@ class JobApi(JobGenericApi):
         return self._run(self._stub.get_config(request, timeout=self._timeout)).config
 
     def get_compilation_config(self) -> DictQuaConfig:
+        """
+        Returns:
+             The config with which this job was compiled
+        """
         return convert_msg_to_config(self._get_pb_config())
 
     def push_to_input_stream(self, stream_name: str, data: List[Union[bool, int, float]]) -> None:
+        """Push data to the input stream declared in the QUA program.
+        The data is then ready to be read by the program using the advance
+        input stream QUA statement.
+
+        Multiple data entries can be inserted before the data is read by the program.
+
+        See [Input streams](../Guides/features.md#input-streams) for more information.
+
+        Args:
+            stream_name: The input stream name the data is to be inserted to.
+            data: The data to be inserted. The data's size must match
+                the size of the input stream.
+        """
         if all(type(element) == bool for element in data):
             self._typed_push_to_input_stream(stream_name, bool, data)
         elif all(type(element) == int for element in data):
@@ -214,18 +249,45 @@ class JobApi(JobGenericApi):
         self._run(self._stub.push_to_input_stream(request, timeout=self._timeout))
 
     def get_status(self) -> JobStatus:
+        """
+        Returns the status of the job, one of the following strings:
+
+        - `In queue` - Program is in the queue
+        - `Running` - Program is currently running
+        - `Processing` - Program done but data processing is ongoing
+        - `Done` - Program and data processing done
+        - `Canceled` - Program was canceled before it was done
+        - `Error` - Program encountered an error
+
+        Returns:
+
+             The job status
+        """
         request = JobServiceGetJobStatusRequest(job_id=self._id)
         response = self._run(self._stub.get_job_status(request, timeout=self._timeout))
         return JOB_STATUS_MAPPING[response.status]
 
-    def wait_for_execution(self, timeout: float = float("infinity")) -> "JobApi":
-        self.wait_until({"Running", "Processing"}, timeout)
-        return self
-
     def is_running(self) -> bool:
+        """
+        Returns:
+
+             `True` if the job is currently running
+        """
         return self.get_status() == "Running"
 
     def wait_until(self, state: Union[JobStatus, Collection[JobStatus]], timeout: float) -> None:
+        """
+        Waits until a specific state is reached. If the job is already passed the given state, the function will
+        immediately return. See [get_status][qm.api.v2.job_api.job_api.JobApi.get_status] for a list of statuses.
+
+        If the state cannot be reached (e.g., waiting for “Done” but the job is “Canceled”) then an error is raised.
+
+        If the timeout time, has passed, an error is raised.
+
+        Args:
+            state: The state to wait for
+            timeout: The timeout time, in seconds
+        """
         if isinstance(state, str):
             state = {state}
         try:
@@ -259,18 +321,32 @@ class JobApi(JobGenericApi):
             await asyncio.sleep(0.1)  # I (YR) just put a number here that sounds reasonable
 
     def is_finished(self) -> bool:
+        """
+        Returns:
+
+             `True` if the job will no longer run (Has reached "Completed", "Canceled" or "Error").
+        """
         return self.get_status() in {"Completed", "Canceled", "Error"}
 
     def cancel(self) -> None:
+        """
+        Cancels the job
+        """
         request = CancelRequest(job_id=self._id)
         self._run(self._stub.cancel(request, timeout=self._timeout))
 
     def is_paused(self) -> bool:
+        """
+        Returns:
+
+             `True` if the job was paused from QUA.
+        """
         request = JobServiceIsPausedRequest(job_id=self._id)
         response = self._run(self._stub.is_paused(request, timeout=self._timeout))
         return response.is_paused
 
     def resume(self) -> None:
+        """Resumes a program that was halted using the [pause][qm.qua._dsl.pause] statement"""
         request = ResumeRequest(job_id=self._id)
         self._run(self._stub.resume(request, timeout=self._timeout))
 
@@ -289,6 +365,20 @@ class JobApi(JobGenericApi):
     def set_io_values(
         self, io1: Optional[NumpySupportedValue] = None, io2: Optional[NumpySupportedValue] = None
     ) -> None:
+        """
+        Sets the values of ``IO1`` & ``IO2`. If only one is given, then the value of the second will remain unchanged.
+
+        This can be used later inside a QUA program as a QUA variable ``IO1``, ``IO2`` without declaration.
+        The type of QUA variable is inferred from the python type according to the following rule:
+
+        int -> int
+        float -> fixed
+        bool -> bool
+
+        Args:
+            io1: The value to be placed in ``IO1``
+            io2: The value to be placed in ``IO2``
+        """
         request = SetIoValuesRequest(
             job_id=self._id,
             io1=self._fix_io_value_type(io1),
@@ -297,9 +387,35 @@ class JobApi(JobGenericApi):
         self._run(self._stub.set_io_values(request, timeout=self._timeout))
 
     def set_io1_value(self, value: Optional[NumpySupportedValue]) -> None:
+        """
+        Sets the values of ``IO1``.
+
+        This can be used later inside a QUA program as a QUA variable ``IO1``, ``IO2`` without declaration.
+        The type of QUA variable is inferred from the python type according to the following rule:
+
+        int -> int
+        float -> fixed
+        bool -> bool
+
+        Args:
+            value: The value to be placed in ``IO1``
+        """
         self.set_io_values(io1=value)
 
     def set_io2_value(self, value: Optional[NumpySupportedValue]) -> None:
+        """
+        Sets the values of ``IO2``.
+
+        This can be used later inside a QUA program as a QUA variable ``IO1``, ``IO2`` without declaration.
+        The type of QUA variable is inferred from the python type according to the following rule:
+
+        int -> int
+        float -> fixed
+        bool -> bool
+
+        Args:
+            value: The value to be placed in ``IO2``
+        """
         self.set_io_values(io2=value)
 
     @overload
@@ -394,6 +510,17 @@ class JobApi(JobGenericApi):
         Union[bool, int, float, GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData],
         Union[bool, int, float, GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData],
     ]:
+        """
+        Gets the data stored in ``IO1`` & ``IO2``
+
+        Data will be presented as the type given. If no type was given, it'll have three fields: `int_value`,
+        `double_value`, & `boolean_value`
+        Args:
+            io1_type: The type of ``IO1``
+            io2_type:  The type of ``IO1``
+        Returns:
+             A tuple of (``IO1``, ``IO2``)
+        """
         v1, v2 = self._fetch_io_values()
         return _extract_io_value_type(v1, io1_type), _extract_io_value_type(v2, io2_type)
 
@@ -419,6 +546,17 @@ class JobApi(JobGenericApi):
     def get_io1_value(
         self, as_type: Optional[IoValueTypes] = None
     ) -> Union[bool, int, float, GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData]:
+        """
+        Gets the data stored in ``IO1``
+
+        Data will be presented as the type given. If no type was given, it'll have three fields: `int_value`,
+        `double_value`, & `boolean_value`
+
+        Args:
+            as_type: The type of ``IO1``
+        Returns:
+             ``IO1``
+        """
         return self.get_io_values(io1_type=as_type)[0]
 
     @overload
@@ -443,6 +581,17 @@ class JobApi(JobGenericApi):
     def get_io2_value(
         self, as_type: Optional[IoValueTypes] = None
     ) -> Union[bool, int, float, GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData]:
+        """
+        Gets the data stored in ``IO12`
+
+        Data will be presented as the type given. If no type was given, it'll have three fields: `int_value`,
+        `double_value`, & `boolean_value`
+
+        Args:
+            as_type: The type of ``IO2``
+        Returns:
+             ``IO2``
+        """
         return self.get_io_values(io2_type=as_type)[1]
 
     def _fetch_io_values(
@@ -465,21 +614,56 @@ class JobApi(JobGenericApi):
         )
 
     def get_errors(self) -> List[ExecutionError]:
+        """
+        Returns:
+
+             A list of all errors in the execution report
+        """
         request = GetJobErrorsRequest(job_id=self._id)
         response = self._run(self._stub.get_errors(request, timeout=self._timeout))
         return [ExecutionError.create_from_grpc_message(error) for error in response.errors]
 
     def execution_report(self) -> ExecutionReport:
+        """Get runtime errors report for this job. See [Runtime errors](../Guides/error.md#runtime-errors).
+
+        Returns:
+            An object holding the errors that this job generated.
+        """
         errors = self.get_errors()
         return ExecutionReport(self._id, errors)
 
     def set_element_correction(self, element: str, correction: Tuple[float, float, float, float]) -> None:
+        r"""Sets the correction matrix for correcting gain and phase imbalances
+        of an IQ mixer associated with an element.
+
+        Values will be rounded to an accuracy of $2^{-16}$.
+        Valid values for the correction values are between $-2$ and $(2 - 2^{-16})$.
+
+        Warning - the correction matrix can increase the output voltage which might result in an
+        overflow.
+
+        Args:
+            element (str): The name of the element to update the correction for
+            correction (tuple):
+                Tuple is of the form (v00, v01, v10, v11) where
+                the matrix is
+                $\begin{pmatrix} v_{00} & v_{01} \\ v_{10} & v_{11}\end{pmatrix}$
+        """
         element_input = self.elements[element].input
         if not isinstance(element_input, MixInputsApi):
             raise ValueError(f"Element {element} is not an IQ mixer")
         element_input.set_correction(correction)
 
     def get_element_correction(self, element: str) -> Tuple[float, float, float, float]:
+        """Gets the correction matrix for correcting gain and phase imbalances
+        of an IQ mixer associated with an element.
+
+        Args:
+            element (str): The name of the element to update the correction for
+
+        Returns:
+            The current correction matrix
+        """
         element_input = self.elements[element].input
         if not isinstance(element_input, MixInputsApi):
             raise ValueError(f"Element {element} is not an IQ mixer")
@@ -489,10 +673,8 @@ class JobApi(JobGenericApi):
         """Sets the intermediate frequency of the element
 
         Args:
-            element (str): the name of the element whose intermediate
-                frequency will be updated
-            freq (float): the intermediate frequency to set to the given
-                element
+            element (str): The name of the element whose intermediate frequency will be updated
+            freq (float): The intermediate frequency to set to the given element
         """
         element_inst = self.elements[element]
         element_inst.set_intermediate_frequency(freq)
@@ -501,11 +683,10 @@ class JobApi(JobGenericApi):
         """Gets the intermediate frequency of the element
 
         Args:
-            element (str): the name of the element whose intermediate
-                frequency will be updated
+            element (str): The name of the element whose intermediate frequency will be updated
 
         Returns:
-            float: the intermediate frequency of the given element
+            float: The intermediate frequency of the given element
         """
         element_inst = self.elements[element]
         return element_inst.get_intermediate_frequency()
@@ -516,18 +697,18 @@ class JobApi(JobGenericApi):
         """Get the current DC offset of the OPX analog output channel associated with an element.
 
         Args:
-            element: the name of the element to get the correction for
-            iq_input: the port name as appears in the element config.
+            element: The name of the element to get the correction for
+            iq_input: The port name as appears in the element config.
                 Options:
 
                 `'single'`
-                    for an element with a single input (not necessary anymore)
+                    for an element with a single input
 
                 `'I'` or `'Q'`
                     for an element with mixer inputs
 
         Returns:
-            the offset, in normalized output units
+            The offset, in volts
         """
         input_instance = self.elements[element].input
         if isinstance(input_instance, SingleInputApi):
@@ -570,18 +751,15 @@ class JobApi(JobGenericApi):
         """Set the current DC offset of the OPX analog output channel associated with an element.
 
         Args:
-            element (str): the name of the element to update the
-                correction for
-            input (Union[str, Tuple[str,str], List[str]]): the input
-                name as appears in the element config. Options:
+            element (str): the name of the element to update the correction for
+            input (Union[str, Tuple[str,str], List[str]]): the input name as appears in the element config. Options:
 
                 `'single'`
                     for an element with a single input
 
                 `'I'` or `'Q'` or a tuple ('I', 'Q')
                     for an element with mixer inputs
-            offset (Union[float, Tuple[float,float], List[float]]): The
-                dc value to set to, in normalized output units. Ranges
+            offset (Union[float, Tuple[float,float], List[float]]): The dc value to set to, in volts. Ranges
                 from -0.5 to 0.5 - 2^-16 in steps of 2^-16.
 
         Examples:
@@ -593,8 +771,8 @@ class JobApi(JobGenericApi):
 
         Note:
 
-            If the sum of the DC offset and the largest waveform data-point exceed the normalized unit range specified
-            above, DAC output overflow will occur and the output will be corrupted.
+            If the sum of the DC offset and the largest waveform data-point exceed the range,
+            DAC output overflow will occur and the output will be corrupted.
         """
         input_instance = self.elements[element].input
         if isinstance(input_instance, MixInputsApi):
@@ -605,16 +783,16 @@ class JobApi(JobGenericApi):
                     raise FunctionInputError(
                         f"input should be two iterables of the same size," f"got input = {input} and offset = {offset}"
                     )
-                kwargs = {f"{_k.lower()}_offset": _v for _k, _v in zip(input, offset)}
+                channel_to_offset = dict(zip(input, offset))
             elif isinstance(input, str):
                 if input not in {"I", "Q"}:
                     raise FunctionInputError(f"Input names should be 'I' or 'Q', got {input}")
                 if not isinstance(offset, (int, float)):
                     raise FunctionInputError(f"Input should be int or float, got {type(offset)}")
-                kwargs = {f"{input.lower()}_offset": offset}
+                channel_to_offset = {cast(Literal["I", "Q"], input): offset}
             else:
                 raise ValueError(f"Invalid input - {input}")
-            input_instance.set_dc_offsets(**kwargs)
+            input_instance.set_dc_offsets(i_offset=channel_to_offset.get("I"), q_offset=channel_to_offset.get("Q"))
         elif isinstance(input_instance, SingleInputApi):
             if input != "single":
                 raise ValueError(f"Invalid input - {input} while the element has a single input")
@@ -628,20 +806,19 @@ class JobApi(JobGenericApi):
             )
 
     def set_input_dc_offset_by_element(self, element: str, output: str, offset: float) -> None:
-        """set the current DC offset of the OPX analog input channel associated with an element.
+        """Set the current DC offset of the OPX analog input channel associated with an element.
 
         Args:
             element (str): the name of the element to update the
                 correction for
             output (str): the output key name as appears in the element
                 config under 'outputs'.
-            offset (float): the dc value to set to, in normalized input
-                units. Ranges from -0.5 to 0.5 - 2^-16 in steps of
+            offset (float): the dc value to set to, in volts. Ranges from -0.5 to 0.5 - 2^-16 in steps of
                 2^-16.
 
         Note:
-            If the sum of the DC offset and the largest waveform data-point exceed the normalized unit range specified
-            above, DAC output overflow will occur and the output will be corrupted.
+            If the sum of the DC offset and the largest waveform data-point exceed the range,
+            DAC output overflow will occur and the output will be corrupted.
         """
         element_instance = self.elements[element]
         element_instance.outputs[output].set_dc_offset(offset)
@@ -655,7 +832,7 @@ class JobApi(JobGenericApi):
                 under 'outputs'.
 
         Returns:
-            the offset, in normalized output units
+            The offset, in volts
         """
         element_instance = self.elements[element]
         return element_instance.outputs[output].get_dc_offset()
@@ -664,12 +841,12 @@ class JobApi(JobGenericApi):
         """Gets the delay of the digital input of the element
 
         Args:
-            element: the name of the element to get the delay for
-            digital_input: the digital input name as appears in the
+            element: The name of the element to get the delay for
+            digital_input: The digital input name as appears in the
                 element's config
 
         Returns:
-            the delay
+            The delay
         """
         element_instance = self.elements[element]
         return element_instance.digital_inputs[digital_input].get_delay()
@@ -678,11 +855,10 @@ class JobApi(JobGenericApi):
         """Sets the delay of the digital input of the element
 
         Args:
-            element (str): the name of the element to update delay for
-            digital_input (str): the digital input name as appears in
+            element (str): The name of the element to update delay for
+            digital_input (str): The digital input name as appears in
                 the element's config
-            delay (int): the delay value to set to, in nsec. Range: 0 to
-                255 - 2 * buffer, in steps of 1
+            delay (int): The delay value to set to, in ns.
         """
         element_instance = self.elements[element]
         element_instance.digital_inputs[digital_input].set_delay(delay)
@@ -691,12 +867,12 @@ class JobApi(JobGenericApi):
         """Gets the buffer for digital input of the element
 
         Args:
-            element (str): the name of the element to get the buffer for
-            digital_input (str): the digital input name as appears in
+            element (str): The name of the element to get the buffer for
+            digital_input (str): The digital input name as appears in
                 the element's config
 
         Returns:
-            the buffer
+            The buffer
         """
         element_instance = self.elements[element]
         return element_instance.digital_inputs[digital_input].get_buffer()
@@ -705,11 +881,10 @@ class JobApi(JobGenericApi):
         """Sets the buffer for digital input of the element
 
         Args:
-            element (str): the name of the element to update buffer for
+            element (str): The name of the element to update buffer for
             digital_input (str): the digital input name as appears in
                 the element's config
-            buffer (int): the buffer value to set to, in nsec. Range: 0
-                to (255 - delay) / 2, in steps of 1
+            buffer (int): The buffer value to set to, in ns.
         """
         element_instance = self.elements[element]
         element_instance.digital_inputs[digital_input].set_buffer(buffer)
@@ -720,12 +895,12 @@ class JobApi(JobGenericApi):
         frequency_hz: float,
         update_component: Literal["upconverter", "downconverter", "both"] = "both",
     ) -> None:
-        """Set the oscillator frequency of the microwave input of the element
+        """Set the upconverter frequency or downconverter frequency of the microwave input of the element
 
         Args:
-            element (str): the name of the element to update the correction for
-            frequency_hz (float): the oscillator frequency to set to the given element
-            update_component (str): the component to update the frequency for.
+            element (str): The name of the element to update the correction for
+            frequency_hz (float): The frequency to set to the given element
+            update_component (str): The component to update the frequency for: "upconverter", "downconverter", or "both"
         """
         if update_component == "upconverter":
             input_instance = self.elements[element].input
@@ -748,7 +923,7 @@ class JobApi(JobGenericApi):
             raise ValueError(f"Invalid update_component: {update_component}")
 
 
-class OldJobApiMock(JobApi):
+class JobApiWithDeprecations(JobApi):
     @property
     def status(self) -> str:
         """Returns the status of the job, one of the following strings:
@@ -778,11 +953,12 @@ class OldJobApiMock(JobApi):
         name: str,
         data: List[Value],
     ) -> None:
+        """Deprecated - Please use `job.push_to_input_stream`."""
         warnings.warn(
             deprecation_message(
                 method="job.insert_input_stream",
-                deprecated_in="1.1.8",
-                removed_in="1.2.0",
+                deprecated_in="1.2.0",
+                removed_in="1.4.0",
                 details="This method was renamed to `job.push_to_input_stream()`.",
             ),
             DeprecationWarning,
@@ -791,6 +967,19 @@ class OldJobApiMock(JobApi):
         self.push_to_input_stream(name, data)
 
     def push_to_input_stream(self, name: str, data: List[Value]) -> None:
+        """Push data to the input stream declared in the QUA program.
+        The data is then ready to be read by the program using the advance
+        input stream QUA statement.
+
+        Multiple data entries can be inserted before the data is read by the program.
+
+        See [Input streams](../Guides/features.md#input-streams) for more information.
+
+        Args:
+            name: The input stream name the data is to be inserted to.
+            data: The data to be inserted. The data's size must match
+                the size of the input stream.
+        """
         if not isinstance(data, list):
             data = [data]
         super().push_to_input_stream(name, data)
@@ -800,8 +989,8 @@ class OldJobApiMock(JobApi):
         warnings.warn(
             deprecation_message(
                 method="job.halt",
-                deprecated_in="1.1.8",
-                removed_in="1.2.0",
+                deprecated_in="1.2.0",
+                removed_in="1.4.0",
                 details="This method was renamed to `job.cancel`.",
             ),
             DeprecationWarning,
@@ -811,14 +1000,24 @@ class OldJobApiMock(JobApi):
         return True
 
     def wait_for_execution(self, timeout: float = float("infinity")) -> "JobApi":
+        """Deprecated - This method is going to be removed, please use `job.wait_until("Running")`.
+
+        Waits until the job has passed the "Running" state.
+        If the timeout is reached, the function will raise an error.
+        Args:
+            timeout: The timeout time, in seconds
+        Returns:
+             The running job
+        """
         warnings.warn(
             deprecation_message(
-                method="job.ait_for_execution",
-                deprecated_in="1.1.8",
-                removed_in="1.2.0",
+                method="job.wait_for_execution",
+                deprecated_in="1.2.0",
+                removed_in="1.4.0",
                 details='This method is going to be removed, please use `job.wait_until("Running")`.',
             ),
             DeprecationWarning,
             stacklevel=2,
         )
-        return super().wait_for_execution(timeout)
+        self.wait_until({"Running"}, timeout)
+        return self

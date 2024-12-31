@@ -9,8 +9,8 @@ from qm.octave import QmOctaveConfig
 from qm.persistence import BaseStore
 from qm.grpc.qua_config import QuaConfig
 from qm.api.v2.base_api_v2 import BaseApiV2
-from qm.api.v2.qm_api_old import OldQmApiMock
 from qm.octave.octave_manager import OctaveManager
+from qm.api.v2.qm_api_old import QmApiWithDeprecations
 from qm.type_hinting.config_types import DictQuaConfig
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
@@ -18,7 +18,7 @@ from qm.api.v2.qm_api import QmApi, handle_simulation_error
 from qm.exceptions import OpenQmException, QopResponseError
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.grpc.frontend import InterOpxConnection, ExecutionRequestSimulate
-from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, OldJobApiMock, transfer_statuses_to_enum
+from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, JobApiWithDeprecations, transfer_statuses_to_enum
 from qm.grpc.v2 import (
     GetJobsRequest,
     QmmServiceStub,
@@ -159,9 +159,9 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
             close_other_machines = True
         request = OpenQuantumMachineRequest(
             config=config,
-            close_mode=OpenQuantumMachineRequestCloseMode.CLOSE_MODE_ALL
+            close_mode=OpenQuantumMachineRequestCloseMode.CLOSE_MODE_IF_NEEDED
             if close_other_machines
-            else OpenQuantumMachineRequestCloseMode.CLOSE_MODE_IF_NEEDED,
+            else OpenQuantumMachineRequestCloseMode.CLOSE_MODE_UNSPECIFIED,
         )
 
         try:
@@ -216,12 +216,17 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
     def get_controllers(self) -> Mapping[str, ControllerBase]:
         response = self._run(self._stub.get_controllers(GetControllersRequest(), timeout=self._timeout))
         to_return = {}
+        correction_offset = 0 if self._caps.opx1000_fems_return_1_based else 1
         for name, value in response.control_devices.items():
             if value.controller_type == 1:
                 to_return[name] = ControllerOPX1000(
                     name=name,
                     hostname=value.hostname,
-                    fems={int(i) + 1: FEM_TYPES_MAPPING[f.type] for i, f in value.fems.items() if f.type > 0},
+                    fems={
+                        int(i) + correction_offset: FEM_TYPES_MAPPING[f.type]
+                        for i, f in value.fems.items()
+                        if f.type > 0
+                    },
                 )
             else:
                 raise NotImplementedError(f"Controller type {value.controller_type} is not supported.")
@@ -279,6 +284,6 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         self._run(self._stub.clear_all_job_results(request, timeout=self._timeout))
 
 
-class OldQmmApiMock(QmmApi):
-    QM_CLASS = OldQmApiMock
-    JOB_CLASS = OldJobApiMock
+class QmmApiWithDeprecations(QmmApi):
+    QM_CLASS = QmApiWithDeprecations
+    JOB_CLASS = JobApiWithDeprecations
