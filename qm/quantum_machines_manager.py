@@ -21,6 +21,7 @@ from qm.results import StreamingResultFetcher
 from qm.api.models.debug_data import DebugData
 from qm.jobs.simulated_job import SimulatedJob
 from qm.logging_utils import set_logging_level
+from qm.api.v2.job_api import JobApi, JobStatus
 from qm.api.server_detector import detect_server
 from qm.simulate.interface import SimulationConfig
 from qm.api.job_result_api import JobResultServiceApi
@@ -29,7 +30,7 @@ from qm.api.models.server_details import ServerDetails
 from qm.type_hinting.config_types import DictQuaConfig
 from qm.api.v2.qmm_api import Controller, OldQmmApiMock
 from qm.program._qua_config_to_pb import load_config_pb
-from qm.api.v2.job_api import JobApi, JobStatus, SimulatedJobApi
+from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm._octaves_container import load_config_from_calibration_db
 from qm.program._qua_config_schema import validate_config_capabilities
 from qm.api.simulation_api import SimulationApi, create_simulation_request
@@ -375,10 +376,10 @@ class QuantumMachinesManager:
         """
         warnings.warn(
             deprecation_message(
-                "open_qm_from_file",
+                "qmm.open_qm_from_file",
                 "1.1.8",
                 "1.2.0",
-                "This function is going to be removed.",
+                "This method is going to be removed.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -465,10 +466,10 @@ class QuantumMachinesManager:
     def list_open_quantum_machines(self) -> List[str]:
         warnings.warn(
             deprecation_message(
-                "list_open_quantum_machines",
+                "qmm.list_open_quantum_machines",
                 "1.1.8",
                 "1.2.0",
-                "This function is going to change its name to `list_open_qms`",
+                "This method was renamed to `qmm.list_open_qms()`",
             )
         )
         return self.list_open_qms()
@@ -506,7 +507,8 @@ class QuantumMachinesManager:
         """
         if self._api is not None:
             raise NotImplementedError(
-                "This method is deprecated, please use qmm.get_job(job_id) and get the result handles from there."
+                "This method is not available in the current QOP version, "
+                "please use `qmm.get_job(job_id).result_handles`"
             )
         return StreamingResultFetcher(
             job_id,
@@ -525,10 +527,10 @@ class QuantumMachinesManager:
     def close_all_quantum_machines(self) -> None:
         warnings.warn(
             deprecation_message(
-                "close_all_quantum_machines",
+                "qmm.close_all_quantum_machines",
                 "1.1.8",
                 "1.2.0",
-                "This function is going to change its name to `close_all_qms`",
+                "This function is going to change its name to `qmm.close_all_qms()`",
             ),
             category=DeprecationWarning,
             stacklevel=2,
@@ -537,14 +539,13 @@ class QuantumMachinesManager:
 
     def get_controllers(self) -> List[Controller]:
         """Returns a list of all the controllers that are available"""
-        # Todo - change response in the new api
         if self._api:
             warnings.warn(
                 deprecation_message(
                     "get_controllers",
                     "1.1.8",
                     "1.2.0",
-                    "This will have a different return type in 1.2.0.",
+                    "This will have a different return type",
                 ),
                 category=DeprecationWarning,
                 stacklevel=2,
@@ -577,7 +578,7 @@ class QuantumMachinesManager:
                     "clear_all_job_results",
                     "1.1.8",
                     "1.2.0",
-                    "This function is going to be removed.",
+                    "This method is going to be removed.",
                 ),
                 category=DeprecationWarning,
                 stacklevel=1,
@@ -595,14 +596,14 @@ class QuantumMachinesManager:
         status: Iterable[JobStatus] = tuple(),
     ) -> List[JobData]:
         if self._api is None:
-            raise NotImplementedError("This method is not available in the current server version")
+            raise NotImplementedError("This method is not available in the current QOP version")
         return self._api.get_jobs(
             qm_ids=qm_ids, job_ids=job_ids, user_ids=user_ids, description=description, status=status
         )
 
     def get_job(self, job_id: str) -> JobApi:
         if self._api is None:
-            raise NotImplementedError("This method is not available in the current server version")
+            raise NotImplementedError("This method is not available in the current QOP version")
         return self._api.get_job(job_id)
 
     @property

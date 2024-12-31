@@ -338,14 +338,14 @@ class FrontendApi(BaseApi[FrontendStub]):
         request = HighQmApiRequest(quantum_machine_id=machine_id, set_input_dc_offset=input_dc_offset_request)
         self._perform_qm_request(request)
 
-    def set_digital_delay(self, machine_id: str, element: str, element_port: str, delay: int) -> None:
+    def set_output_digital_delay(self, machine_id: str, element: str, element_port: str, delay: int) -> None:
         digital_delay_request = HighQmApiRequestSetDigitalRoute(
             delay=HighQmApiRequestQePort(qe=element, port=element_port), value=delay
         )
         request = HighQmApiRequest(quantum_machine_id=machine_id, set_digital_route=digital_delay_request)
         self._perform_qm_request(request)
 
-    def set_digital_buffer(self, machine_id: str, element: str, element_port: str, buffer: int) -> None:
+    def set_output_digital_buffer(self, machine_id: str, element: str, element_port: str, buffer: int) -> None:
         digital_buffer_request = HighQmApiRequestSetDigitalRoute(
             buffer=HighQmApiRequestQePort(qe=element, port=element_port), value=buffer
         )

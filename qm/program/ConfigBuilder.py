@@ -6,7 +6,7 @@ import betterproto
 from qm.type_hinting import Number
 from qm.type_hinting.config_types import (
     DictQuaConfig,
-    FemConfigType,
+    LfFemConfigType,
     MixerConfigType,
     MwFemConfigType,
     PulseConfigType,
@@ -252,7 +252,7 @@ def _convert_controller_types(
     return ret
 
 
-def _convert_fem(data: QuaConfigFemTypes) -> Union[FemConfigType, MwFemConfigType]:
+def _convert_fem(data: QuaConfigFemTypes) -> Union[LfFemConfigType, MwFemConfigType]:
     _, fem_config = betterproto.which_one_of(data, "fem_type_one_of")
     if isinstance(fem_config, QuaConfigOctoDacFemDec):
         return _convert_octo_dac(fem_config)
@@ -304,8 +304,8 @@ def _convert_mw_analog_inputs(
     }
 
 
-def _convert_octo_dac(data: QuaConfigOctoDacFemDec) -> FemConfigType:
-    ret: FemConfigType = {"type": "LF"}
+def _convert_octo_dac(data: QuaConfigOctoDacFemDec) -> LfFemConfigType:
+    ret: LfFemConfigType = {"type": "LF"}
     if data.analog_outputs:
         ret["analog_outputs"] = _convert_octo_dac_fem_analog_outputs(data.analog_outputs)
     if data.analog_inputs:

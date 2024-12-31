@@ -1,9 +1,10 @@
 from typing import Dict, List, Tuple, Optional
 
 import betterproto
-from octave_sdk.octave import RFInput, RFOutput
+from octave_sdk.octave import RFInput
 from octave_sdk import Octave, OctaveOutput, OctaveLOSource
 
+from qm.api.frontend_api import FrontendApi
 from qm.elements.element_inputs import MixInputs
 from qm.utils.config_utils import get_fem_config
 from qm.octave import CalibrationDB, QmOctaveConfig
@@ -15,9 +16,8 @@ from qm.exceptions import OctaveCableSwapError, OctaveConnectionError, ElementUp
 from qm.grpc.qua_config import (
     QuaConfig,
     QuaConfigMatrix,
-    QuaConfigMixInputs,
+    QuaConfigElementDec,
     QuaConfigCorrectionEntry,
-    QuaConfigDacPortReference,
     QuaConfigGeneralPortReference,
 )
 
@@ -33,22 +33,29 @@ class OctavesContainer:
         _qua_config_opx_to_octave_q = {}
         for octave_name, octave_qua_config in self._pb_config.v1_beta.octaves.items():
             for rf_idx, rf_config in octave_qua_config.rf_outputs.items():
-                _qua_config_opx_to_octave_i[(rf_config.i_connection.controller, rf_config.i_connection.number)] = (
+                i_connection, q_connection = rf_config.i_connection, rf_config.q_connection
+                _qua_config_opx_to_octave_i[(i_connection.controller, i_connection.fem, i_connection.number)] = (
                     octave_name,
                     rf_idx,
                 )
-                _qua_config_opx_to_octave_q[(rf_config.q_connection.controller, rf_config.q_connection.number)] = (
+                _qua_config_opx_to_octave_q[(q_connection.controller, q_connection.fem, q_connection.number)] = (
                     octave_name,
                     rf_idx,
                 )
         self._qua_config_opx_to_octave_i = _qua_config_opx_to_octave_i
         self._qua_config_opx_to_octave_q = _qua_config_opx_to_octave_q
 
-    def get_upconverter_port_ref(
-        self, element_i_port: QuaConfigDacPortReference, element_q_port: QuaConfigDacPortReference
-    ) -> OptionalOctaveInputPort:
-        key_i = (element_i_port.controller, element_i_port.number)
-        key_q = (element_q_port.controller, element_q_port.number)
+    def get_upconverter_port_ref(self, element_config: QuaConfigElementDec) -> OptionalOctaveInputPort:
+        if element_config.rf_inputs:
+            rf_input = list(element_config.rf_inputs.values())[0]
+            return rf_input.device_name, rf_input.port
+        if not betterproto.serialized_on_wire(element_config.mix_inputs):
+            return None
+
+        element_i_port, element_q_port = element_config.mix_inputs.i, element_config.mix_inputs.q
+
+        key_i = (element_i_port.controller, element_i_port.fem, element_i_port.number)
+        key_q = (element_q_port.controller, element_q_port.fem, element_q_port.number)
         i_conn = self._qua_config_opx_to_octave_i.get(key_i)
         q_conn = self._qua_config_opx_to_octave_q.get(key_q)
         if i_conn is None and q_conn is None:
@@ -65,17 +72,6 @@ class OctavesContainer:
             raise ElementUpconverterDeclarationError()
         return i_conn
 
-    def _get_upconverter_client(
-        self, element_i_port: QuaConfigDacPortReference, element_q_port: QuaConfigDacPortReference
-    ) -> Optional[RFOutput]:
-        port_ref = self.get_upconverter_port_ref(element_i_port, element_q_port)
-        if port_ref is None:
-            return None
-
-        octave_name, octave_port = port_ref
-        client = self._get_octave_client(octave_name)
-        return client.rf_outputs[octave_port]
-
     def _get_downconverter_client(self, outputs: Dict[str, QuaConfigGeneralPortReference]) -> Optional[RFInput]:
         if not outputs:
             return None
@@ -91,24 +87,53 @@ class OctavesContainer:
             return get_loopbacks_from_pb(pb_loopbacks, octave_name)
         return self._octave_config.get_lo_loopbacks_by_octave(octave_name)
 
-    def add_upconverter(self, element_input: MixInputs) -> MixInputs:
-        port = self.get_upconverter_port_ref(element_input.i_port, element_input.q_port)
+    def create_mix_inputs(
+        self,
+        element_config: QuaConfigElementDec,
+        name: str,
+        frontend_api: FrontendApi,
+        machine_id: str,
+    ) -> MixInputs:
+        port = self.get_upconverter_port_ref(element_config)
         if port is None:
-            return element_input
+            return MixInputs(name, element_config.mix_inputs, frontend_api, machine_id)
+
+        octave_name, octave_port = port
+        client = self._get_octave_client(octave_name)
+
+        return UpconvertedInput(
+            name,
+            element_config.mix_inputs,
+            frontend_api,
+            machine_id,
+            client=client.rf_outputs[octave_port],
+            port=port,
+            calibration_db=self._octave_config.calibration_db,
+            gain=self._get_octave_gain(octave_name, octave_port),
+            use_input_attenuators=self._get_octave_input_attenuators(octave_name, octave_port),
+        )
+
+    def create_new_api_upconverted_input(
+        self,
+        element_config: QuaConfigElementDec,
+        name: str,
+    ) -> Optional[UpconvertedInputNewApi]:
+        port = self.get_upconverter_port_ref(element_config)
+        if port is None:
+            return None
 
         octave_name, octave_port = port
         client = self._get_octave_client(octave_name)
         gain = self._get_octave_gain(octave_name, octave_port)
 
-        return UpconvertedInput(
-            element_input._name,
-            element_input._config,
-            element_input._frontend,
-            element_input._id,
+        return UpconvertedInputNewApi(
+            name,
+            element_config.mix_inputs,
             client=client.rf_outputs[octave_port],
             port=port,
             calibration_db=self._octave_config.calibration_db,
             gain=gain,
+            use_input_attenuators=self._get_octave_input_attenuators(octave_name, octave_port),
         )
 
     def _get_octave_gain(self, octave_name: str, port: int) -> Optional[float]:
@@ -121,27 +146,11 @@ class OctavesContainer:
             )
             return None
 
-    def create_new_api_upconverted_input(
-        self,
-        element_inputs: QuaConfigMixInputs,
-        name: str,
-    ) -> Optional[UpconvertedInputNewApi]:
-        port = self.get_upconverter_port_ref(element_inputs.i, element_inputs.q)
-        if port is None:
-            return None
-
-        octave_name, octave_port = port
-        client = self._get_octave_client(octave_name)
-        gain = self._get_octave_gain(octave_name, octave_port)
-
-        return UpconvertedInputNewApi(
-            name,
-            element_inputs,
-            client=client.rf_outputs[octave_port],
-            port=port,
-            calibration_db=self._octave_config.calibration_db,
-            gain=gain,
-        )
+    def _get_octave_input_attenuators(self, octave_name: str, port: int) -> bool:
+        try:
+            return self._pb_config.v1_beta.octaves[octave_name].rf_outputs[port].input_attenuators
+        except KeyError:
+            return False
 
     def get_downconverter(self, outputs: Dict[str, QuaConfigGeneralPortReference]) -> Optional[RFInput]:
         return self._get_downconverter_client(outputs)
@@ -174,7 +183,7 @@ def load_config_from_calibration_db(
             logger.debug(f"Element '{element_name}' has no LO frequency specified")
             continue
 
-        octave_channel = octaves_container.get_upconverter_port_ref(mix_inputs.i, mix_inputs.q)
+        octave_channel = octaves_container.get_upconverter_port_ref(element)
         if octave_channel is None:
             logger.debug(f"Element '{element_name}' is not connected to Octave")
             continue

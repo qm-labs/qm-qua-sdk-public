@@ -78,7 +78,10 @@ def _format_validation_error(curr_error: object) -> object:
     if isinstance(curr_error, defaultdict):
         to_return = {}
         for k, v in curr_error.items():
-            to_return[k] = _format_validation_error(v["value"])
+            for error in v.values():
+                to_return[k] = _format_validation_error(error)
+                # There is a hidden assumption here of a single error per entry
+                break
         return to_return
     elif isinstance(curr_error, dict):
         to_return = {}

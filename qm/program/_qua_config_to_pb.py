@@ -31,7 +31,7 @@ from qm.type_hinting.config_types import (
     LoopbackType,
     StandardPort,
     DictQuaConfig,
-    FemConfigType,
+    LfFemConfigType,
     MixerConfigType,
     MwFemConfigType,
     PulseConfigType,
@@ -265,7 +265,7 @@ def controlling_devices_to_pb(data: Union[ControllerConfigType, OPX1000Controlle
             if v.get("type") == "MW":
                 fems[k] = _mw_fem_to_pb(cast(MwFemConfigType, v))
             else:
-                fems[k] = _fem_to_pb(cast(FemConfigType, v))
+                fems[k] = _fem_to_pb(cast(LfFemConfigType, v))
 
     else:
         data = cast(ControllerConfigType, data)
@@ -281,7 +281,7 @@ def _controller_to_pb(data: ControllerConfigType) -> QuaConfigFemTypes:
     return QuaConfigFemTypes(opx=cont)
 
 
-def _fem_to_pb(data: FemConfigType) -> QuaConfigFemTypes:
+def _fem_to_pb(data: LfFemConfigType) -> QuaConfigFemTypes:
     cont = QuaConfigOctoDacFemDec()
     cont = _set_ports_in_config(cont, data)
     return QuaConfigFemTypes(octo_dac=cont)
@@ -299,7 +299,7 @@ ControllerConfigTypeVar = TypeVar(
 
 
 def _set_ports_in_config(
-    config: ControllerConfigTypeVar, data: Union[ControllerConfigType, FemConfigType, MwFemConfigType]
+    config: ControllerConfigTypeVar, data: Union[ControllerConfigType, LfFemConfigType, MwFemConfigType]
 ) -> ControllerConfigTypeVar:
     if "analog_outputs" in data:
         for analog_output_idx, analog_output_data in data["analog_outputs"].items():
@@ -357,6 +357,8 @@ def get_octave_loopbacks(data: List[LoopbackType]) -> List[QuaConfigOctaveLoopba
 
 def octave_to_pb(data: OctaveConfigType) -> QuaConfigOctaveConfig:
     connectivity = data.get("connectivity", None)
+    if isinstance(connectivity, str):
+        connectivity = (connectivity, OPX_FEM_IDX)
     loopbacks = get_octave_loopbacks(data.get("loopbacks", []))
     rf_modules = {
         k: rf_module_to_pb(standardize_connectivity_for_if_in(v, connectivity, k))
@@ -373,14 +375,14 @@ def octave_to_pb(data: OctaveConfigType) -> QuaConfigOctaveConfig:
 
 
 def standardize_connectivity_for_if_in(
-    data: OctaveRFOutputConfigType, opx_connectivity: Optional[str], module_number: int
+    data: OctaveRFOutputConfigType, controller_connectivity: Optional[Tuple[str, int]], module_number: int
 ) -> OctaveRFOutputConfigType:
-    if opx_connectivity is not None:
+    if controller_connectivity is not None:
         if ("I_connection" in data) or ("Q_connection" in data):
             raise OctaveConnectionAmbiguity()
 
-        data["I_connection"] = (opx_connectivity, 2 * module_number - 1)
-        data["Q_connection"] = (opx_connectivity, 2 * module_number)
+        data["I_connection"] = controller_connectivity + (2 * module_number - 1,)
+        data["Q_connection"] = controller_connectivity + (2 * module_number,)
     return data
 
 
@@ -389,17 +391,17 @@ IF_OUT2_DEFAULT = "out2"
 
 
 def standardize_connectivity_for_if_out(
-    data: OctaveIfOutputsConfigType, opx_connectivity: Optional[str]
+    data: OctaveIfOutputsConfigType, controller_connectivity: Optional[Tuple[str, int]]
 ) -> OctaveIfOutputsConfigType:
-    if opx_connectivity is not None:
+    if controller_connectivity is not None:
         if "IF_out1" not in data:
             data["IF_out1"] = {"name": IF_OUT1_DEFAULT}
         if "IF_out2" not in data:
             data["IF_out2"] = {"name": IF_OUT2_DEFAULT}
         if ("port" in data["IF_out1"]) or ("port" in data["IF_out2"]):
             raise OctaveConnectionAmbiguity()
-        data["IF_out1"]["port"] = (opx_connectivity, 1)
-        data["IF_out2"]["port"] = (opx_connectivity, 2)
+        data["IF_out1"]["port"] = controller_connectivity + (1,)
+        data["IF_out2"]["port"] = controller_connectivity + (2,)
     return data
 
 

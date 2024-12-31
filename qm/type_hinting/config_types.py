@@ -55,7 +55,7 @@ class AnalogOutputPortConfigTypeOctoDac(TypedDict, total=False):
     output_mode: Literal["direct", "amplified"]
 
 
-class FemConfigType(TypedDict, total=False):
+class LfFemConfigType(TypedDict, total=False):
     type: Literal["LF"]
     analog_outputs: Mapping[int, AnalogOutputPortConfigTypeOctoDac]
     analog_inputs: Mapping[int, AnalogInputPortConfigType]
@@ -127,7 +127,7 @@ class OctaveIfOutputsConfigType(TypedDict, total=False):
 
 class OPX1000ControllerConfigType(TypedDict, total=False):
     type: Literal["opx1000"]
-    fems: Mapping[int, Union[FemConfigType, MwFemConfigType]]
+    fems: Mapping[int, Union[LfFemConfigType, MwFemConfigType]]
 
 
 LoopbackType = Tuple[
@@ -141,7 +141,7 @@ class OctaveConfigType(TypedDict, total=False):
     RF_inputs: Mapping[int, OctaveRFInputConfigType]
     IF_outputs: OctaveIfOutputsConfigType
     loopbacks: List[LoopbackType]
-    connectivity: str
+    connectivity: Union[str, Tuple[str, int]]
 
 
 class DigitalInputConfigType(TypedDict, total=False):

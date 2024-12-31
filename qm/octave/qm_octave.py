@@ -1,20 +1,30 @@
 import logging
 import warnings
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Optional, ContextManager
+from abc import ABCMeta, abstractmethod
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Generic, TypeVar, Optional, ContextManager
 
 from octave_sdk.octave import ClockInfo
 from octave_sdk import IFMode, ClockType, RFOutputMode, ClockFrequency, OctaveLOSource, RFInputLOSource
 
-from qm.jobs.running_qm_job import RunningQmJob
+from qm.elements.element import Element
+from qm.grpc.qua_config import QuaConfigMixInputs
 from qm.elements.element_outputs import DownconvertedOutput
 from qm.elements.up_converted_input import UpconvertedInput
 from qm.octave.octave_manager import ClockMode, OctaveManager
-from qm.octave.octave_mixer_calibration import DeprecatedCalibrationResult, convert_to_old_calibration_result
+from qm.octave.calibration_db import IFCalibrationDBSchema, LOCalibrationDBSchema
+from qm.type_hinting.config_types import DictQuaConfig, MixerConfigType, OPX1000ControllerConfigType
+from qm.octave.octave_mixer_calibration import (
+    DeprecatedCalibrationResult,
+    LOFrequencyCalibrationResult,
+    convert_to_old_calibration_result,
+)
 
 if TYPE_CHECKING:
+    from qm.api.v2.qm_api import QmApi
+    from qm.api.v2.job_api import JobApi
     from qm.quantum_machine import QuantumMachine
-
+    from qm.jobs.running_qm_job import RunningQmJob
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +37,29 @@ class ElementHasNoOctaveError(Exception):
         return f"Element {self._name} has no octave connected to it."
 
 
-class QmOctave:
-    def __init__(self, qm: "QuantumMachine", octave_manager: OctaveManager):
-        self._qm = qm
+class NoCalibrationDbAttachedError(Exception):
+    def __init__(self, name: str):
+        self._name = name
+
+    def __str__(self) -> str:
+        return f"No calibration database attached to element {self._name}"
+
+
+class NoCalibrationParamsError(Exception):
+    def __init__(self, name: str):
+        self._name = name
+
+    def __str__(self) -> str:
+        return f"No calibration parameters found for element {self._name}"
+
+
+QmInstT = TypeVar("QmInstT", "QuantumMachine", "QmApi")
+JobInstT = TypeVar("JobInstT", "RunningQmJob", "JobApi")
+
+
+class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
+    def __init__(self, qm: QmInstT, octave_manager: OctaveManager):
+        self._qm: QmInstT = qm
         self._octave_manager = octave_manager
 
     def _get_upconverted_input(self, name: str) -> UpconvertedInput:
@@ -267,9 +297,25 @@ class QmOctave:
         """
         return self._octave_manager.get_clock(octave_name)
 
-    def set_element_parameters_from_calibration_db(
-        self, element: str, running_job: Optional[RunningQmJob] = None
-    ) -> None:
+    @staticmethod
+    def _fetch_calibrations_from_db(
+        qe: Element[QuaConfigMixInputs],
+    ) -> Tuple[LOCalibrationDBSchema, IFCalibrationDBSchema]:
+        assert isinstance(qe.input, UpconvertedInput)
+        if qe.input._calibration_db is None:
+            logger.warning(f"No calibration DB is attached for element {qe.name}, not changing anything.")
+            raise NoCalibrationDbAttachedError(qe.name)
+        db = qe.input._calibration_db
+
+        lo_cal = db.get_lo_cal(qe.input.port, lo_freq=qe.input.lo_frequency, gain=qe.input.gain)
+        if_cal = db.get_if_cal(
+            qe.input.port, lo_freq=qe.input.lo_frequency, gain=qe.input.gain, if_freq=qe.intermediate_frequency
+        )
+        if if_cal is None or lo_cal is None:
+            raise NoCalibrationParamsError(qe.name)
+        return lo_cal, if_cal
+
+    def set_element_parameters_from_calibration_db(self, element: str, running_job: Optional[JobInstT] = None) -> None:
         """Apply correction parameters to an element from the calibration database. The parameters will be selected
         according to the current LO and IF frequencies in the configuration. Therefore, If used when sweeping the LO,
         it is required to first set the new LO freq using qm.octave.set_lo_frequency() before updating the calibration
@@ -281,28 +327,91 @@ class QmOctave:
         """
         qe = self._qm._elements[element]
         assert isinstance(qe.input, UpconvertedInput)
-
-        if qe.input._calibration_db is None:
-            logger.warning(f"No calibration DB is attached for element {qe.name}, not changing anything.")
-            return
-        db = qe.input._calibration_db
-
-        lo_cal = db.get_lo_cal(qe.input.port, lo_freq=qe.input.lo_frequency, gain=qe.input.gain)
-        if_cal = db.get_if_cal(
-            qe.input.port, lo_freq=qe.input.lo_frequency, gain=qe.input.gain, if_freq=qe.intermediate_frequency
-        )
-
-        if if_cal is None or lo_cal is None:
-            logger.warning(f"No calibration params for element {qe.name}, not changing anything.")
+        try:
+            lo_cal, if_cal = self._fetch_calibrations_from_db(qe)
+        except (NoCalibrationParamsError, NoCalibrationDbAttachedError) as err:
+            logger.warning(f"Cannot change element params due to the following error: {err}")
             return
 
+        self._update_element_parameters(qe, lo_cal, if_cal)
+
+        if running_job:
+            self._set_running_job_parameters(running_job, element, lo_cal, if_cal)
+
+    @abstractmethod
+    def _update_element_parameters(
+        self, qe: Element[QuaConfigMixInputs], lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
+    ) -> None:
+        pass
+
+    @abstractmethod
+    def _set_running_job_parameters(
+        self,
+        job: JobInstT,
+        element: str,
+        lo_cal: LOCalibrationDBSchema,
+        if_cal: IFCalibrationDBSchema,
+    ) -> None:
+        pass
+
+
+class QmOctave(QmOctaveBase["QuantumMachine", "RunningQmJob"]):
+    def _update_element_parameters(
+        self, qe: Element[QuaConfigMixInputs], lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
+    ) -> None:
+        assert isinstance(qe.input, UpconvertedInput)
         qe.input.set_output_dc_offset(i_offset=lo_cal.i0, q_offset=lo_cal.q0)
-
         qe.input.set_mixer_correction(
             intermediate_frequency=qe.intermediate_frequency,
             lo_frequency=qe.input.lo_frequency,
             values=if_cal.correction,
         )
 
-        if running_job:
-            running_job.set_element_correction(qe.name, if_cal.correction)
+    def _set_running_job_parameters(
+        self, job: "RunningQmJob", element: str, lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
+    ) -> None:
+        job.set_element_correction(element, if_cal.correction)
+
+
+class QmOctaveForNewApi(QmOctaveBase["QmApi", "JobApi"]):
+    def _update_element_parameters(
+        self, qe: Element[QuaConfigMixInputs], lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
+    ) -> None:
+        assert isinstance(qe.input, UpconvertedInput)
+        update = create_dc_offset_octave_update(qe.input, lo_cal)
+        update["mixers"] = {
+            qe.input.mixer: [
+                create_mixer_correction(qe.intermediate_frequency, qe.input.lo_frequency, if_cal.correction)
+            ]
+        }
+        self._qm.update_config(update)
+
+    def _set_running_job_parameters(
+        self, job: "JobApi", element: str, lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
+    ) -> None:
+        job.set_output_dc_offset_by_element(element, ("I", "Q"), (lo_cal.i0, lo_cal.q0))
+        job.set_element_correction(element, if_cal.correction)
+
+
+def create_dc_offset_octave_update(
+    qe_input: UpconvertedInput, lo_cal: Union[LOCalibrationDBSchema, LOFrequencyCalibrationResult]
+) -> DictQuaConfig:
+    con_i, fem_i, port_i = qe_input.i_port.controller, qe_input.i_port.fem, qe_input.i_port.number
+    con_q, fem_q, port_q = qe_input.q_port.controller, qe_input.q_port.fem, qe_input.q_port.number
+    controllers: Dict[str, OPX1000ControllerConfigType] = {con_i: {"fems": {}}, con_q: {"fems": {}}}
+    controllers[con_i]["fems"][fem_i] = {"analog_outputs": {}}  # type: ignore[index]
+    controllers[con_q]["fems"][fem_q] = {"analog_outputs": {}}  # type: ignore[index]
+    controllers[con_i]["fems"][fem_i]["analog_outputs"][port_i] = {"offset": lo_cal.i0}  # type: ignore[index]
+    controllers[con_q]["fems"][fem_q]["analog_outputs"][port_q] = {"offset": lo_cal.q0}  # type: ignore[index]
+    update: DictQuaConfig = {"version": 1, "controllers": controllers}
+    return update
+
+
+def create_mixer_correction(
+    intermediate_frequency: float, lo_frequency: float, correction: Tuple[float, float, float, float]
+) -> MixerConfigType:
+    return {
+        "correction": correction,
+        "intermediate_frequency": intermediate_frequency,
+        "lo_frequency": lo_frequency,
+    }

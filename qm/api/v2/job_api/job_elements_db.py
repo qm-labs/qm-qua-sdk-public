@@ -37,9 +37,10 @@ class JobElementsDB(Dict[str, JobElement]):
     ) -> JobElement:
         input_config = cast(InputConfigType, betterproto.which_one_of(element_config, "element_inputs_one_of")[1])
         input_api_class = create_element_input_class(input_config)
+        output_names = list(element_config.multiple_outputs.port_references) or list(element_config.outputs)
         outputs_apis = {
             output_name: AnalogOutputApi(connection_details, job_id, element_name, output_name)
-            for output_name in element_config.outputs
+            for output_name in output_names
         }
         digital_inputs_apis = {
             input_name: DigitalInputApi(connection_details, job_id, element_name, input_name)

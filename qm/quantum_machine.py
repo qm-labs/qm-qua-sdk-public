@@ -3,7 +3,6 @@ import logging
 import warnings
 from typing import Any, Dict, List, Tuple, Union, Mapping, Optional, Sequence, cast
 
-from qm import QmQueue
 from qm.program import Program
 from qm.jobs.qm_job import QmJob
 from qm.octave import QmOctaveConfig
@@ -13,6 +12,7 @@ from qm.utils import deprecation_message
 from qm.api.models.devices import Polarity
 from qm.api.frontend_api import FrontendApi
 from qm.jobs.pending_job import QmPendingJob
+from qm.jobs.job_queue_old_api import QmQueue
 from qm.jobs.job_queue_mock import QmQueueMock
 from qm.jobs.simulated_job import SimulatedJob
 from qm.api.simulation_api import SimulationApi
@@ -609,7 +609,7 @@ class QuantumMachine:
             the delay
         """
         element_instance = self._elements[element]
-        return element_instance.get_digital_delay(digital_input)
+        return element_instance.get_output_digital_delay(digital_input)
 
     def set_digital_delay(self, element: str, digital_input: str, delay: int) -> None:
         """Sets the delay of the digital input of the element
@@ -622,7 +622,7 @@ class QuantumMachine:
                 255 - 2 * buffer, in steps of 1
         """
         element_instance = self._elements[element]
-        element_instance.set_digital_delay(digital_input, delay)
+        element_instance.set_output_digital_delay(digital_input, delay)
 
     def get_digital_buffer(self, element: str, digital_input: str) -> int:
         """Gets the buffer for digital input of the element
@@ -636,7 +636,7 @@ class QuantumMachine:
             the buffer
         """
         element_instance = self._elements[element]
-        return element_instance.get_digital_buffer(digital_input_name=digital_input)
+        return element_instance.get_output_digital_buffer(digital_input_name=digital_input)
 
     def set_digital_buffer(self, element: str, digital_input: str, buffer: int) -> None:
         """Sets the buffer for digital input of the element
@@ -649,7 +649,7 @@ class QuantumMachine:
                 to (255 - delay) / 2, in steps of 1
         """
         element_instance = self._elements[element]
-        element_instance.set_digital_buffer(digital_input, buffer)
+        element_instance.set_output_digital_buffer(digital_input, buffer)
 
     def get_time_of_flight(self, element: str) -> int:
         """Gets the *time of flight*, associated with a measurement element.

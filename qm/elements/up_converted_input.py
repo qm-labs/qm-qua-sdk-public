@@ -27,6 +27,7 @@ class UpconvertedInput(MixInputs):
         port: Tuple[str, int],
         gain: Optional[float],
         calibration_db: Optional["CalibrationDB"] = None,
+        use_input_attenuators: bool = False,
     ):
         super().__init__(name, config, frontend_api, machine_id)
         self._client = client
@@ -34,7 +35,7 @@ class UpconvertedInput(MixInputs):
         self._port = port
         self._gain = gain
         self._calibration_db = calibration_db
-        self._use_input_attenuators = False
+        self._use_input_attenuators = use_input_attenuators
 
     @property
     def port(self) -> Tuple[str, int]:
@@ -77,6 +78,10 @@ class UpconvertedInput(MixInputs):
         :param use_input_attenuators: False means: never use the attenuators. True means: used it based on the desired gain.
         """
         self._use_input_attenuators = use_input_attenuators
+        if self._gain is not None:
+            self._client.set_gain(self._gain, self.lo_frequency, self._use_input_attenuators)
+        else:
+            logger.warning("Gain is not set, so the input attenuators cannot be set.")
 
     def set_lo_source(self, lo_port: OctaveLOSource) -> None:
         """
@@ -125,6 +130,7 @@ class UpconvertedInputNewApi(UpconvertedInput):
         port: Tuple[str, int],
         gain: Optional[float],
         calibration_db: Optional["CalibrationDB"] = None,
+        use_input_attenuators: bool = False,
     ):
         super().__init__(
             name,
@@ -135,6 +141,7 @@ class UpconvertedInputNewApi(UpconvertedInput):
             port=port,
             gain=gain,
             calibration_db=calibration_db,
+            use_input_attenuators=use_input_attenuators,
         )
 
     def set_output_dc_offset(self, i_offset: Optional[float] = None, q_offset: Optional[float] = None) -> None:

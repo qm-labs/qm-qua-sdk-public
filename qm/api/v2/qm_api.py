@@ -1,9 +1,10 @@
 import logging
-from typing import Dict, List, Type, Tuple, Union, Literal, Mapping, Iterable, Optional, TypedDict, cast, overload
+from typing import List, Type, Tuple, Union, Literal, Mapping, Iterable, Optional, TypedDict, cast, overload
 
 from qm.utils import LOG_LEVEL_MAP
 from qm.octave import QmOctaveConfig
 from qm.persistence import BaseStore
+from qm.api.v2.job_api import JobStatus
 from qm.grpc.qua_config import QuaConfig
 from qm.utils.async_utils import run_async
 from qm.api.v2.base_api_v2 import BaseApiV2
@@ -13,15 +14,16 @@ from qm.elements_db import init_octave_elements
 from qm.grpc.frontend import SimulatedResponsePart
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
-from qm.api.v2.job_api import JobStatus, SimulatedJobApi
+from qm.type_hinting.config_types import DictQuaConfig
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
 from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.api.simulation_api import create_simulation_request
+from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.elements.up_converted_input import UpconvertedInputNewApi
 from qm.api.v2.job_api.job_api import JobApi, JobData, transfer_statuses_to_enum
-from qm.type_hinting.config_types import DictQuaConfig, OPX1000ControllerConfigType
 from qm.exceptions import QopResponseError, CompilationException, FailedToExecuteJobException
+from qm.octave.qm_octave import QmOctaveForNewApi, create_mixer_correction, create_dc_offset_octave_update
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params, get_request_compiler_options
 from qm.octave.octave_mixer_calibration import (
     AutoCalibrationParams,
@@ -64,13 +66,21 @@ class QmApi(BaseApiV2[QmServiceStub]):
         capabilities: ServerCapabilities,
         octave_config: Optional[QmOctaveConfig],
         octave_manager: OctaveManager,
+        pb_config: Optional[QuaConfig] = None,
     ) -> None:
+        # todo - remove _pb_config when octave config is in the GW
         super().__init__(connection_details)
         self._caps = capabilities
         self._id = qm_id
         self._store = store
-        self._octave_elements = init_octave_elements(self._get_pb_config(), octave_config)
+        pb_config = pb_config or self._get_pb_config()
+        self._elements = init_octave_elements(pb_config, octave_config)
         self._octave_manager = octave_manager
+        self._octave = QmOctaveForNewApi(self, octave_manager)
+
+    @property
+    def octave(self) -> QmOctaveForNewApi:
+        return self._octave
 
     @property
     def id(self) -> str:
@@ -254,7 +264,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
         params: Optional[AutoCalibrationParams] = None,
     ) -> MixerCalibrationResults:
 
-        inst = self._octave_elements[qe]
+        inst = self._elements[qe]
 
         if params is None:
             params = AutoCalibrationParams()
@@ -281,27 +291,13 @@ class QmApi(BaseApiV2[QmServiceStub]):
         key = (inst_input.lo_frequency, cast(float, inst_input.gain))
         if key in res:
             qe_cal = res[key]
-            con_i, fem_i, port_i = inst_input.i_port.controller, inst_input.i_port.fem, inst_input.i_port.number
-            con_q, fem_q, port_q = inst_input.q_port.controller, inst_input.q_port.fem, inst_input.q_port.number
-            controllers: Dict[str, OPX1000ControllerConfigType] = {con_i: {"fems": {}}, con_q: {"fems": {}}}
-            controllers[con_i]["fems"][fem_i] = {"analog_outputs": {}}  # type: ignore[index]
-            controllers[con_q]["fems"][fem_q] = {"analog_outputs": {}}  # type: ignore[index]
-            controllers[con_i]["fems"][fem_i]["analog_outputs"][port_i] = {"offset": qe_cal.i0}  # type: ignore[index]
-            controllers[con_q]["fems"][fem_q]["analog_outputs"][port_q] = {"offset": qe_cal.q0}  # type: ignore[index]
-            update: DictQuaConfig = {"version": 1, "controllers": controllers}
+            update = create_dc_offset_octave_update(inst_input, qe_cal)
+            mixers = [
+                create_mixer_correction(if_freq, inst_input.lo_frequency, if_cal.fine.correction)
+                for if_freq, if_cal in qe_cal.image.items()
+            ]
+            update["mixers"] = {inst_input.mixer: mixers}
             self.update_config(update)
-
-        # I (YR) kept this here since in the old API we could set the mixer, but now we can't.
-        # We still need to decide what to do with it
-        # for (lo_freq, _), lo_cal in res.items():
-        #     for if_freq, if_cal in lo_cal.image.items():
-        #         fine_cal = if_cal.fine
-        #         self.set_mixer_correction(
-        #             mixer=inst_input.mixer,
-        #             intermediate_frequency=if_freq,
-        #             lo_frequency=lo_freq,
-        #             values=fine_cal.correction,
-        #         )
         return res
 
 

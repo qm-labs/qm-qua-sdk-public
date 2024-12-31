@@ -10,7 +10,6 @@ from qm.octave import QmOctaveConfig
 from qm.persistence import BaseStore
 from qm.grpc.qua_config import QuaConfig
 from qm.api.v2.base_api_v2 import BaseApiV2
-from qm.api.v2.job_api import SimulatedJobApi
 from qm.api.v2.qm_api_old import OldQmApiMock
 from qm.octave.octave_manager import OctaveManager
 from qm.type_hinting.config_types import DictQuaConfig
@@ -18,6 +17,7 @@ from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.qm_api import QmApi, handle_simulation_error
 from qm.exceptions import OpenQmException, QopResponseError
+from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.grpc.frontend import InterOpxConnection, ExecutionRequestSimulate
 from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, OldJobApiMock, transfer_statuses_to_enum
 from qm.grpc.v2 import (
@@ -86,7 +86,8 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
     def _stub_class(self) -> Type[QmmServiceStub]:
         return QmmServiceStub
 
-    def get_qm(self, qm_id: str) -> QmApi:
+    def get_qm(self, qm_id: str, _pb_config: Optional[QuaConfig] = None) -> QmApi:
+        # todo - remove _pb_config when octave config is in the GW
         return self.QM_CLASS(
             connection_details=self.connection_details,
             qm_id=qm_id,
@@ -94,6 +95,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
             capabilities=self._caps,
             octave_config=self._octave_config,
             octave_manager=self._octave_manager,
+            pb_config=_pb_config,
         )
 
     def get_job(self, job_id: str) -> JobApi:
@@ -161,7 +163,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         for warning in response.open_qm_warnings:
             logger.warning(f"Open QM ended with warning {warning.code}: {warning.message}")
 
-        return self.get_qm(response.quantum_machine_id)
+        return self.get_qm(response.quantum_machine_id, _pb_config=config)
 
     def perform_healthcheck(self) -> None:
         logger.info("Performing health check")
@@ -187,7 +189,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
                 name=name,
                 hostname=v.hostname,
                 controller_type=CONTROLLER_TYPES_MAPPING[v.controller_type],
-                fems={int(i): FEM_TYPES_MAPPING[f.type] for i, f in v.fems.items() if f.type > 0},
+                fems={int(i) + 1: FEM_TYPES_MAPPING[f.type] for i, f in v.fems.items() if f.type > 0},
             )
             for name, v in response.control_devices.items()
         }

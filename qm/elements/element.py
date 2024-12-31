@@ -67,34 +67,34 @@ class Element(Generic[ElementInputGRPCType]):
             freq = float(self._config.intermediate_frequency or 0)
         return sign * freq
 
-    def get_digital_delay(self, digital_input_name: str) -> int:
+    def get_output_digital_delay(self, digital_input_name: str) -> int:
         try:
             return self._config.digital_inputs[digital_input_name].delay
         except KeyError:
             raise Exception(f"Digital input for {digital_input_name} was not found.")
 
-    def get_digital_buffer(self, digital_input_name: str) -> int:
+    def get_output_digital_buffer(self, digital_input_name: str) -> int:
         try:
             return self._config.digital_inputs[digital_input_name].buffer
         except KeyError:
             raise Exception(f"Digital buffer for {digital_input_name} was not found.")
 
-    def set_digital_delay(self, digital_input: str, delay: int) -> None:
+    def set_output_digital_delay(self, digital_input: str, delay: int) -> None:
         if not isinstance(digital_input, str):
             raise Exception("port must be a string")
         if not isinstance(delay, int):
             raise Exception("delay must be an int")
         logger.debug(f"Setting delay of digital port '{digital_input}' on element '{self._name}' to '{delay}'")
-        self._frontend.set_digital_delay(self._id, self._name, digital_input, delay)
+        self._frontend.set_output_digital_delay(self._id, self._name, digital_input, delay)
         self._config.digital_inputs[digital_input].delay = delay
 
-    def set_digital_buffer(self, digital_input: str, buffer: int) -> None:
+    def set_output_digital_buffer(self, digital_input: str, buffer: int) -> None:
         if not isinstance(digital_input, str):
             raise Exception("port must be a string")
         if not isinstance(buffer, int):
             raise Exception("buffer must be an int.")
         logger.debug(f"Setting buffer of digital port '{digital_input}' on element '{self._name}' to '{buffer}'")
-        self._frontend.set_digital_buffer(self._id, self._name, digital_input, buffer)
+        self._frontend.set_output_digital_buffer(self._id, self._name, digital_input, buffer)
         self._config.digital_inputs[digital_input].buffer = buffer
 
     def set_input_dc_offset(self, output: str, offset: float) -> None:
@@ -144,10 +144,10 @@ class NewApiUpconvertedElement(Element[QuaConfigMixInputs]):
     ) -> None:
         raise NotImplementedError
 
-    def set_digital_delay(self, digital_input: str, delay: int) -> None:
+    def set_output_digital_delay(self, digital_input: str, delay: int) -> None:
         raise NotImplementedError
 
-    def set_digital_buffer(self, digital_input: str, buffer: int) -> None:
+    def set_output_digital_buffer(self, digital_input: str, buffer: int) -> None:
         raise NotImplementedError
 
     def set_input_dc_offset(self, output: str, offset: float) -> None:

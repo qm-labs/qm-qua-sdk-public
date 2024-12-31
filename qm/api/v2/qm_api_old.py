@@ -1,6 +1,8 @@
 import json
 import warnings
-from typing import List, Tuple, Union, Literal, Optional, Sequence
+from typing import List, Tuple, Union, Literal, Optional, Sequence, overload
+
+import betterproto
 
 from qm.api.v2.job_api import JobApi
 from qm.octave import QmOctaveConfig
@@ -21,7 +23,7 @@ from qm.type_hinting import Value, Number, NumpySupportedValue
 from qm.type_hinting.general import PathLike, NumpySupportedFloat
 from qm.api.v2.job_api.simulated_job_api import OldSimulatedJobApiMock
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
-from qm.grpc.qua_config import QuaConfigMicrowaveFemDec, QuaConfigAdcPortReference, QuaConfigDacPortReference
+from qm.grpc.qua_config import QuaConfig, QuaConfigMicrowaveFemDec, QuaConfigAdcPortReference, QuaConfigDacPortReference
 
 
 class OldQmApiMock(QmApi):
@@ -35,8 +37,9 @@ class OldQmApiMock(QmApi):
         capabilities: ServerCapabilities,
         octave_config: Optional[QmOctaveConfig],
         octave_manager: OctaveManager,
+        pb_config: Optional[QuaConfig] = None,
     ):
-        super().__init__(connection_details, qm_id, store, capabilities, octave_config, octave_manager)
+        super().__init__(connection_details, qm_id, store, capabilities, octave_config, octave_manager, pb_config)
         self._queue = QmQueueMock(store=store, api=self, capabilities=self._caps)
 
     def _get_job(self, job_id: str, store: BaseStore) -> OldJobApiMock:
@@ -48,7 +51,7 @@ class OldQmApiMock(QmApi):
                 method="qm.get_job_by_id",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method is going to be removed, please use qm.get_job.",
+                details="This method is going to be removed, please use `qm.get_job()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -62,7 +65,8 @@ class OldQmApiMock(QmApi):
                 method="qm.queue",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This property is going to be removed, please use the qm_api directly.",
+                details="This property is going to be removed, all functionality will exist directly under "
+                "`QuantumMachine`. For example, instead of `qm.queue.add(prog)` use `qm.add_to_queue(prog)`.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -134,7 +138,7 @@ class OldQmApiMock(QmApi):
                 method="qm.list_controllers",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method is going to be removed.",
+                details="This method is going to be removed, please get data from `qm.get_config()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -154,8 +158,7 @@ class OldQmApiMock(QmApi):
                 method="qm.set_mixer_correction",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method is going to be removed, please use the job API, "
-                "and work with elements, not mixers (use job.set_element_correction).",
+                details="This method is going to be removed, please use `job.set_element_correction()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -175,7 +178,13 @@ class OldQmApiMock(QmApi):
         self.update_config(config)
         job = self._get_running_job()
         if job is not None:
-            job.set_mixer_correction(mixer, intermediate_frequency, lo_frequency, values)
+            pb_config = self._get_pb_config()
+            for name, element_config in pb_config.v1_beta.elements.items():
+                if betterproto.serialized_on_wire(element_config.mix_inputs):
+                    if element_config.mix_inputs.mixer == mixer:
+                        if element_config.intermediate_frequency == intermediate_frequency:
+                            if element_config.mix_inputs.lo_frequency == lo_frequency:
+                                job.set_element_correction(name, values)
 
     def set_intermediate_frequency(self, element: str, freq: float) -> None:
         warnings.warn(
@@ -183,7 +192,8 @@ class OldQmApiMock(QmApi):
                 method="qm.set_intermediate_frequency",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method is going to be removed, please use the appropriate method in the job API.",
+                details="This method is going to be moved to the job API, please use "
+                "`job.set_intermediate_frequency()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -197,7 +207,8 @@ class OldQmApiMock(QmApi):
                 method="qm.get_intermediate_frequency",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method is going to be removed, please use the appropriate method in the job API.",
+                details="This method is going to be moved to the job API, please use "
+                "`job.get_intermediate_frequency()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -213,8 +224,8 @@ class OldQmApiMock(QmApi):
                 method="qm.get_output_dc_offset_by_element",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, Get idle data from get_config() "
-                "or current data from job APi for currently running job.",
+                details="This method is going to be removed, please get idle value from `qm.get_config()`"
+                " or current value from job `job.get_output_dc_offset_by_element()`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -222,18 +233,32 @@ class OldQmApiMock(QmApi):
         job = self._strict_get_running_job()
         return job.get_output_dc_offset_by_element(element, iq_input)
 
+    @overload
+    def set_output_dc_offset_by_element(self, element: str, input: Literal["single", "I", "Q"], offset: float) -> None:
+        pass
+
+    @overload
     def set_output_dc_offset_by_element(
         self,
         element: str,
-        input: Union[str, Tuple[str, str], List[str]],
+        input: Tuple[Literal["I", "Q"], Literal["I", "Q"]],
+        offset: Union[Tuple[float, float], List[float]],
+    ) -> None:
+        pass
+
+    def set_output_dc_offset_by_element(
+        self,
+        element: str,
+        input: Union[Literal["single", "I", "Q"], Tuple[Literal["I", "Q"], Literal["I", "Q"]], List[Literal["I", "Q"]]],
         offset: Union[float, Tuple[float, float], List[float]],
     ) -> None:
         warnings.warn(
             deprecation_message(
-                method="qm.get_output_dc_offset_by_element",
+                method="qm.set_output_dc_offset_by_element",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method is going to be removed, please use the appropriate method in the job API.",
+                details="This method is going to be removed, please set idle value with `qm.update_config()`"
+                " or current value from job `job.set_output_dc_offset_by_element()`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -248,7 +273,9 @@ class OldQmApiMock(QmApi):
                 port = self._get_input_port_from_single_input_element(element)
             config = self._create_config_for_output_dc_offset_setting(port, offset)
             self.update_config(config)
-            return
+            job = self._get_running_job()
+            if job is not None:
+                job.set_output_dc_offset_by_element(element, input, offset)
         elif isinstance(input, (list, tuple)):
             if not set(input) <= {"I", "Q"}:
                 raise FunctionInputError(f"Input names should be 'I' or 'Q', got {input}")
@@ -261,12 +288,11 @@ class OldQmApiMock(QmApi):
                 _port = ports[0] if _input == "I" else ports[1]
                 config = self._create_config_for_output_dc_offset_setting(_port, _offset)
                 self.update_config(config)
+                job = self._get_running_job()
+                if job is not None:
+                    job.set_output_dc_offset_by_element(element, input, offset)
         else:
             raise FunctionInputError(f"Input should be str or tuple, got {type(input)}")
-
-        job = self._get_running_job()
-        if job is not None:
-            job.set_output_dc_offset_by_element(element, input, offset)
 
     def set_output_filter_by_element(
         self,
@@ -283,7 +309,8 @@ class OldQmApiMock(QmApi):
                 method="qm.set_input_dc_offset_by_element",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, please use it from there.",
+                details="This method is going to be moved to the job API, please use "
+                "`job.set_input_dc_offset_by_element()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -302,8 +329,7 @@ class OldQmApiMock(QmApi):
                 method="qm.get_input_dc_offset_by_element",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, Get idle data from get_config()."
-                "or current data from job APi for currently running job.",
+                details="This method is going to be removed, please get the value from `qm.get_config()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -321,14 +347,14 @@ class OldQmApiMock(QmApi):
                 method="qm.get_digital_delay",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, Get idle data from get_config() "
-                "or current data from job APi for currently running job.",
+                details="This method is going to be moved to the job API, please use use "
+                "`job.get_output_digital_delay()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
         )
         job = self._strict_get_running_job()
-        return job.get_digital_buffer(element, digital_input)
+        return job.get_output_digital_buffer(element, digital_input)
 
     def set_digital_delay(self, element: str, digital_input: str, delay: int) -> None:
         warnings.warn(
@@ -336,13 +362,14 @@ class OldQmApiMock(QmApi):
                 method="qm.set_digital_delay",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, please use it from there.",
+                details="This method is going to be moved to the job API, please use use "
+                "`job.set_output_digital_delay()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
         )
         job = self._strict_get_running_job()
-        job.set_digital_delay(element, digital_input, delay)
+        job.set_output_digital_delay(element, digital_input, delay)
 
     def get_digital_buffer(self, element: str, digital_input: str) -> int:
         warnings.warn(
@@ -350,14 +377,14 @@ class OldQmApiMock(QmApi):
                 method="qm.get_digital_buffer",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, Get idle data from get_config() "
-                "or current data from job APi for currently running job.",
+                details="This method is going to be moved to the job API, please use use "
+                "`job.get_output_digital_buffer()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
         )
         job = self._strict_get_running_job()
-        return job.get_digital_buffer(element, digital_input)
+        return job.get_output_digital_buffer(element, digital_input)
 
     def set_digital_buffer(self, element: str, digital_input: str, buffer: int) -> None:
         warnings.warn(
@@ -365,13 +392,14 @@ class OldQmApiMock(QmApi):
                 method="qm.set_digital_buffer",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, please use it from there.",
+                details="This method is going to be moved to the job API, please use use "
+                "`job.set_output_digital_buffer()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
         )
         job = self._strict_get_running_job()
-        job.set_digital_buffer(element, digital_input, buffer)
+        job.set_output_digital_buffer(element, digital_input, buffer)
 
     def get_time_of_flight(self, element: str) -> int:
         warnings.warn(
@@ -379,7 +407,7 @@ class OldQmApiMock(QmApi):
                 method="qm.get_time_of_flight",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method is going to be removed. If you want the idle values, parse the config yourself.",
+                details="This method is going to be removed, please get the value from `qm.get_config()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -396,7 +424,7 @@ class OldQmApiMock(QmApi):
                 method="qm.get_smearing",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method is going to be removed. If you want the idle values, parse the config yourself.",
+                details="This method is going to be removed, please get the value from `qm.get_config()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -414,7 +442,7 @@ class OldQmApiMock(QmApi):
                 method="qm.io1",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This property is going to be removed, please use the appropriate method in the job API.",
+                details="This property is going to be removed, please use `job.get_io_values()[0]`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -428,7 +456,7 @@ class OldQmApiMock(QmApi):
                 method="qm.io1",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This setter is going to be removed, please use the appropriate method in the job API.",
+                details="This property is going to be removed, please use `job.set_io_values(io1=value)`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -442,7 +470,7 @@ class OldQmApiMock(QmApi):
                 method="qm.io2",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This property is going to be removed, please use the appropriate method in the job API.",
+                details="This property is going to be removed, please use `job.get_io_values()[1]`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -456,7 +484,7 @@ class OldQmApiMock(QmApi):
                 method="qm.io2",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This setter is going to be removed, please use the appropriate method in the job API.",
+                details="This property is going to be removed, please use `job.set_io_values(io2=value)`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -469,7 +497,7 @@ class OldQmApiMock(QmApi):
                 method="qm.set_io1_value",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, please use it from there",
+                details="This method is going to be moved to the job API, please use `job.set_io_values(io1=value)`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -482,7 +510,7 @@ class OldQmApiMock(QmApi):
                 method="qm.set_io2_value",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, please use it from there",
+                details="This method is going to be moved to the job API, please use `job.set_io_values(io2=value)`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -499,7 +527,7 @@ class OldQmApiMock(QmApi):
                 method="qm.set_io_values",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, please use it from there",
+                details="This method is going to be moved to the job API, please use `job.set_io_values()`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -516,7 +544,7 @@ class OldQmApiMock(QmApi):
                 method="qm.get_io2_value",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, please use it from there",
+                details="This method is going to be moved to the job API, please use `job.get_io_values()[0]`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -529,7 +557,7 @@ class OldQmApiMock(QmApi):
                 method="qm.get_io2_value",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, please use it from there",
+                details="This method is going to be moved to the job API, please use `job.get_io_values()[1]`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -542,7 +570,7 @@ class OldQmApiMock(QmApi):
                 method="qm.get_io_values",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method moved to the job API, please use it from there",
+                details="This method is going to be moved to the job API, please use `job.get_io_values()`",
             ),
             DeprecationWarning,
             stacklevel=1,
@@ -584,7 +612,7 @@ class OldQmApiMock(QmApi):
                 method="qm.get_running_job",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="This method is going to be removed, use qm.get_jobs(status=['Running'])",
+                details="This method is going to be removed, please use `qm.get_jobs(status=['Running'])`",
             ),
             DeprecationWarning,
             stacklevel=1,

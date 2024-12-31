@@ -571,7 +571,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
     def _perform_coarse_iq_scan(
         self, job: Union[RunningQmJob, JobApi], n_lo: int, lo_offset: int
     ) -> Tuple[Array, Array, List[LOAnalysisDebugData], Array]:
-        self._set_io_values(io1=1)
+        self._set_io_values(io1=0)
 
         job.resume()
         i0_coarse, q0_coarse, debug_coarse = _get_and_analyze_lo_data(job, n_lo, lo_offset, 1)
@@ -773,7 +773,6 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
     ) -> None:
         element_name_to_if_freq = {
             self.names.iq_mixer: if_freq,
-            self.names.signal_analyzer: if_freq - down_mixer_offset,
             self.names.lo_analyzer: -down_mixer_offset,
             self.names.image_analyzer: -if_freq - down_mixer_offset,
         }
@@ -854,9 +853,11 @@ class NewApiOctaveMixerCalibration(OctaveMixerCalibrationBase):
         return self._job
 
     def _set_analyzer_element_outputs_dc_offsets(self, out1: float, out2: float) -> None:
-        analyzer_elem = self.job.elements[self.names.lo_analyzer]
-        analyzer_elem.outputs["out1"].set_dc_offset(out1)
-        analyzer_elem.outputs["out2"].set_dc_offset(out2)
+        # This one is not implemented in the GW, and not so crucial for the calibration, so we remove it for now.
+        return
+        # analyzer_elem = self.job.elements[self.names.lo_analyzer]
+        # analyzer_elem.outputs["out1"].set_dc_offset(out1)
+        # analyzer_elem.outputs["out2"].set_dc_offset(out2)
 
     def _set_iq_mixer_element_input_dc_offsets(self, i_offset: float, q_offset: float) -> None:
         iq_mixer_elem = self.job.elements[self.names.iq_mixer]
@@ -866,7 +867,7 @@ class NewApiOctaveMixerCalibration(OctaveMixerCalibrationBase):
 
     def _execute_job(self, compiled: str) -> JobApi:
         job = self._qm_api.add_to_queue(compiled)
-        job.wait_for_execution()
+        job.wait_until("Running", 10.0)
         self._job = job
         return job
 

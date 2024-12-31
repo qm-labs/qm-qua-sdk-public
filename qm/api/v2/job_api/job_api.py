@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Dict, List, Type, Tuple, Union, Literal, TypeVar, Iterable, Optional, Sequence, Collection, overload
 
-import betterproto
 import numpy as np
 
 from qm.qua import fixed
@@ -17,6 +16,7 @@ from qm.utils.async_utils import run_async
 from qm.results import StreamingResultFetcher
 from qm.api.v2.job_result_api import JobResultApi
 from qm._report import ExecutionError, ExecutionReport
+from qm.type_hinting import Value, NumpySupportedValue
 from qm.api.v2.job_api.generic_apis import JobGenericApi
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
@@ -24,7 +24,6 @@ from qm.exceptions import QmValueError, FunctionInputError
 from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.api.v2.job_api.job_elements_db import JobElementsDB
 from qm.utils.general_utils import create_input_stream_name
-from qm.type_hinting import Value, Number, NumpySupportedValue
 from qm.grpc.job_manager import IntStreamData, BoolStreamData, FixedStreamData
 from qm.api.v2.job_api.element_input_api import MwInputApi, MixInputsApi, SingleInputApi
 from qm.grpc.v2 import (
@@ -65,7 +64,7 @@ for k, v in JOB_STATUS_MAPPING.items():
     _inverse_job_status_mapping_tmp[v].append(k)
 _INVERSE_JOB_STATUS_MAPPING = dict(_inverse_job_status_mapping_tmp)
 
-IO_VALUE_TYPES = Union[Type[bool], Type[int], Type[float], Type[fixed]]
+IoValueTypes = Union[Type[bool], Type[int], Type[float], Type[fixed]]
 
 
 class JobFailedError(ValueError):
@@ -110,7 +109,7 @@ def _extract_io_value_type(
 
 
 def _extract_io_value_type(
-    io_value: GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData, io_type: Optional[IO_VALUE_TYPES]
+    io_value: GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData, io_type: Optional[IoValueTypes]
 ) -> Union[bool, int, float, GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData]:
     if io_type is None:
         return io_value
@@ -297,6 +296,12 @@ class JobApi(JobGenericApi):
         )
         self._run(self._stub.set_io_values(request, timeout=self._timeout))
 
+    def set_io1_value(self, value: Optional[NumpySupportedValue]) -> None:
+        self.set_io_values(io1=value)
+
+    def set_io2_value(self, value: Optional[NumpySupportedValue]) -> None:
+        self.set_io_values(io2=value)
+
     @overload
     def get_io_values(
         self, *, io1_type: None = ..., io2_type: None = ...
@@ -335,7 +340,9 @@ class JobApi(JobGenericApi):
         pass
 
     @overload
-    def get_io_values(self, *, io1_type: Type[int], io2_type: Type[bool]) -> Tuple[int, bool]:  # type: ignore[overload-overlap]
+    def get_io_values(  # type: ignore[overload-overlap]
+        self, *, io1_type: Type[int], io2_type: Type[bool]
+    ) -> Tuple[int, bool]:
         # This overlap is because int and bool are not distinct types in runtime
         pass
 
@@ -378,17 +385,65 @@ class JobApi(JobGenericApi):
     @overload
     def get_io_values(
         self, *, io1_type: Union[Type[float], Type[fixed]], io2_type: Union[Type[float], Type[fixed]]
-    ) -> Tuple[int, float]:
+    ) -> Tuple[float, float]:
         pass
 
     def get_io_values(
-        self, *, io1_type: Optional[IO_VALUE_TYPES] = None, io2_type: Optional[IO_VALUE_TYPES] = None
+        self, *, io1_type: Optional[IoValueTypes] = None, io2_type: Optional[IoValueTypes] = None
     ) -> Tuple[
         Union[bool, int, float, GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData],
         Union[bool, int, float, GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData],
     ]:
         v1, v2 = self._fetch_io_values()
         return _extract_io_value_type(v1, io1_type), _extract_io_value_type(v2, io2_type)
+
+    @overload
+    def get_io1_value(
+        self,
+        as_type: None = ...,
+    ) -> GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData:
+        pass
+
+    @overload
+    def get_io1_value(self, as_type: Type[bool]) -> bool:
+        pass
+
+    @overload
+    def get_io1_value(self, as_type: Type[int]) -> int:
+        pass
+
+    @overload
+    def get_io1_value(self, as_type: Union[Type[float], Type[fixed]]) -> float:
+        pass
+
+    def get_io1_value(
+        self, as_type: Optional[IoValueTypes] = None
+    ) -> Union[bool, int, float, GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData]:
+        return self.get_io_values(io1_type=as_type)[0]
+
+    @overload
+    def get_io2_value(
+        self,
+        as_type: None = ...,
+    ) -> GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData:
+        pass
+
+    @overload
+    def get_io2_value(self, as_type: Type[bool]) -> bool:
+        pass
+
+    @overload
+    def get_io2_value(self, as_type: Type[int]) -> int:
+        pass
+
+    @overload
+    def get_io2_value(self, as_type: Union[Type[float], Type[fixed]]) -> float:
+        pass
+
+    def get_io2_value(
+        self, as_type: Optional[IoValueTypes] = None
+    ) -> Union[bool, int, float, GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData]:
+        return self.get_io_values(io2_type=as_type)[1]
 
     def _fetch_io_values(
         self,
@@ -399,9 +454,6 @@ class JobApi(JobGenericApi):
         request = GetIoValuesRequest(job_id=self._id)
         response = self._run(self._stub.get_io_values(request, timeout=self._timeout))
         return response.io1, response.io2
-
-    def get_blocking_input_streams(self) -> List[str]:
-        raise NotImplementedError("This function is not for alpha")
 
     @property
     def result_handles(self) -> StreamingResultFetcher:
@@ -491,10 +543,28 @@ class JobApi(JobGenericApi):
         else:
             raise ValueError(f"Element {element} of type {type(input_instance)} does not have a 'port' property.")
 
+    @overload
     def set_output_dc_offset_by_element(
         self,
         element: str,
-        input: Optional[Union[str, Tuple[str, str], List[str]]],
+        input: Union[Tuple[Literal["I", "Q"], Literal["I", "Q"]], List[Literal["I", "Q"]]],
+        offset: Union[Tuple[float, float], List[float]],
+    ) -> None:
+        pass
+
+    @overload
+    def set_output_dc_offset_by_element(
+        self,
+        element: str,
+        input: Literal["single", "I", "Q"],
+        offset: float,
+    ) -> None:
+        pass
+
+    def set_output_dc_offset_by_element(
+        self,
+        element: str,
+        input: Union[Literal["single", "I", "Q"], Tuple[Literal["I", "Q"], Literal["I", "Q"]], List[Literal["I", "Q"]]],
         offset: Union[float, Tuple[float, float], List[float]],
     ) -> None:
         """Set the current DC offset of the OPX analog output channel associated with an element.
@@ -516,9 +586,9 @@ class JobApi(JobGenericApi):
 
         Examples:
             ```python
-            qm.set_output_dc_offset_by_element('flux', 'single', 0.1)
-            qm.set_output_dc_offset_by_element('qubit', 'I', -0.01)
-            qm.set_output_dc_offset_by_element('qubit', ('I', 'Q'), (-0.01, 0.05))
+            job.set_output_dc_offset_by_element('flux', 'single', 0.1)
+            job.set_output_dc_offset_by_element('qubit', 'I', -0.01)
+            job.set_output_dc_offset_by_element('qubit', ('I', 'Q'), (-0.01, 0.05))
             ```
 
         Note:
@@ -546,6 +616,8 @@ class JobApi(JobGenericApi):
                 raise ValueError(f"Invalid input - {input}")
             input_instance.set_dc_offsets(**kwargs)
         elif isinstance(input_instance, SingleInputApi):
+            if input != "single":
+                raise ValueError(f"Invalid input - {input} while the element has a single input")
             if not isinstance(offset, (int, float)):
                 raise FunctionInputError(f"Input should be int or float, got {type(offset)}")
             input_instance.set_dc_offset(offset)
@@ -588,7 +660,7 @@ class JobApi(JobGenericApi):
         element_instance = self.elements[element]
         return element_instance.outputs[output].get_dc_offset()
 
-    def get_digital_delay(self, element: str, digital_input: str) -> int:
+    def get_output_digital_delay(self, element: str, digital_input: str) -> int:
         """Gets the delay of the digital input of the element
 
         Args:
@@ -602,7 +674,7 @@ class JobApi(JobGenericApi):
         element_instance = self.elements[element]
         return element_instance.digital_inputs[digital_input].get_delay()
 
-    def set_digital_delay(self, element: str, digital_input: str, delay: int) -> None:
+    def set_output_digital_delay(self, element: str, digital_input: str, delay: int) -> None:
         """Sets the delay of the digital input of the element
 
         Args:
@@ -615,7 +687,7 @@ class JobApi(JobGenericApi):
         element_instance = self.elements[element]
         element_instance.digital_inputs[digital_input].set_delay(delay)
 
-    def get_digital_buffer(self, element: str, digital_input: str) -> int:
+    def get_output_digital_buffer(self, element: str, digital_input: str) -> int:
         """Gets the buffer for digital input of the element
 
         Args:
@@ -629,7 +701,7 @@ class JobApi(JobGenericApi):
         element_instance = self.elements[element]
         return element_instance.digital_inputs[digital_input].get_buffer()
 
-    def set_digital_buffer(self, element: str, digital_input: str, buffer: int) -> None:
+    def set_output_digital_buffer(self, element: str, digital_input: str, buffer: int) -> None:
         """Sets the buffer for digital input of the element
 
         Args:
@@ -708,10 +780,10 @@ class OldJobApiMock(JobApi):
     ) -> None:
         warnings.warn(
             deprecation_message(
-                method="insert_input_stream",
+                method="job.insert_input_stream",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="Use `push_to_input_stream` instead",
+                details="This method was renamed to `job.push_to_input_stream()`.",
             ),
             DeprecationWarning,
             stacklevel=2,
@@ -727,10 +799,10 @@ class OldJobApiMock(JobApi):
         """Halts the job on the opx"""
         warnings.warn(
             deprecation_message(
-                method="halt",
+                method="job.halt",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="Use `cancel` instead.",
+                details="This method was renamed to `job.cancel`.",
             ),
             DeprecationWarning,
             stacklevel=2,
@@ -741,37 +813,12 @@ class OldJobApiMock(JobApi):
     def wait_for_execution(self, timeout: float = float("infinity")) -> "JobApi":
         warnings.warn(
             deprecation_message(
-                method="wait_for_execution",
+                method="job.ait_for_execution",
                 deprecated_in="1.1.8",
                 removed_in="1.2.0",
-                details="Use `wait_until` instead.",
+                details='This method is going to be removed, please use `job.wait_until("Running")`.',
             ),
             DeprecationWarning,
             stacklevel=2,
         )
         return super().wait_for_execution(timeout)
-
-    def set_mixer_correction(
-        self,
-        mixer: str,
-        intermediate_frequency: Number,
-        lo_frequency: Number,
-        values: Tuple[float, float, float, float],
-    ) -> None:
-        warnings.warn(
-            deprecation_message(
-                method="job.set_mixer_correction",
-                deprecated_in="1.1.8",
-                removed_in="1.2.0",
-                details="This method is going to be removed, work with elements, not mixers.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
-        pb_config = self._get_pb_config()
-        for name, element_config in pb_config.v1_beta.elements.items():
-            if betterproto.serialized_on_wire(element_config.mix_inputs):
-                if element_config.mix_inputs.mixer == mixer:
-                    if element_config.intermediate_frequency == intermediate_frequency:
-                        if element_config.mix_inputs.lo_frequency == lo_frequency:
-                            self.set_element_correction(name, values)

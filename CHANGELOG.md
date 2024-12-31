@@ -4,11 +4,129 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## Unreleased
+
+
+## 1.2.0a1 - 2024-07-02
+Tested against QOP 1.2, 2.4.1, 3.1 
+### Changed
+#### QMM (QuantumMachinesManager API)
+- `qmm.get_controllers()` - returns also the types of the FEMs they contain.  For QOP2.x (OPX+) it returns single FEM.
+- QOP 3.x (OPX1000) users will get a new object based return when calling `qmm.version()`. For QOP 2.x (OPX+) users the returned object stays the same.
+#### QM (QuantumMachine API)
+- When closing a QM with `qm.close()`, `None` will be returned instead of `True`.
+#### Job API
+- `job.id` is changed to `job.get_job_id()`.
+- When a job has data loss, an error is raised instead of a warning.
+#### General
+- Simulation of MW signals returns a complex signal of the I and Q quadratures, before the upconversion.
+- The MW-FEM ADC stream is returned as a complex float representing the I and Q quadratures.
+
 ### Fixed
 - Fixed a bug that opened a redundant communication with Octaves in the cluster when opening a QM, even if the Octaves were not in the config.
 - Removed the duplication of keys we have in simulation results, keys are now prefixed with "1-" or "2-" to indicate the fem index (also for OPX).
 - Fixed an error that occurred when setting the Octave to default connectivity and also adding the OPX input ports manually to the readout element.
-- Fixed an error of a missing attribute in the octave instance.
+- Fixed a bug introduced in 1.1.7 that prevented multiple Octaves to be used in the same QM in some cases.
+- Fixed validation of the pulse configuration to catch typos in operation value.
+- Fixed a bug that set the Octave's input attenuators to 0 regardless of the config.
+
+### Added
+#### QMM (QuantumMachinesManager API)
+- Added `qmm.list_open_qms()` which replaced `qmm.list_open_quantum_machines()`. 
+- Added `qmm.close_all_qms()` which replaced `qmm.close_all_quantum_machines()`. 
+- Added `qmm.get_jobs(filter_options)` to get a list of jobs that match the filter options. This function is currently only available for QOP 3.x (OPX1000) users.
+- Added `qmm.get_job(job_id)` to get an instance of running job by its ID. This function is currently only available for QOP 3.x (OPX1000) users.
+- Added `qmm.get_job_result_handles(job_id)` to get the results of a job by its ID. This is a backwards compatible solution that will be also removed soon.
+- Added `qmm.get_devices()` which returns both the OPX controllers and also the Octaves connected to the system.
+#### QM (QuantumMachine API)
+- Added `qm.update_config(config)` function that sets/update the **physical** properties of the qm.
+- Added `qm.get_jobs(filter_options)` to get the jobs on the current machine.
+#### Job API
+- Added `job.get_compilation_config()` that returns the config with which the running program was compiled.
+- Added `job.__str__` and `job.__repr__` methods for the `QmJob` class.
+- Added `job.get_status()` to get the status of a job.
+- Added `job.set_io_values()` to set the IO values to the running program.
+- Added `job.set_io1_value()` to set the IO value to the running program.
+- Added `job.set_io2_value()` to set the IO value to the running program.
+- Added `job.get_io_values(io1_type, io2_type)` to get the IO values from the running program.
+- Added `job.get_io1_values(as_type)` to get the IO value from the running program.
+- Added `job.get_io2_values(as_type)` to get the IO value from the running program.
+- Added `job.wait_until(status)` to get the job status.
+- Added `job.is_running()` to check if the program is still actively running.
+- Added `job.is_finished()` to check if the program is done (or canceled, or has an error).
+- Added `job.set/get_element_correction(...)` to set/get the correction matrix currently used by the element.
+- Added `job.set/get_intermediate_frequency(...)` to set/get the current intermediate frequency of the element
+- Added `job.set/get_output_digital_delay(...)` to set/get the current digital delay of the element's port.
+- Added `job.set/get_output_digital_buffer(...)` to set/get the current digital buffer of the element's port.
+- Added `job.set/get_output_dc_offset_by_element(...)` to set/get the current dc offset of the element's port.
+- Added `job.update_oscillator_frequency(...)` to update the MW-FEM upconverter and downconverter frequencies.
+- Added `job.push_to_input_stream()` which replaces `job.insert_input_stream()`
+- Added `job.cancel()` which cancels a job in the queue or halts a running job.
+#### QUA
+- `dual_demod.full()` can now be called without referencing the element's outputs, and default values are set: `dual_demod.full("cos", "sin", I)` -> `dual_demod.full("cos", "out1", "sin", "out2", I)`. This is compatible with performing demodulation with the MW-FEM. 
+- A new QUA context manager `port_condition` is introduced that allows faster conditional play for the entire port, supported with the MW-FEM.
+#### Config
+- Added an FEM type called `MW`, which has its own set of properties. 
+- There is a new input to an element called `MWInput`, that references one output port in the MW-FEM.
+- There is a new output called `MWOutput`, that references one input port in the MW-FEM.
+#### General
+- Added two new stream processing commands `.real()` and `.image()`, that can be applied to a MW-FEM ADC stream.
+
+### Deprecated
+#### QMM (QuantumMachinesManager API)
+- `qmm.list_open_quantum_machines()` has been replaced by `qmm.list_open_qms()`
+- `qmm.close_all_quantum_machines()` has been replaced by `qmm.close_all_qms()`
+- `qmm.open_qm_from_file()` is deprecated and will be removed in the future.
+- `qmm.clear_all_job_results()` is deprecated and will be removed in the future.
+#### QM (QuantumMachine API)
+- `save_config_to_file` is deprecated and will be removed in the future.
+- The following methods will be moved to the job API: 
+  - `qm.get_digital_buffer()` -> `job.get_output_digital_buffer()`
+  - `qm.set_digital_buffer()` -> `job.set_output_digital_buffer()`
+  - `qm.get_digital_delay()` -> `job.getoutput__digital_delay()`
+  - `qm.set_digital_delay()` -> `job.setoutput__digital_delay()`
+  - `qm.get_input_dc_offset_by_element()` -> `job.get_input_dc_offset_by_element()`
+  - `qm.set_input_dc_offset_by_element()` -> `job.set_input_dc_offset_by_element()`
+  - `qm.get_io1_value()` -> `job.get_io1_value()`
+  - `qm.set_io1_value()` -> `job.set_io1_value()`
+  - `qm.get_io2_value()` -> `job.get_io2_value()`
+  - `qm.set_io2_value()` -> `job.set_io2_value()`
+  - `qm.get_io_values()` -> `job.get_io_values()`
+  - `qm.set_io_values()` -> `job.set_io_values()`
+  - `qm.get_intermediate_frequency()` -> `job.get_intermediate_frequency()`
+  - `qm.set_intermediate_frequency()` -> `job.set_intermediate_frequency()`
+  - `qm.get_output_dc_offset_by_element()` -> `job.get_output_dc_offset_by_element()`
+  - `qm.set_output_dc_offset_by_element()` -> `job.set_output_dc_offset_by_element()`
+- The following methods will be deprecated, these values can be set/get from the config:
+  - `qm.set_mixer_correction()`
+  - `qm.get_smearing()`
+  - `qm.get_time_of_flight()`
+  - `qm.list_controllers()`
+- The following methods will be deprecated:
+  - `qm.get_running_job()`
+- `qm.queue` is being deprecated, management of the queue is moving to the QM itself:
+  - `qm.queue.count()` -> `qm.get_queue_count()`
+  - `qm.queue.pending_jobs()` -> `qm.get_pending_jobs()`
+  - `qm.queue.add()` -> `qm.add_to_queue()`
+  - `qm.queue.add_compiled()` -> `qm.add_compiled()`
+  - `qm.queue.clear()` -> `qm.clear_queue()`
+  - `qm.queue.get()` -> `qm.get_job_by_id()`
+  - `qm.queue.get_by_user_id()` -> `qm.get_jobs_by_user_id()`
+  - `qm.queue.remove_by_user_id()` -> `qm.clear_jobs_by_user_id()`
+- `qm.queue` is being deprecated, this methods will be removed in the future:
+  - `qm.queue.add_to_start()`
+  - `qm.queue.get_at()`
+  - `qm.queue.remove_by_id()`
+  - `qm.queue.remove_by_position()`
+#### Job API
+- The `job.status` property is deprecated, and will be removed in the future. Please use `job.get_status()`, which has a different return type.
+- `job.insert_input_stream()` is renamed to `job.push_to_input_stream()`
+- `job.position_in_queue()` is deprecated and will be removed in the future.
+- `job.wait_for_execution()` is deprecated and will be removed in the future. Please use `job.wait_until("Running")` instead.
+- `job.halt()` is renamed to `job.cancel()`.
+- The property `job.manager` has been removed.
+
+### Removed
+-
 
 ## 1.1.7 - 2024-02-19
 Tested against QOP 1.2, 2.2

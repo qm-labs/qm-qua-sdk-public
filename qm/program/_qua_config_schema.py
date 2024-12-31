@@ -1,5 +1,19 @@
 import logging
-from typing import Any, Dict, List, Tuple, Union, Mapping, TypeVar, Optional, TypedDict, cast, overload
+from typing import (
+    Any,
+    Dict,
+    List,
+    Tuple,
+    Union,
+    Mapping,
+    TypeVar,
+    Callable,
+    Optional,
+    TypedDict,
+    Collection,
+    cast,
+    overload,
+)
 
 import betterproto
 from betterproto.lib.google.protobuf import Empty
@@ -377,6 +391,16 @@ PortReferenceSchema = UnionField(
 )
 
 
+def validate_string_is_one_of(valid_values: Collection[str]) -> Callable[[str], None]:
+    valid_values = {value.lower() for value in valid_values}
+
+    def _validate(string: str) -> None:
+        if not string.lower() in valid_values:
+            raise ValidationError(f"Value '{string}' is not one of the valid values: {valid_values}")
+
+    return _validate
+
+
 class AnalogOutputFilterDefSchema(Schema):
     feedforward = fields.List(
         fields.Float(),
@@ -502,11 +526,11 @@ class AnalogOutputPortDefSchemaOPX1000(AnalogOutputPortDefSchema):
     )
     upsampling_mode = fields.String(
         metadata={"description": "Mode of sampling rate, can be mw (default) or pulse"},
-        validate=validate.OneOf(["mw", "pulse"]),
+        validate=validate_string_is_one_of({"mw", "pulse"}),
     )
     output_mode = fields.String(
         metadata={"description": "Mode of the port, can be direct (default) or amplified"},
-        validate=validate.OneOf(["direct", "amplified"]),
+        validate=validate_string_is_one_of({"direct", "amplified"}),
     )
 
     @post_load(pass_many=False)
@@ -572,7 +596,7 @@ class DigitalOutputPortDefSchema(Schema):
         metadata={"description": "Whether the port is inverted. " "If True, the output will be inverted."},
     )
     level = fields.String(
-        validate=validate.OneOf(["TTL", "LVTTL"]),
+        validate=validate_string_is_one_of({"ttl", "lvttl"}),
         metadata={
             "description": "The voltage level of the digital output, can be TTL or LVTTL (default) - "
             "for now this option is available only for MW-FEM"
@@ -592,7 +616,7 @@ class DigitalInputPortDefSchema(Schema):
     deadtime = fields.Int(metadata={"description": "The minimal time between pulses, in ns."}, required=True)
     polarity = fields.String(
         metadata={"description": "The Detection edge - Whether to trigger in the rising or falling edge of the pulse"},
-        validate=validate.OneOf(["RISING", "FALLING", "rising", "falling"]),
+        validate=validate_string_is_one_of({"rising", "falling"}),
         required=True,
     )
     threshold = fields.Number(metadata={"description": "The minimum voltage to trigger when a pulse arrives"})
@@ -624,16 +648,16 @@ class OctaveRFOutputSchema(Schema):
     LO_frequency = fields.Number(metadata={"description": "The frequency of the LO in Hz"})
     LO_source = fields.String(
         metadata={"description": "The source of the LO}, e.g. 'internal' or 'external'"},
-        validate=validate.OneOf(["internal", "external"]),
+        validate=validate_string_is_one_of({"internal", "external"}),
     )
     output_mode = fields.String(
         metadata={"description": "The output mode of the RF output"},
-        validate=validate.OneOf(["always_on", "always_off", "triggered", "triggered_reversed"]),
+        validate=validate_string_is_one_of({"always_on", "always_off", "triggered", "triggered_reversed"}),
     )
     gain = fields.Number(metadata={"description": "The gain of the RF output in dB"})
     input_attenuators = fields.String(
         metadata={"description": "The attenuators of the I and Q inputs"},
-        validate=validate.OneOf(["ON", "OFF", "on", "off"]),
+        validate=validate_string_is_one_of({"on", "off"}),
     )
     I_connection = PortReferenceSchema
     Q_connection = PortReferenceSchema
@@ -688,7 +712,7 @@ class _SemiBuiltOctaveConfig(TypedDict, total=False):
     RF_outputs: Dict[int, QuaConfigOctaveRfOutputConfig]
     RF_inputs: Dict[int, QuaConfigOctaveRfInputConfig]
     IF_outputs: QuaConfigOctaveIfOutputsConfig
-    connectivity: str
+    connectivity: Union[str, Tuple[str, int]]
 
 
 class OctaveSchema(Schema):
@@ -710,8 +734,9 @@ class OctaveSchema(Schema):
         metadata={"description": "The RF inputs and their properties."},
     )
     IF_outputs = fields.Nested(IFOutputsSchema)
-    connectivity = fields.String(
-        metadata={"description": "Sets the default connectivity for all RF outputs and inputs in the octave."}
+    connectivity = UnionField(
+        [fields.String(), _create_tuple_field([fields.String(), fields.Int()])],
+        metadata={"description": "Sets the default connectivity for all RF outputs and inputs in the octave."},
     )
 
     @post_load(pass_many=False)
@@ -733,23 +758,27 @@ class OctaveSchema(Schema):
             to_return.if_outputs = data["IF_outputs"]
 
         if "connectivity" in data:
-            controller_name = data["connectivity"]
+            connectivity = data["connectivity"]
+            if isinstance(connectivity, str):
+                controller_name, fem_idx = connectivity, OPX_FEM_IDX
+            else:
+                controller_name, fem_idx = connectivity
             for upconverter_idx, upconverter in to_return.rf_outputs.items():
                 if betterproto.serialized_on_wire(upconverter.i_connection) or betterproto.serialized_on_wire(
                     upconverter.q_connection
                 ):
                     raise OctaveConnectionAmbiguity
-                upconverter.i_connection = dac_port_ref_to_pb(controller_name, OPX_FEM_IDX, 2 * upconverter_idx - 1)
-                upconverter.q_connection = dac_port_ref_to_pb(controller_name, OPX_FEM_IDX, 2 * upconverter_idx)
+                upconverter.i_connection = dac_port_ref_to_pb(controller_name, fem_idx, 2 * upconverter_idx - 1)
+                upconverter.q_connection = dac_port_ref_to_pb(controller_name, fem_idx, 2 * upconverter_idx)
 
             if betterproto.serialized_on_wire(to_return.if_outputs):
                 raise OctaveConnectionAmbiguity
             to_return.if_outputs.if_out1 = QuaConfigOctaveSingleIfOutputConfig(
-                port=QuaConfigAdcPortReference(controller=controller_name, fem=OPX_FEM_IDX, number=1),
+                port=QuaConfigAdcPortReference(controller=controller_name, fem=fem_idx, number=1),
                 name=IF_OUT1_DEFAULT,
             )
             to_return.if_outputs.if_out2 = QuaConfigOctaveSingleIfOutputConfig(
-                port=QuaConfigAdcPortReference(controller=controller_name, fem=OPX_FEM_IDX, number=2),
+                port=QuaConfigAdcPortReference(controller=controller_name, fem=fem_idx, number=2),
                 name=IF_OUT2_DEFAULT,
             )
         return to_return
