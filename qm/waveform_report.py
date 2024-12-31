@@ -22,6 +22,7 @@ from typing import (
     Protocol,
     Sequence,
     cast,
+    Literal,
 )
 
 import numpy as np
@@ -866,9 +867,9 @@ class _WaveformPlotBuilder:
     @property
     def _subplot_titles(self) -> Sequence[Union[str, Sequence[str]]]:
         titles = (
-            [f"Analog-Out-{a}" for a in self._report_by_output_ports.flat_analog_out]
-            + [f"Digital-Out-{d}" for d in self._report_by_output_ports.flat_digital_out]
-            + [f"Analog-In-{ai}" for ai in self._report_by_output_ports.flat_analog_in]
+            [_calc_label(a, "Analog", "Out") for a in self._report_by_output_ports.flat_analog_out]
+            + [_calc_label(d, "Digital", "Out") for d in self._report_by_output_ports.flat_digital_out]
+            + [_calc_label(ai, "Analog", "In") for ai in self._report_by_output_ports.flat_analog_in]
         )
         return titles
 
@@ -1027,12 +1028,12 @@ class _WaveformPlotBuilderWithSamples(_WaveformPlotBuilder):
 
     @property
     def _subplot_titles(self) -> Sequence[Union[str, Sequence[str]]]:
-        _titles = [f"Analog-Out-{a}" for a in self._report_by_output_ports.flat_analog_out] + [
-            f"Digital-Out-{d}" for d in self._report_by_output_ports.flat_digital_out
+        _titles = [_calc_label(a, "Analog", "Out") for a in self._report_by_output_ports.flat_analog_out] + [
+            _calc_label(d, "Digital", "Out") for d in self._report_by_output_ports.flat_digital_out
         ]
         zipped: Sequence[Tuple[str, Sequence[str]]] = list(zip(_titles, [[]] * len(_titles)))
         titles: Sequence[Union[str, Sequence[str]]] = [item for z in zipped for item in z] + [
-            f"Analog-In-{a}" for a in self._report_by_output_ports.flat_analog_in
+            _calc_label(a, "Analog", "In") for a in self._report_by_output_ports.flat_analog_in
         ]
         return titles
 
@@ -1050,3 +1051,12 @@ class _WaveformPlotBuilderWithSamples(_WaveformPlotBuilder):
             self._figure.update_yaxes(range=sample_y_range, row=r, col=1)
             self._figure.update_xaxes(showticklabels=False, row=r, col=1)
             self._figure.update_yaxes(title=dict(text="Voltage(v)", standoff=5, font=dict(size=9)), row=r, col=1)
+
+
+def _calc_label(port: str, port_type: Literal["Analog", "Digital"], direction: Literal["Out", "In"]) -> str:
+    address = port.split("-")
+    if len(address) == 2:
+        return f"FEM{address[0]} - {port_type} {direction} {address[1]}"
+    if len(address) == 3:
+        return f"FEM{address[0]} - {port_type} {direction} {address[1]} - Upconverter {address[2]}"
+    return port

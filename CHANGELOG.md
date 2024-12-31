@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
+## [1.2.1.1a1] - 2024-12-17
+### Fixed
+- Fixed a bug in the MW-FEM samples returned from the cloud simulator (using `qm-saas`) which prevented plotting them
+
+### Changed
+- Improved labels for the simulators' samples plot and waveform report plot
+- The simulator's samples plot will no longer plot waveforms that are all zeros (not changed in the simulation)
+
 ## [1.2.1] - 2024-11-20
 Tested against QOP 2.4, 3.2
 

@@ -424,10 +424,7 @@ class AnalogOutputFilterDefSchema(Schema):
 class AnalogOutputPortDefSchema(Schema):
     grpc_class = QuaConfigAnalogOutputPortDec
     offset = fields.Number(
-        metadata={
-            "description": "DC offset to the output."
-            "Will be applied while quantum machine is open."
-        },
+        metadata={"description": "DC offset to the output." "Will be applied while quantum machine is open."},
         required=True,
     )
     filter = fields.Nested(AnalogOutputFilterDefSchema)
@@ -624,9 +621,7 @@ class DigitalOutputPortDefSchema(Schema):
     )
     level = fields.String(
         validate=validate_string_is_one_of({"ttl", "lvttl"}),
-        metadata={
-            "description": "The voltage level of the digital output, can be TTL or LVTTL (default)"
-        },
+        metadata={"description": "The voltage level of the digital output, can be TTL or LVTTL (default)"},
     )
 
     class Meta:
@@ -1425,7 +1420,9 @@ class HoldOffsetSchema(Schema):
 
 
 class StickySchema(Schema):
-    analog = fields.Boolean(metadata={"description": """Whether the analog part of the pulse is sticky."""}, required=True)
+    analog = fields.Boolean(
+        metadata={"description": """Whether the analog part of the pulse is sticky."""}, required=True
+    )
     digital = fields.Boolean(metadata={"description": """Whether the digital part of the pulse is sticky."""})
     duration = fields.Int(metadata={"description": """The analog's ramp to zero duration, in ns"""})
 

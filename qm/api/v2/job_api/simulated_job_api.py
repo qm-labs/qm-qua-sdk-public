@@ -91,7 +91,12 @@ class SimulatedJobApi(JobApi):
                     samples = response.double_data
                     _, data = betterproto.which_one_of(samples, "output")
                     if isinstance(data, PullSamplesResponsePullSamplesResponseSuccessMw):
-                        analog[f"{key}-{data.duc_id}"] = [x + 1j * y for x, y in zip(data.i, data.q)]
+                        duc_id = str(data.duc_id)
+                        if duc_id == "[0, 0, 0, 0, 0, 0, 8176]":
+                            duc_id = "1"
+                        if duc_id == "[0, 0, 0, 0, 0, 0, 0, 64]":
+                            duc_id = "2"
+                        analog[f"{key}-{duc_id}"] = [x + 1j * y for x, y in zip(data.i, data.q)]
                     elif isinstance(data, PullSamplesResponsePullSamplesResponseSuccessLf):
                         analog[key] = data.items
                 else:
