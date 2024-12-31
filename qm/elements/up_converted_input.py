@@ -1,16 +1,17 @@
 import logging
-from typing import TYPE_CHECKING, Tuple, Optional
+from typing import TYPE_CHECKING, Tuple, Union, Optional, Sequence
 
 from octave_sdk.octave import RFOutput
 from octave_sdk import RFOutputMode, OctaveLOSource
 
+from qm.type_hinting import Number
 from qm.api.frontend_api import FrontendApi
 from qm.elements.element_inputs import MixInputs
 from qm.grpc.qua_config import QuaConfigMixInputs
+from qm.type_hinting.general import NumpySupportedFloat
 
 if TYPE_CHECKING:
     from qm.octave import CalibrationDB
-
 
 logger = logging.getLogger(__name__)
 
@@ -113,3 +114,44 @@ class UpconvertedInput(MixInputs):
             raise ValueError(f"Gain must be between -20 and 20 dB, got {gain_in_db}")
         self._client.set_gain(gain_in_db, self.lo_frequency, self._use_input_attenuators)
         self._gain = gain_in_db
+
+
+class UpconvertedInputNewApi(UpconvertedInput):
+    def __init__(
+        self,
+        name: str,
+        config: QuaConfigMixInputs,
+        client: RFOutput,
+        port: Tuple[str, int],
+        gain: Optional[float],
+        calibration_db: Optional["CalibrationDB"] = None,
+    ):
+        super().__init__(
+            name,
+            config,
+            frontend_api=None,  # type: ignore[arg-type]
+            machine_id=None,  # type: ignore[arg-type]
+            client=client,
+            port=port,
+            gain=gain,
+            calibration_db=calibration_db,
+        )
+
+    def set_output_dc_offset(self, i_offset: Optional[float] = None, q_offset: Optional[float] = None) -> None:
+        raise NotImplementedError
+
+    def set_output_filter(
+        self,
+        input_name: str,
+        feedforward: Union[Sequence[NumpySupportedFloat], None],
+        feedback: Union[Sequence[NumpySupportedFloat], None],
+    ) -> None:
+        raise NotImplementedError
+
+    def set_mixer_correction(
+        self,
+        intermediate_frequency: Number,
+        lo_frequency: Number,
+        values: Tuple[float, float, float, float],
+    ) -> None:
+        raise NotImplementedError

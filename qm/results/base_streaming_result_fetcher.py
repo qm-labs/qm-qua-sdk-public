@@ -14,11 +14,13 @@ from qm.persistence import BaseStore
 from qm.utils import deprecation_message
 from qm.utils.async_utils import run_async
 from qm.type_hinting.general import PathLike
-from qm.exceptions import InvalidStreamMetadataError
+from qm.api.v2.job_result_api import JobResultApi
 from qm.api.job_result_api import JobResultServiceApi
 from qm.api.models.capabilities import ServerCapabilities
 from qm.utils.general_utils import run_until_with_timeout
 from qm.StreamMetadata import StreamMetadata, StreamMetadataError
+from qm.grpc.results_analyser import GetJobNamedResultHeaderResponse
+from qm.exceptions import InvalidStreamMetadataError, StreamProcessingDataLossError
 
 logger = logging.getLogger(__name__)
 
@@ -78,15 +80,13 @@ class JobStreamingState:
 class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
     def __init__(
         self,
-        job_id: str,
         schema: JobResultItemSchema,
-        service: JobResultServiceApi,
+        service: Union[JobResultServiceApi, JobResultApi],
         store: BaseStore,
         stream_metadata_errors: List[StreamMetadataError],
         stream_metadata: Optional[StreamMetadata],
         capabilities: ServerCapabilities,
     ) -> None:
-        self._job_id = job_id
         self._schema = schema
         self._service = service
         self._store = store
@@ -96,6 +96,10 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         self._capabilities = capabilities
 
         self._validate_schema()
+
+    @property
+    def _job_id(self) -> str:
+        return self._service.id
 
     @abc.abstractmethod
     def _validate_schema(self) -> None:
@@ -260,7 +264,7 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         )  # type: ignore[no-untyped-call]
 
     async def _add_results_to_writer(self, data_writer: BinaryIO, start: int, stop: int) -> None:
-        async for result in self._service.get_job_named_result(self._job_id, self._schema.name, start, stop - start):
+        async for result in self._service.get_job_named_result(self._schema.name, start, stop - start):
             self._count_data_written += result.count_of_items
             data_writer.write(result.data)
 
@@ -276,9 +280,10 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
     def get_job_state(self) -> JobStreamingState:
         response: JobStreamingStateProtocol
         if self._capabilities.has_job_streaming_state:
-            response = self._service.get_job_state(self._job_id)
+            response = self._service.get_job_state()
         else:
-            response = self._service.get_named_header(self._job_id, self.name, False)
+            # This is just for backward compatibility
+            response = cast(GetJobNamedResultHeaderResponse, self._service.get_named_header(self.name, False))
         return JobStreamingState(
             job_id=self._job_id,
             done=response.done,
@@ -287,7 +292,7 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         )
 
     def _get_named_header(self, check_for_errors: bool = True, flat_struct: bool = False) -> NamedJobResultHeader:
-        response = self._service.get_named_header(self._job_id, self.name, flat_struct)
+        response = self._service.get_named_header(self.name, flat_struct)
         dtype = _parse_dtype(response.simple_d_type)
 
         if check_for_errors and response.has_execution_errors:
@@ -407,7 +412,7 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         writer = self._fetch_all_job_results(header, start, stop)
 
         if header.has_dataloss:
-            logger.warning(f"Possible data loss detected in data for job: {self._job_id}")
+            raise StreamProcessingDataLossError(f"Data loss detected in data for job: {self._job_id}")
 
         return cast(numpy.typing.NDArray[numpy.generic], numpy.load(writer))
 

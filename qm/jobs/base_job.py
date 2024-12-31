@@ -1,4 +1,5 @@
 import datetime
+import warnings
 from typing import List, Optional, Protocol
 
 import betterproto
@@ -6,11 +7,11 @@ import betterproto
 from qm.type_hinting import Value
 from qm.persistence import BaseStore
 from qm.exceptions import QmQuaException
-from qm.utils import deprecate_to_property
 from qm.api.frontend_api import FrontendApi
 from qm.grpc.frontend import JobExecutionStatus
-from qm.api.job_manager_api import JobManagerApi
 from qm.api.models.capabilities import ServerCapabilities
+from qm.api.job_manager_api import create_job_manager_from_api
+from qm.utils import deprecation_message, deprecate_to_property
 
 
 class JobStateProtocol(Protocol):
@@ -33,7 +34,7 @@ class QmBaseJob:
         self._capabilities = capabilities
         self._store = store
 
-        self._job_manager = JobManagerApi.from_api(frontend_api)
+        self._job_manager = create_job_manager_from_api(frontend_api)
 
         self._added_user_id: Optional[str] = None
         self._time_added: Optional[datetime.datetime] = None
@@ -84,6 +85,19 @@ class QmBaseJob:
         name: str,
         data: List[Value],
     ) -> None:
+        warnings.warn(
+            deprecation_message(
+                method="RunningQmJob.insert_input_stream",
+                deprecated_in="1.1.8",
+                removed_in="1.2.0",
+                details="Use `push_to_input_stream` instead",
+            ),
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.push_to_input_stream(name, data)
+
+    def push_to_input_stream(self, name: str, data: List[Value]) -> None:
         """Insert data to the input stream declared in the QUA program.
         The data is then ready to be read by the program using the advance
         input stream QUA statement.

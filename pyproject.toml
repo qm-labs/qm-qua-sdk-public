@@ -102,7 +102,7 @@ move-generated-grpc.sequence = [
     { "script" = "shutil:move('io', 'qm/io')" },
     { "script" = "os:remove('__init__.py')" }
 ]
-create-grpc = "poetry run python -m grpc_tools.protoc -Iproto --python_betterproto_out=. proto/qm/pb/*.proto io/qualang/api/v1/info_service.proto"
+create-grpc = "poetry run python -m grpc_tools.protoc -Iproto --python_betterproto_out=. proto/qm/pb/**/*.proto io/qualang/api/v1/info_service.proto proto/qm/grpc/v2/*.proto"
 generate-grpc.sequence = [
     "clean-grpc",
     "create-grpc",

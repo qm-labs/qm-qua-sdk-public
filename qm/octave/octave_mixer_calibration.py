@@ -3,7 +3,7 @@ import time
 import logging
 from enum import Enum, auto
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Mapping, Optional
 
 import numpy as np
 from octave_sdk import Octave, RFInputLOSource
@@ -31,10 +31,12 @@ from octave_sdk.grpc.quantummachines.octave.api.v1 import (
 
 from qm.program import Program
 from qm.type_hinting import Number
+from qm.api.v2.job_api import JobApi
 from qm.elements.element import Element
 from qm.jobs.running_qm_job import RunningQmJob
 from qm.grpc.qua_config import QuaConfigMixInputs
 from qm.elements.up_converted_input import UpconvertedInput
+from qm.api.v2.job_api.element_input_api import MixInputsApi
 from qm.exceptions import QmQuaException, CantCalibrateElementError
 from qm.octave._calibration_names import SavedVariablesNames, CalibrationElementsNames
 from qm.octave._calibration_analysis import (
@@ -55,7 +57,6 @@ from qm.qua import (
     save,
     align,
     else_,
-    fixed,
     pause,
     assign,
     while_,
@@ -70,7 +71,8 @@ from qm.qua import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from qm.QuantumMachine import QuantumMachine
+    from qm.api.v2.qm_api import QmApi
+    from qm.quantum_machine import QuantumMachine
 
 CALIBRATION_INPUT = 2
 OTHER_INPUT = 1
@@ -168,15 +170,8 @@ def convert_to_old_calibration_result(
     return to_return
 
 
-class OctaveMixerCalibration:
-    def __init__(self, quantum_machine: "QuantumMachine", client: Octave):
-        self._qm = quantum_machine
-        if not self._qm._octave_calibration_elements:
-            raise NoCalibrationElements(
-                "No calibration elements were found, if you want to use the calibration "
-                "please open the QM with the flag 'add_calibration_elements_to_config'."
-            )
-        self._calibration_elements = self._qm._octave_calibration_elements
+class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
+    def __init__(self, client: Octave):
         self._client = client
 
         self._lo_step = 2**-3
@@ -187,11 +182,21 @@ class OctaveMixerCalibration:
         self._image_range = 2**-1
         self._n_image = int(self._image_range / self._image_step) + 1
 
+        self._names: Optional[CalibrationElementsNames] = None
+
+    @property
+    def names(self) -> CalibrationElementsNames:
+        if self._names is None:
+            raise ValueError("The calibration elements names were not set.")
+        return self._names
+
     @property
     def _low_level_client(self) -> OctaveClient:
         return self._client._client
 
-    def _generate_program(self, elements_names: CalibrationElementsNames, params: AutoCalibrationParams) -> Program:
+    def _generate_program(self, params: AutoCalibrationParams) -> Program:
+        elements_names = self.names
+
         def read_lo_and_image_power() -> None:
             align()
 
@@ -267,46 +272,46 @@ class OctaveMixerCalibration:
         with program() as prog:
 
             # variables for getting IQ data
-            Q2 = declare(fixed)
-            Q3 = declare(fixed)
-            I2 = declare(fixed)
-            I3 = declare(fixed)
+            Q2 = declare(float)
+            Q3 = declare(float)
+            I2 = declare(float)
+            I3 = declare(float)
 
-            lo_power = declare(fixed)
-            image_power = declare(fixed)
+            lo_power = declare(float)
+            image_power = declare(float)
 
-            i0_center = declare(fixed)
-            q0_center = declare(fixed)
-            i0_offset = declare(fixed)
-            q0_offset = declare(fixed)
-            i0_curr = declare(fixed)
-            q0_curr = declare(fixed)
-            i0_best = declare(fixed)
-            q0_best = declare(fixed)
+            i0_center = declare(float)
+            q0_center = declare(float)
+            i0_offset = declare(float)
+            q0_offset = declare(float)
+            i0_curr = declare(float)
+            q0_curr = declare(float)
+            i0_best = declare(float)
+            q0_best = declare(float)
 
-            scale_iq = declare(fixed)
-            scale_gp = declare(fixed)
-            scale_cal = declare(fixed)
+            scale_iq = declare(float)
+            scale_gp = declare(float)
+            scale_cal = declare(float)
 
-            g_center = declare(fixed)
-            p_center = declare(fixed)
-            g_offset = declare(fixed)
-            p_offset = declare(fixed)
-            g_curr = declare(fixed)
-            p_curr = declare(fixed)
+            g_center = declare(float)
+            p_center = declare(float)
+            g_offset = declare(float)
+            p_offset = declare(float)
+            g_curr = declare(float)
+            p_curr = declare(float)
 
             # variables for correction matrix
-            g_mat_plus = declare(fixed)
-            g_mat_minus = declare(fixed)
-            s2 = declare(fixed)
-            c_mat = declare(fixed)
-            s_mat = declare(fixed)
-            c00 = declare(fixed)
-            c01 = declare(fixed)
-            c10 = declare(fixed)
-            c11 = declare(fixed)
+            g_mat_plus = declare(float)
+            g_mat_minus = declare(float)
+            s2 = declare(float)
+            c_mat = declare(float)
+            s_mat = declare(float)
+            c00 = declare(float)
+            c01 = declare(float)
+            c10 = declare(float)
+            c11 = declare(float)
 
-            best_lo_power = declare(fixed)
+            best_lo_power = declare(float)
 
             task = declare(int)
             go_on = declare(bool, value=True)
@@ -534,16 +539,6 @@ class OctaveMixerCalibration:
         self._low_level_client.update(updates=updates)
         return restore_lo_frequency, state_restore_updates
 
-    def _set_if_freq(self, element_names: CalibrationElementsNames, if_freq: Number, down_mixer_offset: Number) -> None:
-        element_name_to_if_freq = {
-            element_names.iq_mixer: if_freq,
-            element_names.signal_analyzer: if_freq - down_mixer_offset,
-            element_names.lo_analyzer: -down_mixer_offset,
-            element_names.image_analyzer: -if_freq - down_mixer_offset,
-        }
-        for element_name, freq_to_set in element_name_to_if_freq.items():
-            self._calibration_elements[element_name].set_intermediate_frequency(freq_to_set)
-
     @staticmethod
     def _set_input_lo_frequency(element_input: UpconvertedInput, lo_freq: Number) -> None:
         """Even if the LO source is external, we will have to update the attenuators."""
@@ -561,7 +556,6 @@ class OctaveMixerCalibration:
         self,
         element_input: UpconvertedInput,
         lo_freq: Number,
-        names: CalibrationElementsNames,
         offset_frequency: float,
     ) -> None:
 
@@ -571,16 +565,14 @@ class OctaveMixerCalibration:
             source_name=RFInputLOSource.Internal, frequency=lo_freq + offset_frequency
         )
 
-        # IQ-mixer set to 0
-        iq_mixer_elem = self._calibration_elements[names.iq_mixer]
-        assert isinstance(iq_mixer_elem.input, UpconvertedInput)
-        iq_mixer_elem.input.set_output_dc_offset(i_offset=0.0, q_offset=0.0)
-        self._set_if_freq(names, 50.0e6, down_mixer_offset=offset_frequency)
+        self._set_iq_mixer_element_input_dc_offsets(i_offset=0.0, q_offset=0.0)
+        self._set_if_freq(50.0e6, down_mixer_offset=offset_frequency)
 
     def _perform_coarse_iq_scan(
-        self, job: RunningQmJob, n_lo: int, lo_offset: int
+        self, job: Union[RunningQmJob, JobApi], n_lo: int, lo_offset: int
     ) -> Tuple[Array, Array, List[LOAnalysisDebugData], Array]:
-        self._qm.set_io1_value(0)
+        self._set_io_values(io1=1)
+
         job.resume()
         i0_coarse, q0_coarse, debug_coarse = _get_and_analyze_lo_data(job, n_lo, lo_offset, 1)
 
@@ -601,11 +593,11 @@ class OctaveMixerCalibration:
 
     def _perform_fine_iq_scan(
         self,
-        job: RunningQmJob,
+        job: Union[RunningQmJob, JobApi],
         n_lo: int,
         lo_offset: int,
     ) -> Tuple[Array, Array, List[LOAnalysisDebugData]]:
-        self._qm.set_io1_value(1)
+        self._set_io_values(io1=1)
 
         for _ in range(2):
             job.resume()
@@ -630,7 +622,8 @@ class OctaveMixerCalibration:
         lo_if_dict: Mapping[float, Tuple[float, ...]],
         params: AutoCalibrationParams,
     ) -> MixerCalibrationResults:
-        if not isinstance(element.input, UpconvertedInput):
+        element_input = element.input
+        if not isinstance(element_input, UpconvertedInput):
             raise CantCalibrateElementError(
                 f"Element {element.name} has input of type {type(element.input)} and is not connected to an Octave. "
                 f"Hence, it cannot be calibrated."
@@ -638,16 +631,15 @@ class OctaveMixerCalibration:
 
         t_start = time.time()
         octave = self._client
-
-        octave_port = element.input.port
+        octave_port = element_input.port
 
         port_idx = octave_port[1]
 
-        restore_lo_frequency, state_restore_updates = self._set_octave_for_calibration(port_idx, params, element.input)
+        restore_lo_frequency, state_restore_updates = self._set_octave_for_calibration(port_idx, params, element_input)
 
-        names = CalibrationElementsNames(self._low_level_client.octave_name, port_idx)
+        self._names = CalibrationElementsNames(self._low_level_client.octave_name, port_idx)
 
-        compiled = self._qm.compile(self._generate_program(names, params))
+        compiled = self._compile_program(self._generate_program(params))
 
         n_lo_samples, n_image_samples = self._n_lo, self._n_image
 
@@ -656,16 +648,13 @@ class OctaveMixerCalibration:
         result = {}
         start_lo_sweep = time.time()
         logger.debug(f"time to start LO sweep {start_lo_sweep - t_start}")
-        iq_mixer_elem = self._calibration_elements[names.iq_mixer]
-        analyzer_elem = self._calibration_elements[names.lo_analyzer]
-        assert isinstance(iq_mixer_elem.input, UpconvertedInput)
 
         for lo_freq in lo_if_dict:
             t0_lo = time.time()
             logger.debug(f"Calibrating {lo_freq / 1e9:0.3f} GHz")
 
-            pending_job = self._qm.queue.add_compiled(compiled)
-            job = pending_job.wait_for_execution()
+            job = self._execute_job(compiled)
+
             lo_offset, image_offset = 0, 0
 
             while not job.is_paused():
@@ -675,19 +664,19 @@ class OctaveMixerCalibration:
             prev_lo_cal = None
 
             logger.debug(f"Calibrating {lo_freq / 1e9:0.3f} GHz")
-            self._set_before_coarse_scan(element.input, lo_freq, names, params.offset_frequency)
+            self._set_before_coarse_scan(element_input, lo_freq, params.offset_frequency)
 
-            analyzer_elem.set_input_dc_offset("out1", 0.0)
-            analyzer_elem.set_input_dc_offset("out2", 0.0)
+            self._set_analyzer_element_outputs_dc_offsets(out1=0.0, out2=0.0)
 
             i0_coarse, q0_coarse, debug_coarse, lo_adc_data = self._perform_coarse_iq_scan(job, n_lo_samples, lo_offset)
             lo_offset += 1
 
-            analyzer_elem.set_input_dc_offset("out1", -np.mean(lo_adc_data[0]) / 4096)
-            analyzer_elem.set_input_dc_offset("out2", -np.mean(lo_adc_data[1]) / 4096)
+            self._set_analyzer_element_outputs_dc_offsets(
+                out1=-np.mean(lo_adc_data[0]) / 4096, out2=-np.mean(lo_adc_data[1]) / 4096
+            )
 
             # The first scan is coarse and use to find a good starting point
-            iq_mixer_elem.input.set_output_dc_offset(i_offset=i0_coarse[0], q_offset=q0_coarse[0])
+            self._set_iq_mixer_element_input_dc_offsets(i_offset=i0_coarse[0], q_offset=q0_coarse[0])
 
             i0_shift, q0_shift, debug_fine = self._perform_fine_iq_scan(job, n_lo_samples, lo_offset)
             lo_offset += 2
@@ -704,7 +693,9 @@ class OctaveMixerCalibration:
                 ),
             )
 
-            iq_mixer_elem.input.set_output_dc_offset(i_offset=curr_lo_freq_result.i0, q_offset=curr_lo_freq_result.q0)
+            self._set_iq_mixer_element_input_dc_offsets(
+                i_offset=curr_lo_freq_result.i0, q_offset=curr_lo_freq_result.q0
+            )
 
             logger.debug(f"Pre IF sweep time - {time.time() - t0_lo}")
             for if_freq in lo_if_dict[lo_freq]:
@@ -713,14 +704,14 @@ class OctaveMixerCalibration:
                 t0_if = time.time()
                 logger.debug(f"if_freq = {if_freq / 1e6:0.1f} MHz")
 
-                self._set_if_freq(names, float(if_freq), params.offset_frequency)
+                self._set_if_freq(float(if_freq), params.offset_frequency)
 
                 # 2 - image scan
-                self._qm.set_io1_value(2)
+                self._set_io_values(io1=2)
                 job.resume()
                 #  Set the initial guess for the gain and phase from the coarse DC scan
                 coarse_gain, coarse_phase = curr_lo_freq_result.dc_gain, curr_lo_freq_result.dc_phase
-                self._qm.set_io_values(value_1=coarse_gain, value_2=coarse_phase)
+                self._set_io_values(io1=coarse_gain, io2=coarse_phase)
                 logger.debug(f"coarse. gain = {coarse_gain:.5f}, phase = {coarse_phase:0.5f}")
                 while not job.is_paused():
                     time.sleep(0.001)
@@ -730,12 +721,12 @@ class OctaveMixerCalibration:
                 image_offset += 1
 
                 # prepare for fine scan
-                self._qm.set_io1_value(3)
+                self._set_io_values(io1=3)
                 job.resume()
 
                 # Set the initial guess for the gain and phase from the coarse gate-phase scan
                 coarse_gain, coarse_phase = gp_coarse.gain, gp_coarse.phase
-                self._qm.set_io_values(value_1=coarse_gain, value_2=coarse_phase)
+                self._set_io_values(io1=coarse_gain, io2=coarse_phase)
                 logger.debug(f"coarse. gain = {coarse_gain:.5f}, phase = {coarse_phase:0.5f}")
                 while not job.is_paused():
                     time.sleep(0.001)
@@ -759,9 +750,9 @@ class OctaveMixerCalibration:
 
                 logger.debug(f"Calibration for {lo_freq}, {if_freq} took {time.time() - t0_if}")
 
-            result[(lo_freq, element.input.gain)] = curr_lo_freq_result
+            result[(lo_freq, element_input.gain)] = curr_lo_freq_result
 
-            self._qm.set_io1_value(4)
+            self._set_io_values(io1=4)
             job.resume()
 
             if params.callback is not None:
@@ -769,8 +760,121 @@ class OctaveMixerCalibration:
             logger.debug(f"Calibration for LO {lo_freq} took {time.time() - t0_lo}")
 
         # set to previous state
-        self._restore_octave_state(element.input, restore_lo_frequency, state_restore_updates)
+        self._restore_octave_state(element_input, restore_lo_frequency, state_restore_updates)
 
         logger.debug(f"Total calibration sweep process took {time.time() - start_lo_sweep}")
         logger.debug(f"Total calibration process took {time.time() - t_start}")
         return result
+
+    def _set_if_freq(
+        self,
+        if_freq: Number,
+        down_mixer_offset: Number,
+    ) -> None:
+        element_name_to_if_freq = {
+            self.names.iq_mixer: if_freq,
+            self.names.signal_analyzer: if_freq - down_mixer_offset,
+            self.names.lo_analyzer: -down_mixer_offset,
+            self.names.image_analyzer: -if_freq - down_mixer_offset,
+        }
+        for element_name, freq_to_set in element_name_to_if_freq.items():
+            self._set_element_if_freq(element_name, freq_to_set)
+
+    @abc.abstractmethod
+    def _set_analyzer_element_outputs_dc_offsets(self, out1: float, out2: float) -> None:
+        pass
+
+    @abc.abstractmethod
+    def _set_iq_mixer_element_input_dc_offsets(self, i_offset: float, q_offset: float) -> None:
+        pass
+
+    @abc.abstractmethod
+    def _execute_job(self, compiled: str) -> Union[RunningQmJob, JobApi]:
+        pass
+
+    @abc.abstractmethod
+    def _set_io_values(self, io1: Optional[Union[int, float]] = None, io2: Optional[Union[int, float]] = None) -> None:
+        pass
+
+    @abc.abstractmethod
+    def _set_element_if_freq(self, element_name: str, if_freq: Number) -> None:
+        pass
+
+    @abc.abstractmethod
+    def _compile_program(self, _program: Program) -> str:
+        pass
+
+
+class OctaveMixerCalibration(OctaveMixerCalibrationBase):
+    def __init__(self, client: Octave, quantum_machine: "QuantumMachine"):
+        super().__init__(client)
+        self._qm = quantum_machine
+        if not self._qm._octave_calibration_elements:
+            raise NoCalibrationElements(
+                "No calibration elements were found, if you want to use the calibration "
+                "please open the QM with the flag 'add_calibration_elements_to_config'."
+            )
+        self._calibration_elements = self._qm._octave_calibration_elements
+
+    def _set_analyzer_element_outputs_dc_offsets(self, out1: float, out2: float) -> None:
+        analyzer_elem = self._qm._octave_calibration_elements[self.names.lo_analyzer]
+        analyzer_elem.set_input_dc_offset("out1", out1)
+        analyzer_elem.set_input_dc_offset("out2", out2)
+
+    def _set_iq_mixer_element_input_dc_offsets(self, i_offset: float, q_offset: float) -> None:
+        iq_mixer_elem = self._qm._octave_calibration_elements[self.names.iq_mixer]
+        assert isinstance(iq_mixer_elem.input, UpconvertedInput)
+        iq_mixer_elem.input.set_output_dc_offset(i_offset=i_offset, q_offset=q_offset)
+
+    def _execute_job(self, compiled: str) -> RunningQmJob:
+        pending_job = self._qm.queue.add_compiled(compiled)
+        job = pending_job.wait_for_execution()
+        return job
+
+    def _set_io_values(self, io1: Optional[Union[int, float]] = None, io2: Optional[Union[int, float]] = None) -> None:
+        self._qm.set_io_values(value_1=io1, value_2=io2)
+
+    def _set_element_if_freq(self, element_name: str, if_freq: Number) -> None:
+        self._qm._octave_calibration_elements[element_name].set_intermediate_frequency(if_freq)
+
+    def _compile_program(self, _program: Program) -> str:
+        return self._qm.compile(_program)
+
+
+class NewApiOctaveMixerCalibration(OctaveMixerCalibrationBase):
+    def __init__(self, client: Octave, qm_api: "QmApi"):
+        super().__init__(client)
+        self._qm_api = qm_api
+        self._job: Optional[JobApi] = None
+
+    @property
+    def job(self) -> JobApi:
+        if self._job is None:
+            raise RuntimeError("Job not set")
+        return self._job
+
+    def _set_analyzer_element_outputs_dc_offsets(self, out1: float, out2: float) -> None:
+        analyzer_elem = self.job.elements[self.names.lo_analyzer]
+        analyzer_elem.outputs["out1"].set_dc_offset(out1)
+        analyzer_elem.outputs["out2"].set_dc_offset(out2)
+
+    def _set_iq_mixer_element_input_dc_offsets(self, i_offset: float, q_offset: float) -> None:
+        iq_mixer_elem = self.job.elements[self.names.iq_mixer]
+        iq_mixer_elem_input = iq_mixer_elem.input
+        assert isinstance(iq_mixer_elem_input, MixInputsApi)
+        iq_mixer_elem_input.set_dc_offsets(i_offset=i_offset, q_offset=q_offset)
+
+    def _execute_job(self, compiled: str) -> JobApi:
+        job = self._qm_api.add_to_queue(compiled)
+        job.wait_for_execution()
+        self._job = job
+        return job
+
+    def _set_io_values(self, io1: Optional[Union[int, float]] = None, io2: Optional[Union[int, float]] = None) -> None:
+        self.job.set_io_values(io1=io1, io2=io2)
+
+    def _set_element_if_freq(self, element_name: str, if_freq: Number) -> None:
+        self.job.elements[element_name].set_intermediate_frequency(if_freq)
+
+    def _compile_program(self, _program: Program) -> str:
+        return self._qm_api.compile(_program)

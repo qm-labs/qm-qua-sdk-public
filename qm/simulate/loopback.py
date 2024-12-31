@@ -1,8 +1,7 @@
 import logging
 from typing import List, Tuple, cast
 
-from qm.api.models.capabilities import OPX_FEM_IDX
-from qm.simulate.interface import SimulatorInterface, SupportedConnectionTypes, _get_opx_fem_number
+from qm.simulate.interface import SimulatorInterface, SupportedConnectionTypes, get_opx_fem_number
 from qm.grpc.frontend import (
     SimulationRequest,
     ExecutionRequestSimulateSimulationInterfaceNone,
@@ -101,10 +100,10 @@ class LoopbackInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInt
             tuple_4 = cast(Tuple[str, int, str, int], connection)
             return ExecutionRequestSimulateSimulationInterfaceLoopbackConnections(
                 from_controller=tuple_4[0],
-                from_fem=OPX_FEM_IDX,
+                from_fem=get_opx_fem_number(),
                 from_port=tuple_4[1],
                 to_controller=tuple_4[2],
-                to_fem=OPX_FEM_IDX,
+                to_fem=get_opx_fem_number(),
                 to_port=tuple_4[3],
             )
         if len(connection) == 3:
@@ -120,28 +119,15 @@ class LoopbackInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInt
             )
         raise Exception("connection should be tuple of length 3, 4 or 6")
 
-    def _update_simulate_request(
+    def update_simulate_request(
         self,
         request: SimulationRequest,
-        connections: List[ExecutionRequestSimulateSimulationInterfaceLoopbackConnections],
     ) -> SimulationRequest:
-        if not connections:
+        if not self._connections:
             request.simulate.simulation_interface.none = ExecutionRequestSimulateSimulationInterfaceNone()
             return request
 
         request.simulate.simulation_interface.loopback = ExecutionRequestSimulateSimulationInterfaceLoopback(
-            latency=self.latency, noise_power=self.noisePower, connections=connections
+            latency=self.latency, noise_power=self.noisePower, connections=self._connections
         )
         return request
-
-    def _fix_connection(
-        self, connection: ExecutionRequestSimulateSimulationInterfaceLoopbackConnections
-    ) -> ExecutionRequestSimulateSimulationInterfaceLoopbackConnections:
-        return ExecutionRequestSimulateSimulationInterfaceLoopbackConnections(
-            from_controller=connection.from_controller,
-            from_fem=_get_opx_fem_number(),
-            from_port=connection.from_port,
-            to_controller=connection.to_controller,
-            to_fem=_get_opx_fem_number(),
-            to_port=connection.to_port,
-        )

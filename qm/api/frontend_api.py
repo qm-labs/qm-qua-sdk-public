@@ -1,5 +1,5 @@
 import logging
-from typing import List, Tuple, Optional, cast
+from typing import List, Type, Tuple, Optional, cast
 
 from betterproto.lib.google.protobuf import Empty
 
@@ -12,12 +12,11 @@ from qm.grpc.general_messages import Matrix
 from qm.api.models.jobs import InsertDirection
 from qm.utils.protobuf_utils import LOG_LEVEL_MAP
 from qm.api.models.capabilities import OPX_FEM_IDX
-from qm.api.models.server_details import ConnectionDetails
 from qm.api.base_api import BaseApi, connection_error_handle
 from qm.api.models.quantum_machine import QuantumMachineData
 from qm.api.models.devices import Polarity, MixerInfo, AnalogOutputPortFilter
 from qm.grpc.qua_config import QuaConfig, QuaConfigFemTypes, QuaConfigDeviceDec
-from qm.api.models.compiler import CompilerOptionArguments, _get_request_compiler_options
+from qm.api.models.compiler import CompilerOptionArguments, get_request_compiler_options
 from qm.grpc.qm_manager import (
     Controller,
     GetQuantumMachineRequest,
@@ -71,10 +70,10 @@ logger = logging.getLogger(__name__)
 
 
 @connection_error_handle()
-class FrontendApi(BaseApi):
-    def __init__(self, connection_details: ConnectionDetails):
-        super().__init__(connection_details)
-        self._stub = FrontendStub(self._channel)
+class FrontendApi(BaseApi[FrontendStub]):
+    @property
+    def _stub_class(self) -> Type[FrontendStub]:
+        return FrontendStub
 
     def get_version(self) -> str:
         response = run_async(self._stub.get_version(Empty(), timeout=self._timeout))
@@ -103,9 +102,7 @@ class FrontendApi(BaseApi):
         run_async(self._stub.reset_data_processing(ResetDataProcessingRequest(), timeout=self._timeout))
 
     def open_qm(self, config: QuaConfig, close_other_machines: bool) -> str:
-        request = OpenQuantumMachineRequest(
-            config=config,
-        )
+        request = OpenQuantumMachineRequest(config=config)
 
         if close_other_machines:
             request.always = True
@@ -115,19 +112,26 @@ class FrontendApi(BaseApi):
         response = run_async(self._stub.open_quantum_machine(request, timeout=self._timeout))
 
         if not response.success:
+            error_messages = []
             for error in response.config_validation_errors:
-                logger.error(f'CONFIG ERROR in key "{error.path}" [{error.group}] : {error.message}')
+                error_messages.append(f'CONFIG ERROR in key "{error.path}" [{error.group}] : {error.message}')
 
             for physical_error in response.physical_validation_errors:
-                logger.error(
-                    f'PHYSICAL CONFIG ERROR in key "{physical_error.path}" [{physical_error.group}] : {physical_error.message}'
+                error_messages.append(
+                    f"PHYSICAL CONFIG ERROR in key "
+                    f'"{physical_error.path}" [{physical_error.group}] : {physical_error.message}'
                 )
 
-            errors = [(item.group, item.path, item.message) for item in response.config_validation_errors] + [
+            for msg in error_messages:
+                logger.error(msg)
+
+            error_details = [(item.group, item.path, item.message) for item in response.config_validation_errors] + [
                 (item.group, item.path, item.message) for item in response.physical_validation_errors
             ]
-
-            raise OpenQmException("Can not open QM. Please see previous errors", errors=errors)
+            formatted_errors = "\n".join(error_messages)
+            raise OpenQmException(
+                f"Can not open QM, see the following errors:\n{formatted_errors}", errors=error_details
+            )
 
         for warning in response.open_qm_warnings:
             logger.warning(f"Open QM ended with warning {warning.code}: {warning.message}")
@@ -170,11 +174,12 @@ class FrontendApi(BaseApi):
     def close_all_quantum_machines(self) -> None:
         response = run_async(self._stub.close_all_quantum_machines(Empty(), timeout=self._timeout))
         if not response.success:
-            for error in response.errors:
-                logger.error(error.message)
+            messages = [error.message for error in response.errors]
+            for msg in messages:
+                logger.error(msg)
 
             raise QMFailedToCloseAllQuantumMachinesError(
-                "Can not close all quantum machines. Please see previous errors"
+                "Can not close all quantum machines. See the following errors:\n" + "\n".join(messages),
             )
 
     def get_controllers(self) -> List[Controller]:
@@ -205,7 +210,7 @@ class FrontendApi(BaseApi):
         elif insert_direction == InsertDirection.end:
             queue_position.end = Empty()
 
-        program.compiler_options = _get_request_compiler_options(compiler_options)
+        program.compiler_options = get_request_compiler_options(compiler_options)
 
         request = AddToQueueRequest(
             quantum_machine_id=machine_id,
@@ -257,7 +262,7 @@ class FrontendApi(BaseApi):
         program: QuaProgram,
         compiler_options: CompilerOptionArguments,
     ) -> str:
-        program.compiler_options = _get_request_compiler_options(compiler_options)
+        program.compiler_options = get_request_compiler_options(compiler_options)
         request = CompileRequest(quantum_machine_id=machine_id, high_level_program=program)
 
         response = run_async(self._stub.compile(request, timeout=None))

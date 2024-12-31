@@ -7,6 +7,7 @@ from dependency_injector.wiring import Provide, inject
 from qm.api.frontend_api import FrontendApi
 from qm.elements.element_outputs import ElementOutput
 from qm.api.models.capabilities import ServerCapabilities
+from qm.elements.up_converted_input import UpconvertedInputNewApi
 from qm.containers.capabilities_container import CapabilitiesContainer
 from qm.elements.element_inputs import ElementInput, ElementInputGRPCType
 from qm.grpc.qua_config import (
@@ -25,14 +26,14 @@ class Element(Generic[ElementInputGRPCType]):
         self,
         name: str,
         config: QuaConfigElementDec,
-        frontend_api: FrontendApi,
+        api: FrontendApi,
         machine_id: str,
         element_input: ElementInput[ElementInputGRPCType],
         element_output: ElementOutput,
     ):
         self._config = config
         self._name = name
-        self._frontend = frontend_api
+        self._frontend = api
         self._id = machine_id
         self.input: ElementInput[ElementInputGRPCType] = element_input
         self.output = element_output
@@ -114,6 +115,43 @@ class Element(Generic[ElementInputGRPCType]):
     @property
     def smearing(self) -> int:
         return self._config.smearing or 0
+
+
+class NewApiUpconvertedElement(Element[QuaConfigMixInputs]):
+    def __init__(
+        self,
+        name: str,
+        config: QuaConfigElementDec,
+        element_input: UpconvertedInputNewApi,
+        element_output: ElementOutput,
+    ):
+        super().__init__(
+            name,
+            config,
+            api=None,  # type: ignore[arg-type]
+            machine_id=None,  # type: ignore[arg-type]
+            element_input=element_input,
+            element_output=element_output,
+        )
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @inject
+    def set_intermediate_frequency(
+        self, freq: float, capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]
+    ) -> None:
+        raise NotImplementedError
+
+    def set_digital_delay(self, digital_input: str, delay: int) -> None:
+        raise NotImplementedError
+
+    def set_digital_buffer(self, digital_input: str, buffer: int) -> None:
+        raise NotImplementedError
+
+    def set_input_dc_offset(self, output: str, offset: float) -> None:
+        raise NotImplementedError
 
 
 AllElements = Union[

@@ -4,7 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## Unreleased
-
+### Fixed
+- Fixed a bug that opened a redundant communication with Octaves in the cluster when opening a QM, even if the Octaves were not in the config.
+- Removed the duplication of keys we have in simulation results, keys are now prefixed with "1-" or "2-" to indicate the fem index (also for OPX).
+- Fixed an error that occurred when setting the Octave to default connectivity and also adding the OPX input ports manually to the readout element.
+- Fixed an error of a missing attribute in the octave instance.
 
 ## 1.1.7 - 2024-02-19
 Tested against QOP 1.2, 2.2

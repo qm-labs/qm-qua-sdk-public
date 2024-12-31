@@ -284,7 +284,11 @@ class QuaSerializingVisitor(QuaNodeVisitor):
             args_str = f', {", ".join(args)}'
         else:
             args_str = ""
-        self._line(f'play({pulse}{amp}, "{element}"{args_str})')
+        indent = ""
+        if betterproto.serialized_on_wire(node.port_condition):
+            self._line(f"with port_condition({_ser_exp(node.port_condition)}):")
+            indent = " " * 4
+        self._line(f'{indent}play({pulse}{amp}, "{element}"{args_str})')
 
     def _default_leave(self, node: Node) -> None:
         if isinstance(node, tuple(_blocks)):

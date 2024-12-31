@@ -33,6 +33,7 @@ from qm.type_hinting.config_types import (
     DictQuaConfig,
     FemConfigType,
     MixerConfigType,
+    MwFemConfigType,
     PulseConfigType,
     OctaveConfigType,
     ElementConfigType,
@@ -52,7 +53,9 @@ from qm.type_hinting.config_types import (
     DigitalOutputPortConfigType,
     IntegrationWeightConfigType,
     OPX1000ControllerConfigType,
+    MwFemAnalogInputPortConfigType,
     OctaveSingleIfOutputConfigType,
+    MwFemAnalogOutputPortConfigType,
     AnalogOutputPortConfigTypeOctoDac,
 )
 from qm.grpc.qua_config import (
@@ -73,6 +76,7 @@ from qm.grpc.qua_config import (
     QuaConfigWaveformDec,
     QuaConfigOctaveConfig,
     QuaConfigOctaveIfMode,
+    QuaConfigVoltageLevel,
     QuaConfigControllerDec,
     QuaConfigElementThread,
     QuaConfigOctoDacFemDec,
@@ -80,6 +84,7 @@ from qm.grpc.qua_config import (
     QuaConfigMultipleInputs,
     QuaConfigOctaveLoopback,
     QuaConfigCorrectionEntry,
+    QuaConfigMicrowaveFemDec,
     QuaConfigAdcPortReference,
     QuaConfigDacPortReference,
     QuaConfigPulseDecOperation,
@@ -109,8 +114,12 @@ from qm.grpc.qua_config import (
     QuaConfigOctaveSingleIfOutputConfig,
     QuaConfigOctoDacAnalogOutputPortDec,
     QuaConfigDigitalInputPortDecPolarity,
+    QuaConfigMicrowaveAnalogInputPortDec,
+    QuaConfigMicrowaveInputPortReference,
     QuaConfigOctaveDownconverterRfSource,
     QuaConfigOctaveSynthesizerOutputName,
+    QuaConfigMicrowaveAnalogOutputPortDec,
+    QuaConfigMicrowaveOutputPortReference,
     QuaConfigOutputPulseParametersPolarity,
     QuaConfigOctoDacAnalogOutputPortDecOutputMode,
     QuaConfigOctoDacAnalogOutputPortDecSamplingRate,
@@ -120,11 +129,22 @@ from qm.grpc.qua_config import (
 ALLOWED_GAINES = {x / 2 for x in range(-40, 41)}
 
 
-def analog_input_port_to_pb(data: AnalogInputPortConfigType) -> QuaConfigAnalogInputPortDec:
+def _analog_input_port_to_pb(data: AnalogInputPortConfigType) -> QuaConfigAnalogInputPortDec:
     analog_input = QuaConfigAnalogInputPortDec(
         offset=data.get("offset", 0.0),
         shareable=bool(data.get("shareable")),
         gain_db=int(data.get("gain_db", 0)),
+        sampling_rate=int(data.get("sampling_rate", 1e9)),
+    )
+    return analog_input
+
+
+def mw_fem_analog_input_port_to_pb(data: MwFemAnalogInputPortConfigType) -> QuaConfigMicrowaveAnalogInputPortDec:
+    analog_input = QuaConfigMicrowaveAnalogInputPortDec(
+        sampling_rate=data.get("sampling_rate", 1e9),
+        gain_db=data.get("gain_db", 0),
+        shareable=data.get("shareable", False),
+        band=data["band"],
     )
     return analog_input
 
@@ -139,7 +159,7 @@ def _get_port_reference_with_fem(reference: PortReferenceType) -> StandardPort:
 AnalogOutputType = TypeVar("AnalogOutputType", QuaConfigAnalogOutputPortDec, QuaConfigOctoDacAnalogOutputPortDec)
 
 
-def analog_output_port_to_pb(
+def _analog_output_port_to_pb(
     data: AnalogOutputPortConfigType,
     output_type: Type[AnalogOutputType],
 ) -> AnalogOutputType:
@@ -177,10 +197,10 @@ def create_sampling_rate_enum(
     return QuaConfigOctoDacAnalogOutputPortDecSamplingRate(sampling_rate_gsps)
 
 
-def opx_1000_analog_output_port_to_pb(
+def _opx_1000_analog_output_port_to_pb(
     data: AnalogOutputPortConfigTypeOctoDac,
 ) -> QuaConfigOctoDacAnalogOutputPortDec:
-    item = analog_output_port_to_pb(data, output_type=QuaConfigOctoDacAnalogOutputPortDec)
+    item = _analog_output_port_to_pb(data, output_type=QuaConfigOctoDacAnalogOutputPortDec)
     item.sampling_rate = create_sampling_rate_enum(data)
     if item.sampling_rate == QuaConfigOctoDacAnalogOutputPortDecSamplingRate.GSPS1:
         item.upsampling_mode = QuaConfigOctoDacAnalogOutputPortDecSamplingRateMode[data.get("upsampling_mode", "mw")]
@@ -191,10 +211,24 @@ def opx_1000_analog_output_port_to_pb(
     return item
 
 
+def mw_fem_analog_output_to_pb(
+    data: MwFemAnalogOutputPortConfigType,
+) -> QuaConfigMicrowaveAnalogOutputPortDec:
+    item = QuaConfigMicrowaveAnalogOutputPortDec(
+        sampling_rate=data.get("sampling_rate", 1e9),
+        full_scale_power_dbm=data.get("full_scale_power_dbm", 0),
+        band=data["band"],
+        delay=data.get("delay", 0),
+        shareable=data.get("shareable", False),
+    )
+    return item
+
+
 def digital_output_port_to_pb(data: DigitalOutputPortConfigType) -> QuaConfigDigitalOutputPortDec:
     digital_output = QuaConfigDigitalOutputPortDec(
-        shareable=bool(data.get("shareable")),
-        inverted=bool(data.get("inverted", False)),
+        shareable=data.get("shareable", False),
+        inverted=data.get("inverted", False),
+        level=QuaConfigVoltageLevel[data.get("level", "LVTTL").upper()],
     )
     return digital_output
 
@@ -228,47 +262,73 @@ def controlling_devices_to_pb(data: Union[ControllerConfigType, OPX1000Controlle
                 "'analog', 'analog_outputs', 'digital_outputs' and 'digital_inputs' are not allowed when 'fems' is present"
             )
         for k, v in data["fems"].items():
-            fems[k] = fem_to_pb(v)
+            if v.get("type") == "MW":
+                fems[k] = _mw_fem_to_pb(cast(MwFemConfigType, v))
+            else:
+                fems[k] = _fem_to_pb(cast(FemConfigType, v))
+
     else:
         data = cast(ControllerConfigType, data)
-        fems[OPX_FEM_IDX] = controller_to_pb(data)
+        fems[OPX_FEM_IDX] = _controller_to_pb(data)
 
     item = QuaConfigDeviceDec(fems=fems)
     return item
 
 
-def controller_to_pb(data: ControllerConfigType) -> QuaConfigFemTypes:
+def _controller_to_pb(data: ControllerConfigType) -> QuaConfigFemTypes:
     cont = QuaConfigControllerDec(type=data.get("type", "opx1"))
     cont = _set_ports_in_config(cont, data)
     return QuaConfigFemTypes(opx=cont)
 
 
-def fem_to_pb(data: FemConfigType) -> QuaConfigFemTypes:
+def _fem_to_pb(data: FemConfigType) -> QuaConfigFemTypes:
     cont = QuaConfigOctoDacFemDec()
     cont = _set_ports_in_config(cont, data)
     return QuaConfigFemTypes(octo_dac=cont)
 
 
-ControllerConfigTypeVar = TypeVar("ControllerConfigTypeVar", QuaConfigOctoDacFemDec, QuaConfigControllerDec)
+def _mw_fem_to_pb(data: MwFemConfigType) -> QuaConfigFemTypes:
+    cont = QuaConfigMicrowaveFemDec()
+    cont = _set_ports_in_config(cont, data)
+    return QuaConfigFemTypes(microwave=cont)
+
+
+ControllerConfigTypeVar = TypeVar(
+    "ControllerConfigTypeVar", QuaConfigOctoDacFemDec, QuaConfigControllerDec, QuaConfigMicrowaveFemDec
+)
 
 
 def _set_ports_in_config(
-    config: ControllerConfigTypeVar, data: Union[ControllerConfigType, FemConfigType]
+    config: ControllerConfigTypeVar, data: Union[ControllerConfigType, FemConfigType, MwFemConfigType]
 ) -> ControllerConfigTypeVar:
     if "analog_outputs" in data:
         for analog_output_idx, analog_output_data in data["analog_outputs"].items():
             int_k = int(analog_output_idx)
             if isinstance(config, QuaConfigControllerDec):
-                config.analog_outputs[int_k] = analog_output_port_to_pb(
+                analog_output_data = cast(AnalogOutputPortConfigType, analog_output_data)
+                config.analog_outputs[int_k] = _analog_output_port_to_pb(
                     analog_output_data, output_type=QuaConfigAnalogOutputPortDec
                 )
-            else:
+            elif isinstance(config, QuaConfigOctoDacFemDec):
                 analog_output_data = cast(AnalogOutputPortConfigTypeOctoDac, analog_output_data)
-                config.analog_outputs[int_k] = opx_1000_analog_output_port_to_pb(analog_output_data)
+                config.analog_outputs[int_k] = _opx_1000_analog_output_port_to_pb(analog_output_data)
+            elif isinstance(config, QuaConfigMicrowaveFemDec):
+                analog_output_data = cast(MwFemAnalogOutputPortConfigType, analog_output_data)
+                config.analog_outputs[int_k] = mw_fem_analog_output_to_pb(analog_output_data)
+            else:
+                raise ValueError(f"Unknown config type {type(config)}")
 
     if "analog_inputs" in data:
-        for analog_input_idx, analog_input_data in data["analog_inputs"].items():
-            config.analog_inputs[int(analog_input_idx)] = analog_input_port_to_pb(analog_input_data)
+        if isinstance(config, (QuaConfigControllerDec, QuaConfigOctoDacFemDec)):
+            for analog_input_idx, analog_input_data in data["analog_inputs"].items():
+                analog_input_data = cast(AnalogInputPortConfigType, analog_input_data)
+                config.analog_inputs[int(analog_input_idx)] = _analog_input_port_to_pb(analog_input_data)
+        elif isinstance(config, QuaConfigMicrowaveFemDec):
+            for analog_input_idx, analog_input_data_mw in data["analog_inputs"].items():
+                analog_input_data_mw = cast(MwFemAnalogInputPortConfigType, analog_input_data_mw)
+                config.analog_inputs[int(analog_input_idx)] = mw_fem_analog_input_port_to_pb(analog_input_data_mw)
+        else:
+            raise ValueError(f"Unknown config type {type(config)}")
 
     if "digital_outputs" in data:
         for digital_output_idx, digital_output_data in data["digital_outputs"].items():
@@ -539,6 +599,7 @@ def element_to_pb(
     if "outputs" in data:
         for k, v in data["outputs"].items():
             element.outputs[k] = adc_port_ref_to_pb(*_get_port_reference_with_fem(v))
+        element.multiple_outputs.port_references = element.outputs
 
     if "digitalInputs" in data:
         for digital_input_k, digital_input_v in data["digitalInputs"].items():
@@ -583,6 +644,20 @@ def element_to_pb(
                 k: dac_port_ref_to_pb(*_get_port_reference_with_fem(v))
                 for k, v in data["multipleInputs"]["inputs"].items()
             }
+        )
+
+    if "MWInput" in data:
+        element.microwave_input = QuaConfigMicrowaveInputPortReference(
+            port=dac_port_ref_to_pb(*_get_port_reference_with_fem(data["MWInput"]["port"])),
+            oscillator_frequency_hz=data["MWInput"]["oscillator_frequency"],
+        )
+    if "MWOutput" in data:
+        mw_output = data["MWOutput"]
+        element.microwave_output = QuaConfigMicrowaveOutputPortReference(
+            port=adc_port_ref_to_pb(*_get_port_reference_with_fem(mw_output["port"])),
+            oscillator_frequency_hz=mw_output.get(
+                "oscillator_frequency", element.microwave_input.oscillator_frequency_hz
+            ),
         )
 
     if "oscillator" in data:
@@ -683,11 +758,12 @@ def pulse_to_pb(data: PulseConfigType) -> QuaConfigPulseDec:
     if "length" in data:
         pulse.length = int(data["length"])
 
-    if "operation" in data:
-        if data["operation"] == "control":
-            pulse.operation = QuaConfigPulseDecOperation.CONTROL
-        else:
-            pulse.operation = QuaConfigPulseDecOperation.MEASUREMENT
+    if data["operation"] == "control":
+        pulse.operation = QuaConfigPulseDecOperation.CONTROL
+    elif data["operation"] == "measurement":
+        pulse.operation = QuaConfigPulseDecOperation.MEASUREMENT
+    else:
+        raise ConfigValidationException(f"Invalid operation {data['operation']}")
 
     if "digital_marker" in data:
         pulse.digital_marker = data["digital_marker"]
@@ -836,6 +912,7 @@ def set_octave_downconverter_connection_to_elements(pb_config: QuaConfig) -> Non
                                 )
                         else:
                             element.outputs[k] = v
+                            element.multiple_outputs.port_references[k] = v
 
 
 def set_non_existing_mixers_in_mix_input_elements(pb_config: QuaConfig) -> None:
@@ -866,9 +943,11 @@ def set_non_existing_mixers_in_mix_input_elements(pb_config: QuaConfig) -> None:
 def validate_inputs_or_outputs_exist(pb_config: QuaConfig) -> None:
     for element in pb_config.v1_beta.elements.values():
         _, element_input = betterproto.which_one_of(element, "element_inputs_one_of")
+        _, element_outputs = betterproto.which_one_of(element, "element_outputs_one_of")
         if (
             element_input is None
-            and not bool(element.outputs)
+            and element_outputs is None
+            and not bool(element.outputs)  # this is for backward compatibility
             and not bool(element.digital_outputs)
             and not bool(element.digital_inputs)
         ):

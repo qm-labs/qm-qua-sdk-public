@@ -4,6 +4,7 @@ from typing import Set, Dict, List, Optional, TypedDict
 class PulserLocationType(TypedDict, total=False):
     controllerName: str
     pulserIndex: int
+    femId: int
 
 
 class IqInfoType(TypedDict, total=False):

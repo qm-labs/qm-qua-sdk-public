@@ -13,7 +13,7 @@ from qm.octave.octave_manager import ClockMode, OctaveManager
 from qm.octave.octave_mixer_calibration import DeprecatedCalibrationResult, convert_to_old_calibration_result
 
 if TYPE_CHECKING:
-    from qm.QuantumMachine import QuantumMachine
+    from qm.quantum_machine import QuantumMachine
 
 
 logger = logging.getLogger(__name__)

@@ -2,12 +2,12 @@ import warnings
 from enum import Enum
 from typing import Tuple
 
-from qm._report import ExecutionReport
 from qm.jobs.base_job import QmBaseJob
 from qm.utils import deprecation_message
 from qm.grpc.general_messages import Matrix
+from qm.results import StreamingResultFetcher
 from qm.api.job_result_api import JobResultServiceApi
-from qm.results.streaming_result_fetcher import StreamingResultFetcher
+from qm._report import ExecutionError, ExecutionReport
 
 
 class AcquiringStatus(Enum):
@@ -45,10 +45,13 @@ class RunningQmJob(QmBaseJob):
         """
         return StreamingResultFetcher(
             self._id,
-            JobResultServiceApi.from_api(self._frontend),
+            JobResultServiceApi(self._frontend.connection_details, self._id),
             self._store,
             self._capabilities,
         )
+
+    def cancel(self) -> bool:
+        return self.halt()
 
     def halt(self) -> bool:
         """Halts the job on the opx"""
@@ -90,7 +93,11 @@ class RunningQmJob(QmBaseJob):
         Returns:
             An object holding the errors that this job generated.
         """
-        return ExecutionReport(self._id, JobResultServiceApi.from_api(self._frontend))
+        errors = [
+            ExecutionError.create_from_grpc_message(item)
+            for item in JobResultServiceApi(self._frontend.connection_details, self.id).get_job_errors()
+        ]
+        return ExecutionReport(self._id, errors)
 
     def set_element_correction(
         self, element: str, correction: Tuple[float, float, float, float]

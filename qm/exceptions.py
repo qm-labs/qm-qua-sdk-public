@@ -1,4 +1,10 @@
-from typing import Any, List, Tuple
+from pprint import pformat
+from collections import defaultdict
+from collections.abc import Collection
+from typing import Any, List, Tuple, Generic, TypeVar
+
+import betterproto
+from marshmallow import ValidationError
 
 from qm.StreamMetadata import StreamMetadataError
 
@@ -66,6 +72,32 @@ class InvalidStreamMetadataError(QmQuaException):
 
 class ConfigValidationException(QmQuaException):
     pass
+
+
+def _format_validation_error(curr_error: object) -> object:
+    if isinstance(curr_error, defaultdict):
+        to_return = {}
+        for k, v in curr_error.items():
+            to_return[k] = _format_validation_error(v["value"])
+        return to_return
+    elif isinstance(curr_error, dict):
+        to_return = {}
+        for k, v in curr_error.items():
+            to_return[k] = _format_validation_error(v)
+        return to_return
+    elif isinstance(curr_error, Collection):
+        if all(isinstance(i, str) for i in curr_error):
+            return curr_error
+        else:
+            return [_format_validation_error(i) for i in curr_error]
+    raise ValueError(f"Unexpected type {type(curr_error)} in validation error")
+
+
+class ConfigSchemaError(ConfigValidationException):
+    def __init__(self, data: ValidationError) -> None:
+        self.data = data
+        self.formatted_dict = _format_validation_error(data.messages)
+        super().__init__(pformat(self.formatted_dict, width=120))
 
 
 class NoInputsOrOutputsError(ConfigValidationException):
@@ -213,3 +245,24 @@ class QmLocationParsingError(QmQuaException):
 
 class ElementInputConnectionAmbiguity(ConfigValidationException):
     pass
+
+
+class StreamProcessingDataLossError(QmQuaException):
+    pass
+
+
+ErrorType = TypeVar("ErrorType", bound=betterproto.Message)
+
+
+class QopResponseError(Exception, Generic[ErrorType]):
+    def __init__(self, error: ErrorType):
+        self._error = error
+
+    @property
+    def error(self) -> ErrorType:
+        return self._error
+
+    def __str__(self) -> str:
+        details = getattr(self._error, "details", "")
+        to_return = f"Error from QOP, details:\n{details}." if details else f"Error from QOP: {self._error}"
+        return to_return

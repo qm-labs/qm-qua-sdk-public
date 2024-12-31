@@ -6,7 +6,7 @@ from enum import Enum
 from time import perf_counter
 from functools import lru_cache
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Iterator, Optional, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Iterator, Optional, cast
 
 from octave_sdk.octave import ClockInfo
 from octave_sdk._octave_client import MonitorResult
@@ -69,7 +69,8 @@ from qm.grpc.qua_config import (
 )
 
 if TYPE_CHECKING:
-    from qm.QuantumMachine import QuantumMachine
+    from qm.api.v2.qm_api import QmApi
+    from qm.quantum_machine import QuantumMachine
     from qm.quantum_machines_manager import QuantumMachinesManager
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,11 @@ class OctaveManager:
         self._capabilities = capabilities
         self._octave_config = config or QmOctaveConfig()
         self._upconverted_states: Dict[Tuple[str, int], _UpconvertedState] = {}
+        self._perform_healthcheck_at_init()
+
+    def _perform_healthcheck_at_init(self) -> None:
+        for octave_name in self._octave_config.get_devices():
+            self.get_client(octave_name)
 
     def get_client(self, name: str) -> Octave:
         return get_device(
@@ -422,7 +428,7 @@ class OctaveManager:
         first_if: Number,
         octave_output_port: Tuple[str, int],
         close_open_quantum_machines: bool = True,
-    ) -> "QuantumMachine":
+    ) -> Union["QuantumMachine", "QmApi"]:
         iq_channels = self._octave_config.get_opx_iq_ports(octave_output_port)
         controller_name = iq_channels[0][0]
         adc_channels = ((controller_name, 1), (controller_name, 2))
@@ -444,75 +450,81 @@ class OctaveManager:
         return qm_inst
 
     def set_octaves_from_qua_config(self, octaves_config: Dict[str, QuaConfigOctaveConfig]) -> None:
-        with self.batch_mode():
-            for octave_name, octave_config in octaves_config.items():
-                pb_loopbacks = octave_config.loopbacks
-                loopbacks = get_loopbacks_from_pb(pb_loopbacks, octave_name)
-                connection_info = self._octave_config.devices[octave_name]
-                octave = get_device(connection_info, loopbacks, octave_name)
-                for output_port_idx, output_config in octave_config.rf_outputs.items():
-                    output_client = octave.rf_outputs[output_port_idx]
-                    config_lo_source = output_config.lo_source
-                    if config_lo_source == QuaConfigOctaveLoSourceInput.internal:
-                        lo_source = OctaveLOSource.Internal
-                    elif config_lo_source == QuaConfigOctaveLoSourceInput.external:
-                        lo_source = OctaveLOSource[f"LO{output_port_idx}"]
-                    else:
-                        raise ValueError(f"lo_source {config_lo_source} is not supported")
+        if not octaves_config:
+            # This if serves two things - if the user uses the old API, no need to set the octaves,
+            # and if there are no octaves in the qua config, but there are in the cluster,
+            # we still want to skip the batch mode.
+            return
+        for octave_name, octave_config in octaves_config.items():
+            pb_loopbacks = octave_config.loopbacks
+            loopbacks = get_loopbacks_from_pb(pb_loopbacks, octave_name)
+            connection_info = self._octave_config.devices[octave_name]
+            octave = get_device(connection_info, loopbacks, octave_name)
+            octave.start_batch_mode()
+            for output_port_idx, output_config in octave_config.rf_outputs.items():
+                output_client = octave.rf_outputs[output_port_idx]
+                config_lo_source = output_config.lo_source
+                if config_lo_source == QuaConfigOctaveLoSourceInput.internal:
+                    lo_source = OctaveLOSource.Internal
+                elif config_lo_source == QuaConfigOctaveLoSourceInput.external:
+                    lo_source = OctaveLOSource[f"LO{output_port_idx}"]
+                else:
+                    raise ValueError(f"lo_source {config_lo_source} is not supported")
 
-                    output_client.set_lo_source(lo_source)
+                output_client.set_lo_source(lo_source)
 
-                    if lo_source == OctaveLOSource.Internal or lo_source in loopbacks:
-                        output_client.set_lo_frequency(lo_source, output_config.lo_frequency)
-                    else:
-                        logger.debug(f"Cannot set frequency to an external lo source {lo_source.name}")
+                if lo_source == OctaveLOSource.Internal or lo_source in loopbacks:
+                    output_client.set_lo_frequency(lo_source, output_config.lo_frequency)
+                else:
+                    logger.debug(f"Cannot set frequency to an external lo source {lo_source.name}")
 
-                    output_mode = {
-                        QuaConfigOctaveOutputSwitchState.always_on: RFOutputMode.on,
-                        QuaConfigOctaveOutputSwitchState.always_off: RFOutputMode.off,
-                        QuaConfigOctaveOutputSwitchState.triggered: RFOutputMode.trig_normal,
-                        QuaConfigOctaveOutputSwitchState.triggered_reversed: RFOutputMode.trig_inverse,
-                    }[output_config.output_mode]
-                    output_client.set_output(output_mode)
-                    output_client.set_gain(
-                        output_config.gain,
-                        output_config.lo_frequency,
-                        use_iq_attenuators=output_config.input_attenuators,
-                    )
+                output_mode = {
+                    QuaConfigOctaveOutputSwitchState.always_on: RFOutputMode.on,
+                    QuaConfigOctaveOutputSwitchState.always_off: RFOutputMode.off,
+                    QuaConfigOctaveOutputSwitchState.triggered: RFOutputMode.trig_normal,
+                    QuaConfigOctaveOutputSwitchState.triggered_reversed: RFOutputMode.trig_inverse,
+                }[output_config.output_mode]
+                output_client.set_output(output_mode)
+                output_client.set_gain(
+                    output_config.gain,
+                    output_config.lo_frequency,
+                    use_iq_attenuators=output_config.input_attenuators,
+                )
 
-                for input_port_idx, input_config in octave_config.rf_inputs.items():
-                    input_client = octave.rf_inputs[input_port_idx]
-                    input_source = {
-                        QuaConfigOctaveDownconverterRfSource.rf_in: RFInputRFSource.RF_in,
-                        QuaConfigOctaveDownconverterRfSource.loopback_1: RFInputRFSource.Loopback_RF_out_1,
-                        QuaConfigOctaveDownconverterRfSource.loopback_2: RFInputRFSource.Loopback_RF_out_2,
-                        QuaConfigOctaveDownconverterRfSource.loopback_3: RFInputRFSource.Loopback_RF_out_3,
-                        QuaConfigOctaveDownconverterRfSource.loopback_4: RFInputRFSource.Loopback_RF_out_4,
-                        QuaConfigOctaveDownconverterRfSource.loopback_5: RFInputRFSource.Loopback_RF_out_5,
-                    }[input_config.rf_source]
-                    input_client.set_rf_source(input_source)
+            for input_port_idx, input_config in octave_config.rf_inputs.items():
+                input_client = octave.rf_inputs[input_port_idx]
+                input_source = {
+                    QuaConfigOctaveDownconverterRfSource.rf_in: RFInputRFSource.RF_in,
+                    QuaConfigOctaveDownconverterRfSource.loopback_1: RFInputRFSource.Loopback_RF_out_1,
+                    QuaConfigOctaveDownconverterRfSource.loopback_2: RFInputRFSource.Loopback_RF_out_2,
+                    QuaConfigOctaveDownconverterRfSource.loopback_3: RFInputRFSource.Loopback_RF_out_3,
+                    QuaConfigOctaveDownconverterRfSource.loopback_4: RFInputRFSource.Loopback_RF_out_4,
+                    QuaConfigOctaveDownconverterRfSource.loopback_5: RFInputRFSource.Loopback_RF_out_5,
+                }[input_config.rf_source]
+                input_client.set_rf_source(input_source)
 
-                    if input_config.lo_source == QuaConfigOctaveLoSourceInput.internal:
-                        downconversion_lo_source = RFInputLOSource.Internal
-                    elif input_config.lo_source == QuaConfigOctaveLoSourceInput.external:
-                        downconversion_lo_source = RFInputLOSource[f"Dmd{input_port_idx}LO"]
-                    elif input_config.lo_source == QuaConfigOctaveLoSourceInput.analyzer:
-                        downconversion_lo_source = RFInputLOSource.Analyzer
-                    else:
-                        raise ValueError(f"lo_source {input_config.lo_source} is not supported")
+                if input_config.lo_source == QuaConfigOctaveLoSourceInput.internal:
+                    downconversion_lo_source = RFInputLOSource.Internal
+                elif input_config.lo_source == QuaConfigOctaveLoSourceInput.external:
+                    downconversion_lo_source = RFInputLOSource[f"Dmd{input_port_idx}LO"]
+                elif input_config.lo_source == QuaConfigOctaveLoSourceInput.analyzer:
+                    downconversion_lo_source = RFInputLOSource.Analyzer
+                else:
+                    raise ValueError(f"lo_source {input_config.lo_source} is not supported")
 
-                    input_client.set_lo_source(downconversion_lo_source)
-                    if (
-                        downconversion_lo_source == RFInputLOSource.Internal
-                        or (downconversion_lo_source == RFInputLOSource.Dmd1LO and OctaveLOSource.Dmd1LO in loopbacks)
-                        or (downconversion_lo_source == RFInputLOSource.Dmd2LO and OctaveLOSource.Dmd2LO in loopbacks)
-                    ):
-                        input_client.set_lo_frequency(downconversion_lo_source, input_config.lo_frequency)
-                    else:
-                        logger.debug(f"Cannot set frequency to an external lo source {downconversion_lo_source.name}")
+                input_client.set_lo_source(downconversion_lo_source)
+                if (
+                    downconversion_lo_source == RFInputLOSource.Internal
+                    or (downconversion_lo_source == RFInputLOSource.Dmd1LO and OctaveLOSource.Dmd1LO in loopbacks)
+                    or (downconversion_lo_source == RFInputLOSource.Dmd2LO and OctaveLOSource.Dmd2LO in loopbacks)
+                ):
+                    input_client.set_lo_frequency(downconversion_lo_source, input_config.lo_frequency)
+                else:
+                    logger.debug(f"Cannot set frequency to an external lo source {downconversion_lo_source.name}")
 
-                    input_client.set_if_mode_i(IFMode[input_config.if_mode_i.name])
-                    input_client.set_if_mode_q(IFMode[input_config.if_mode_q.name])
+                input_client.set_if_mode_i(IFMode[input_config.if_mode_i.name])
+                input_client.set_if_mode_q(IFMode[input_config.if_mode_q.name])
+            octave.end_batch_mode()
 
 
 def get_som_temp(monitor_data: MonitorResult) -> float:

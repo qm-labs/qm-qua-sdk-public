@@ -1,9 +1,12 @@
 from enum import Enum
-from typing import List
+from typing import List, Union
 from dataclasses import dataclass
 
-from qm.api.job_result_api import JobResultServiceApi
-from qm.grpc.results_analyser import GetJobErrorsResponseExecutionErrorSeverity
+from qm.grpc.results_analyser import GetJobErrorsResponseError, GetJobErrorsResponseExecutionErrorSeverity
+from qm.grpc.v2 import (
+    GetJobErrorsResponseGetJobErrorsResponseSuccessError,
+    GetJobErrorsResponseGetJobErrorsResponseSuccessExecutionErrorSeverity,
+)
 
 
 class ExecutionErrorSeverity(Enum):
@@ -20,30 +23,40 @@ class ExecutionError:
     def __repr__(self) -> str:
         return f"{self.error_code}\t\t{self.severity.name}\t\t{self.message}"
 
-
-class ExecutionReport:
-    def __init__(self, job_id: str, service: JobResultServiceApi) -> None:
-        self._job_id = job_id
-        self._service = service
-        self._errors = self._load_errors()
-
-    def _load_errors(self) -> List[ExecutionError]:
-        return [
-            ExecutionError(
-                error_code=item.error_code,
-                message=item.message,
-                severity=ExecutionReport._parse_error_severity(item.error_severity),
-            )
-            for item in self._service.get_job_errors(self._job_id)
-        ]
+    @classmethod
+    def create_from_grpc_message(
+        cls, error: Union[GetJobErrorsResponseError, GetJobErrorsResponseGetJobErrorsResponseSuccessError]
+    ) -> "ExecutionError":
+        return cls(
+            error_code=error.error_code,
+            message=error.message,
+            severity=cls._parse_severity(error.error_severity),
+        )
 
     @staticmethod
-    def _parse_error_severity(error_severity: GetJobErrorsResponseExecutionErrorSeverity) -> ExecutionErrorSeverity:
-        if error_severity == GetJobErrorsResponseExecutionErrorSeverity.WARNING:
+    def _parse_severity(
+        error_severity: Union[
+            GetJobErrorsResponseExecutionErrorSeverity,
+            GetJobErrorsResponseGetJobErrorsResponseSuccessExecutionErrorSeverity,
+        ]
+    ) -> ExecutionErrorSeverity:
+        if error_severity in {
+            GetJobErrorsResponseExecutionErrorSeverity.WARNING,
+            GetJobErrorsResponseGetJobErrorsResponseSuccessExecutionErrorSeverity.WARNING,
+        }:
             return ExecutionErrorSeverity.Warn
-        elif error_severity == GetJobErrorsResponseExecutionErrorSeverity.ERROR:
+        elif error_severity in {
+            GetJobErrorsResponseExecutionErrorSeverity.ERROR,
+            GetJobErrorsResponseGetJobErrorsResponseSuccessExecutionErrorSeverity.ERROR,
+        }:
             return ExecutionErrorSeverity.Error
         raise TypeError(f"No severity level: {error_severity}")
+
+
+class ExecutionReport:
+    def __init__(self, job_id: str, errors: List[ExecutionError]) -> None:
+        self._job_id = job_id
+        self._errors = errors
 
     def has_errors(self) -> bool:
         """Returns: True if encountered a runtime error while executing the job."""

@@ -1,5 +1,5 @@
 import logging
-from typing import Tuple, Union, AsyncIterator
+from typing import Type, Tuple, Union, AsyncIterator
 
 from qm.simulate import interface
 from qm.api.base_api import BaseApi
@@ -11,7 +11,7 @@ from qm.simulate.interface import SimulationConfig
 from qm.type_hinting.config_types import DictQuaConfig
 from qm.api.models.server_details import ConnectionDetails
 from qm.exceptions import QMSimulationError, FailedToExecuteJobException
-from qm.api.models.compiler import CompilerOptionArguments, _get_request_compiler_options
+from qm.api.models.compiler import CompilerOptionArguments, get_request_compiler_options
 from qm.grpc.results_analyser import SimulatorSamplesResponse, PullSimulatorSamplesRequest
 from qm.grpc.frontend import (
     FrontendStub,
@@ -30,11 +30,92 @@ from qm.grpc.frontend import (
 logger = logging.getLogger(__name__)
 
 
-class SimulationApi(BaseApi):
+def create_simulation_request(
+    config: Union[DictQuaConfig, QuaConfig],
+    program: Program,
+    simulate: SimulationConfig,
+    compiler_options: CompilerOptionArguments,
+) -> SimulationRequest:
+    if not isinstance(program, Program):
+        raise Exception("program argument must be of type qm.program.Program")
+
+    request = SimulationRequest()
+    msg_config = config if isinstance(config, QuaConfig) else load_config(config)
+    msg_config.v1_beta._unknown_fields = b""  # The above correction is for a return of an unknown fields from
+    # an old GW, that changes the flow of the config parsing (in the GW, and to a buggy one).
+    # Check a year from now (Feb/2024) if this is still necessary.
+    request.config = msg_config
+
+    if isinstance(simulate, SimulationConfig):
+        request.simulate = ExecutionRequestSimulate(
+            duration=simulate.duration,
+            include_analog_waveforms=simulate.include_analog_waveforms,
+            include_digital_waveforms=simulate.include_digital_waveforms,
+            extra_processing_timeout_ms=simulate.extraProcessingTimeoutInMs,
+        )
+        request = simulate.update_simulate_request(request)
+
+        for connection in simulate.controller_connections:
+            if not isinstance(connection.source, type(connection.target)):
+                raise Exception(
+                    f"Unsupported InterOpx connection. Source is "
+                    f"{type(connection.source).__name__} but target is "
+                    f"{type(connection.target).__name__}"
+                )
+
+            if isinstance(connection.source, interface.InterOpxAddress) and isinstance(
+                connection.target, interface.InterOpxAddress
+            ):
+                con = InterOpxConnection(
+                    address_to_address=InterOpxConnectionAddressToAddress(
+                        source=InterOpxAddress(
+                            controller=connection.source.controller,
+                            left=connection.source.is_left_connection,
+                        ),
+                        target=InterOpxAddress(
+                            controller=connection.target.controller,
+                            left=connection.target.is_left_connection,
+                        ),
+                    )
+                )
+            elif isinstance(connection.source, interface.InterOpxChannel) and isinstance(
+                connection.target, interface.InterOpxChannel
+            ):
+                con = InterOpxConnection(
+                    channel_to_channel=InterOpxConnectionChannelToChannel(
+                        source=InterOpxChannel(
+                            controller=connection.source.controller,
+                            channel_number=connection.source.channel_number,
+                        ),
+                        target=InterOpxChannel(
+                            controller=connection.target.controller,
+                            channel_number=connection.target.channel_number,
+                        ),
+                    )
+                )
+            else:
+                raise Exception(
+                    f"Unsupported InterOpx connection. Source is "
+                    f"{type(connection.source).__name__}. Supported types are "
+                    f"InterOpxAddress "
+                    f"or InterOpxChannel"
+                )
+
+            request.controller_connections.append(con)
+
+    request.high_level_program = program.qua_program
+    request.high_level_program.compiler_options = get_request_compiler_options(compiler_options)
+    return request
+
+
+class SimulationApi(BaseApi[FrontendStub]):
     def __init__(self, connection_details: ConnectionDetails):
         super().__init__(connection_details)
-        self._stub = FrontendStub(self._channel)
         self._timeout = None
+
+    @property
+    def _stub_class(self) -> Type[FrontendStub]:
+        return FrontendStub
 
     def simulate(
         self,
@@ -46,73 +127,7 @@ class SimulationApi(BaseApi):
         if type(program) is not Program:
             raise Exception("program argument must be of type qm.program.Program")
 
-        request = SimulationRequest()
-        msg_config = config if isinstance(config, QuaConfig) else load_config(config)
-        msg_config.v1_beta._unknown_fields = b""  # The above correction is for a return of an unknown fields from
-        # an old GW, that changes the flow of the config parsing (in the GW, and to a buggy one).
-        # Check a year from now (Feb/2024) if this is still necessary.
-        request.config = msg_config
-
-        if isinstance(simulate, SimulationConfig):
-            request.simulate = ExecutionRequestSimulate(
-                duration=simulate.duration,
-                include_analog_waveforms=simulate.include_analog_waveforms,
-                include_digital_waveforms=simulate.include_digital_waveforms,
-                extra_processing_timeout_ms=simulate.extraProcessingTimeoutInMs,
-            )
-            request = simulate.update_simulate_request(request)
-
-            for connection in simulate.controller_connections:
-                if not isinstance(connection.source, type(connection.target)):
-                    raise Exception(
-                        f"Unsupported InterOpx connection. Source is "
-                        f"{type(connection.source).__name__} but target is "
-                        f"{type(connection.target).__name__}"
-                    )
-
-                if isinstance(connection.source, interface.InterOpxAddress) and isinstance(
-                    connection.target, interface.InterOpxAddress
-                ):
-                    con = InterOpxConnection(
-                        address_to_address=InterOpxConnectionAddressToAddress(
-                            source=InterOpxAddress(
-                                controller=connection.source.controller,
-                                left=connection.source.is_left_connection,
-                            ),
-                            target=InterOpxAddress(
-                                controller=connection.target.controller,
-                                left=connection.target.is_left_connection,
-                            ),
-                        )
-                    )
-                elif isinstance(connection.source, interface.InterOpxChannel) and isinstance(
-                    connection.target, interface.InterOpxChannel
-                ):
-                    con = InterOpxConnection(
-                        channel_to_channel=InterOpxConnectionChannelToChannel(
-                            source=InterOpxChannel(
-                                controller=connection.source.controller,
-                                channel_number=connection.source.channel_number,
-                            ),
-                            target=InterOpxChannel(
-                                controller=connection.target.controller,
-                                channel_number=connection.target.channel_number,
-                            ),
-                        )
-                    )
-                else:
-                    raise Exception(
-                        f"Unsupported InterOpx connection. Source is "
-                        f"{type(connection.source).__name__}. Supported types are "
-                        f"InterOpxAddress "
-                        f"or InterOpxChannel"
-                    )
-
-                request.controller_connections.append(con)
-
-        request.high_level_program = program.qua_program
-        request.high_level_program.compiler_options = _get_request_compiler_options(compiler_options)
-
+        request = create_simulation_request(config, program, simulate, compiler_options)
         logger.info("Simulating program")
 
         response = run_async(self._stub.simulate(request, timeout=self._timeout))
@@ -155,5 +170,4 @@ class SimulationApi(BaseApi):
             include_digital=include_digital,
             include_all_connections=True,  # TODO: Check whether it should appear
         )
-
         return self._stub.pull_simulator_samples(request)

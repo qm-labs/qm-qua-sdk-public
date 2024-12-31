@@ -1,26 +1,23 @@
 import logging
-from typing import List, Optional
+from typing import List, Tuple, Optional
 
 from qm.persistence import BaseStore
 from qm.program.program import Program
 from qm.grpc.qua_config import QuaConfig
 from qm.api.frontend_api import FrontendApi
 from qm.jobs.pending_job import QmPendingJob
-from qm.api.job_manager_api import JobManagerApi
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.compiler import CompilerOptionArguments
+from qm.api.job_manager_api import create_job_manager_from_api
 from qm.api.models.jobs import PendingJobData, InsertDirection
+from qm.jobs.job_queue_base import QmQueueBase, JobNotFoundError
 from qm.type_hinting.exceution_overrides import ExecutionOverridesType
 from qm.program._execution_overrides_schema import ExecutionOverridesSchema
 
 logger = logging.getLogger(__name__)
 
 
-class JobNotFoundError(Exception):
-    pass
-
-
-class QmQueue:
+class QmQueue(QmQueueBase[QmPendingJob]):
     def __init__(
         self,
         config: QuaConfig,
@@ -29,19 +26,18 @@ class QmQueue:
         capabilities: ServerCapabilities,
         store: BaseStore,
     ):
+        super().__init__(store, capabilities)
         self.machine_id = quantum_machine_id
         self._config = config
         self._frontend: FrontendApi = frontend_api
-        self._job_manager = JobManagerApi.from_api(self._frontend)
-        self._capabilities = capabilities
-        self._store = store
+        self._job_manager = create_job_manager_from_api(self._frontend)
 
     def _get_pending_jobs(
         self, job_id: Optional[str] = None, position: Optional[int] = None, user_id: Optional[str] = None
-    ) -> List[QmPendingJob]:
+    ) -> Tuple[QmPendingJob, ...]:
         jobs: List[PendingJobData] = self._job_manager.get_pending_jobs(self.machine_id, job_id, position, user_id)
         jobs.sort(key=lambda it: it.job_id)
-        result = [
+        result = tuple(
             QmPendingJob(
                 job_id=job.job_id,
                 machine_id=self.machine_id,
@@ -50,7 +46,7 @@ class QmQueue:
                 store=self._store,
             )
             for job in jobs
-        ]
+        )
         return result
 
     def add(
@@ -157,51 +153,6 @@ class QmQueue:
             store=self._store,
         )
 
-    @property
-    def count(self) -> int:
-        """Get the number of jobs currently on the queue
-
-        Returns:
-            The number of jobs in the queue
-
-        Example:
-            ```python
-            qm.queue.count
-            ```
-        """
-        return len(self._get_pending_jobs())
-
-    def __len__(self) -> int:
-        return self.count
-
-    @property
-    def pending_jobs(self) -> List[QmPendingJob]:
-        """Returns all currently pending jobs
-
-        Returns:
-            A list of all of the currently pending jobs
-        """
-        return self._get_pending_jobs()
-
-    def get(self, job_id: str) -> QmPendingJob:
-        """Get a pending job object by job_id
-
-        Args:
-            job_id: a QMJob id
-
-        Returns:
-            The pending job
-
-        Example:
-            ```python
-            qm.queue.get(job_id)
-            ```
-        """
-        jobs = self._get_pending_jobs(job_id)
-        if len(jobs) == 0:
-            raise JobNotFoundError()
-        return jobs[0]
-
     def get_at(self, position: int) -> QmPendingJob:
         """Gets the pending job object at the given position in the queue
 
@@ -220,9 +171,6 @@ class QmQueue:
         if len(jobs) == 0:
             raise JobNotFoundError()
         return jobs[0]
-
-    def get_by_user_id(self, user_id: str) -> List[QmPendingJob]:
-        return self._get_pending_jobs(None, None, user_id)
 
     def remove_by_id(self, job_id: str) -> int:
         """Removes the pending job object with a specific job id
@@ -279,9 +227,6 @@ class QmQueue:
             position=None,
             user_id=user_id,
         )
-
-    def __getitem__(self, position: int) -> QmPendingJob:
-        return self.get_at(position)
 
     def clear(self) -> int:
         """Empties the queue from all pending jobs

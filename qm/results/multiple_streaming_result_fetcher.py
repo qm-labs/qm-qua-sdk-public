@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, List, Union, BinaryIO, Optional, cast
 import numpy
 
 from qm.persistence import BaseStore
+from qm.api.v2.job_result_api import JobResultApi
 from qm.api.job_result_api import JobResultServiceApi
 from qm.api.models.capabilities import ServerCapabilities
 from qm.exceptions import QmNoResultsError, QmInvalidSchemaError
@@ -21,9 +22,8 @@ class MultipleStreamingResultFetcher(BaseStreamingResultFetcher):
     def __init__(
         self,
         job_results: "StreamingResultFetcher",
-        job_id: str,
         schema: JobResultItemSchema,
-        service: JobResultServiceApi,
+        service: Union[JobResultServiceApi, JobResultApi],
         store: BaseStore,
         stream_metadata_errors: List[StreamMetadataError],
         stream_metadata: Optional[StreamMetadata],
@@ -31,7 +31,6 @@ class MultipleStreamingResultFetcher(BaseStreamingResultFetcher):
     ) -> None:
         self.job_results = job_results
         super().__init__(
-            job_id=job_id,
             schema=schema,
             service=service,
             store=store,

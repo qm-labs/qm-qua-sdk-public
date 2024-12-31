@@ -1,15 +1,16 @@
+from typing import Type
+
 from qm.utils.async_utils import run_async
-from qm.api.models.server_details import ConnectionDetails
 from qm.api.base_api import BaseApi, connection_error_handle
 from qm.io.qualang.api.v1 import GetInfoRequest, InfoServiceStub
 from qm.api.models.info import QuaMachineInfo, ImplementationInfo
 
 
 @connection_error_handle()
-class InfoServiceApi(BaseApi):
-    def __init__(self, connection_details: ConnectionDetails):
-        super().__init__(connection_details)
-        self._stub = InfoServiceStub(self._channel)
+class InfoServiceApi(BaseApi[InfoServiceStub]):
+    @property
+    def _stub_class(self) -> Type[InfoServiceStub]:
+        return InfoServiceStub
 
     def get_info(self) -> QuaMachineInfo:
         request = GetInfoRequest()

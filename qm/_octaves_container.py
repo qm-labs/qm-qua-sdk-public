@@ -9,12 +9,13 @@ from qm.utils.config_utils import get_fem_config
 from qm.octave import CalibrationDB, QmOctaveConfig
 from qm.api.models.capabilities import ServerCapabilities
 from qm.octave.calibration_db import convert_to_correction
-from qm.elements.up_converted_input import UpconvertedInput
 from qm.octave.octave_manager import logger, get_device, get_loopbacks_from_pb
+from qm.elements.up_converted_input import UpconvertedInput, UpconvertedInputNewApi
 from qm.exceptions import OctaveCableSwapError, OctaveConnectionError, ElementUpconverterDeclarationError
 from qm.grpc.qua_config import (
     QuaConfig,
     QuaConfigMatrix,
+    QuaConfigMixInputs,
     QuaConfigCorrectionEntry,
     QuaConfigDacPortReference,
     QuaConfigGeneralPortReference,
@@ -97,21 +98,45 @@ class OctavesContainer:
 
         octave_name, octave_port = port
         client = self._get_octave_client(octave_name)
-
-        try:
-            gain = self._pb_config.v1_beta.octaves[octave_name].rf_outputs[octave_port].gain
-        except KeyError:
-            logger.warning(
-                "No gain was specified. Setting gain to None. "
-                "Please configure all the ports' gain values in the qua configuration"
-            )
-            gain = None
+        gain = self._get_octave_gain(octave_name, octave_port)
 
         return UpconvertedInput(
             element_input._name,
             element_input._config,
             element_input._frontend,
             element_input._id,
+            client=client.rf_outputs[octave_port],
+            port=port,
+            calibration_db=self._octave_config.calibration_db,
+            gain=gain,
+        )
+
+    def _get_octave_gain(self, octave_name: str, port: int) -> Optional[float]:
+        try:
+            return self._pb_config.v1_beta.octaves[octave_name].rf_outputs[port].gain
+        except KeyError:
+            logger.warning(
+                "No gain was specified. Setting gain to None. "
+                "Please configure all the ports' gain values in the qua configuration"
+            )
+            return None
+
+    def create_new_api_upconverted_input(
+        self,
+        element_inputs: QuaConfigMixInputs,
+        name: str,
+    ) -> Optional[UpconvertedInputNewApi]:
+        port = self.get_upconverter_port_ref(element_inputs.i, element_inputs.q)
+        if port is None:
+            return None
+
+        octave_name, octave_port = port
+        client = self._get_octave_client(octave_name)
+        gain = self._get_octave_gain(octave_name, octave_port)
+
+        return UpconvertedInputNewApi(
+            name,
+            element_inputs,
             client=client.rf_outputs[octave_port],
             port=port,
             calibration_db=self._octave_config.calibration_db,

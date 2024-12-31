@@ -2,10 +2,10 @@ import base64
 import logging
 import os.path
 import datetime
-import functools
 import dataclasses
 from copy import deepcopy
 from dataclasses import dataclass
+from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from typing import (
     Any,
@@ -18,11 +18,9 @@ from typing import (
     Mapping,
     TypeVar,
     Callable,
-    Iterable,
     Optional,
     Protocol,
     Sequence,
-    MutableMapping,
     cast,
 )
 
@@ -30,6 +28,7 @@ import numpy as np
 import plotly.colors  # type: ignore[import-untyped]
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 
+from qm.results.simulator_samples import SimulatorSamples, SimulatorControllerSamples
 from qm.type_hinting.simulator_types import (
     IqInfoType,
     ChirpInfoType,
@@ -42,11 +41,21 @@ from qm.type_hinting.simulator_types import (
 
 
 class HasPortsProtocol(Protocol):
-    controller: str
-
     @property
     def ports(self) -> List[int]:
-        return [1]
+        raise NotImplementedError
+
+    @property
+    def controller(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def fem(self) -> int:
+        raise NotImplementedError
+
+    @property
+    def element(self) -> str:
+        raise NotImplementedError
 
 
 T = TypeVar("T", bound="PlayedWaveform")
@@ -63,6 +72,7 @@ class PlayedWaveform(metaclass=ABCMeta):
     output_ports: List[int]
     controller: str
     pulser: Dict[str, Any]
+    fem: int
 
     @staticmethod
     def _build_initialization_dict(
@@ -84,6 +94,7 @@ class PlayedWaveform(metaclass=ABCMeta):
             output_ports=[int(p) for p in dict_description["outputPorts"]],
             pulser=dict_description["pulser"],
             controller=dict_description["pulser"]["controllerName"],
+            fem=int(dict_description["pulser"].get("femId", 0)) + 1,
         )
         return attribute_dict
 
@@ -187,24 +198,15 @@ class PlayedAnalogWaveform(PlayedWaveform):
         )
         return cls(**cls._build_initialization_dict(dict_description, formatted_attribute_list))
 
-    def _to_custom_string(self, show_chirp: bool = True) -> str:
+    def to_custom_string(self, show_chirp: bool = True) -> str:
         _attributes = super()._common_attributes_to_printable_str_list()
         _attributes += (
             [
                 f"{k}={v if self.is_iq else v[0]}"
                 for k, v in [
-                    (
-                        "Amplitude Values",
-                        [format_float(f) for f in self.current_amp_elements],
-                    ),
-                    (
-                        "Frame Values",
-                        [format_float(f) for f in self.current_frame],
-                    ),
-                    (
-                        "Correction Values",
-                        [format_float(f) for f in self.current_correction_elements],
-                    ),
+                    ("Amplitude Values", [format_float(f) for f in self.current_amp_elements]),
+                    ("Frame Values", [format_float(f) for f in self.current_frame]),
+                    ("Correction Values", [format_float(f) for f in self.current_correction_elements]),
                 ]
             ]
             + [
@@ -218,7 +220,7 @@ class PlayedAnalogWaveform(PlayedWaveform):
         return s
 
     def to_string(self) -> str:
-        return self._to_custom_string()
+        return self.to_custom_string()
 
 
 @dataclass(frozen=True)
@@ -245,6 +247,8 @@ class AdcAcquisition:
     quantum_element: str
     adc_ports: List[int]
     controller: str
+    fem: int
+    element: str
 
     @classmethod
     def from_job_dict(cls, dict_description: AdcAcquisitionType) -> "AdcAcquisition":
@@ -256,6 +260,8 @@ class AdcAcquisition:
             quantum_element=dict_description["quantumElement"],
             adc_ports=[int(p) + 1 for p in dict_description["adc"]],
             controller=dict_description["pulser"]["controllerName"],
+            fem=int(dict_description["pulser"].get("femId", 0)) + 1,
+            element=dict_description["quantumElement"],
         )
 
     @property
@@ -281,24 +287,54 @@ class AdcAcquisition:
         return dataclasses.asdict(self)
 
 
+@dataclass
+class FemToWaveformMap:
+    analog_out: Dict[int, List[PlayedAnalogWaveform]]
+    digital_out: Dict[int, List[PlayedDigitalWaveform]]
+    analog_in: Dict[int, List[AdcAcquisition]]
+
+
+class _SingleControllerMapping(Dict[int, FemToWaveformMap]):
+    @property
+    def num_analog_out_ports(self) -> int:
+        return len(self.flat_analog_out)
+
+    @property
+    def num_digital_out_ports(self) -> int:
+        return len(self.flat_digital_out)
+
+    @property
+    def num_analog_in_ports(self) -> int:
+        return len(self.flat_analog_in)
+
+    @property
+    def flat_analog_out(self) -> Dict[str, List[PlayedAnalogWaveform]]:
+        return {f"{fem_idx}-{port_idx}": v for fem_idx, fem in self.items() for port_idx, v in fem.analog_out.items()}
+
+    @property
+    def flat_digital_out(self) -> Dict[str, List[PlayedDigitalWaveform]]:
+        return {f"{fem_idx}-{port_idx}": v for fem_idx, fem in self.items() for port_idx, v in fem.digital_out.items()}
+
+    @property
+    def flat_analog_in(self) -> Dict[str, List[AdcAcquisition]]:
+        return {f"{fem_idx}-{port_idx}": v for fem_idx, fem in self.items() for port_idx, v in fem.analog_in.items()}
+
+
+@dataclass(frozen=True)
 class WaveformReport:
-    def __init__(self, descriptor_dict: Optional[WaveformReportType] = None, job_id: Union[int, str] = -1):
-        self.analog_waveforms: List[PlayedAnalogWaveform] = []
-        self.digital_waveforms: List[PlayedDigitalWaveform] = []
-        self.adc_acquisitions: List[AdcAcquisition] = []
-        self.job_id = job_id
-        if descriptor_dict is not None:
-            for awf in descriptor_dict["analogWaveforms"]:
-                self.analog_waveforms.append(PlayedAnalogWaveform.from_job_dict(awf))
-            for dwf in descriptor_dict["digitalWaveforms"]:
-                self.digital_waveforms.append(PlayedDigitalWaveform.from_job_dict(dwf))
-            if "adcAcquisitions" in descriptor_dict:
-                for acq in descriptor_dict["adcAcquisitions"]:
-                    self.adc_acquisitions.append(AdcAcquisition.from_job_dict(acq))
+    job_id: Union[int, str]
+    analog_waveforms: List[PlayedAnalogWaveform]
+    digital_waveforms: List[PlayedDigitalWaveform]
+    adc_acquisitions: List[AdcAcquisition]
 
     @classmethod
     def from_dict(cls, d: WaveformReportType, job_id: Union[int, str] = -1) -> "WaveformReport":
-        return cls(d, job_id)
+        return cls(
+            analog_waveforms=[PlayedAnalogWaveform.from_job_dict(awf) for awf in d["analogWaveforms"]],
+            digital_waveforms=[PlayedDigitalWaveform.from_job_dict(dwf) for dwf in d["digitalWaveforms"]],
+            adc_acquisitions=[AdcAcquisition.from_job_dict(acq) for acq in d.get("adcAcquisitions", [])],
+            job_id=job_id,
+        )
 
     @property
     def waveforms(self) -> Sequence[PlayedWaveform]:
@@ -306,50 +342,26 @@ class WaveformReport:
 
     @property
     def controllers_in_use(self) -> Sequence[str]:
-        waveform_controllers = [c.controller for c in self.waveforms]
-        adc_controller = [c.controller for c in self.adc_acquisitions]
-        return list(set(adc_controller + waveform_controllers))
+        return sorted(self.fems_in_use_by_controller)
+
+    @property
+    def elements_in_report(self) -> Sequence[str]:
+        wf_elements = {wf.element for wf in self.waveforms}
+        adc_elements = {adc.element for adc in self.adc_acquisitions}
+        return sorted(wf_elements | adc_elements)
+
+    @property
+    def fems_in_use_by_controller(self) -> Mapping[str, Sequence[int]]:
+        fems_in_use = defaultdict(set)
+        for ap in self.waveforms:
+            fems_in_use[ap.controller].add(ap.fem)
+        for adc in self.adc_acquisitions:
+            fems_in_use[adc.controller].add(adc.fem)
+        return {k: sorted(v) for k, v in fems_in_use.items()}
 
     @property
     def num_controllers_in_use(self) -> int:
         return len(self.controllers_in_use)
-
-    @staticmethod
-    def _sort_ports_dict(ports_in_use: Mapping[str, Iterable[int]]) -> Mapping[str, Sequence[int]]:
-        output: MutableMapping[str, Sequence[int]] = {}
-        for k, v in ports_in_use.items():
-            output[k] = sorted(v)
-        return output
-
-    def _get_output_ports_in_use(
-        self, src: List[HasPortsProtocol], on_controller: Optional[str]
-    ) -> Union[Mapping[str, Sequence[int]], Sequence[int]]:
-        ports_in_use: MutableMapping[str, Set[int]] = {c: set() for c in self.controllers_in_use}
-        for ap in src:
-            ports_in_use[ap.controller].update(ap.ports)
-        sorted_ports: Mapping[str, Sequence[int]] = self._sort_ports_dict(ports_in_use)
-        if on_controller is None:
-            if self.num_controllers_in_use == 1:
-                return sorted_ports[self.controllers_in_use[0]]
-            else:
-                return sorted_ports
-        else:
-            return sorted_ports[on_controller]
-
-    def analog_output_ports_in_use(
-        self, on_controller: Optional[str] = None
-    ) -> Union[Mapping[str, Sequence[int]], Sequence[int]]:
-        return self._get_output_ports_in_use(self.analog_waveforms, on_controller)  # type: ignore[arg-type]
-
-    def digital_output_ports_in_use(
-        self, on_controller: Optional[str] = None
-    ) -> Union[Mapping[str, Sequence[int]], Sequence[int]]:
-        return self._get_output_ports_in_use(self.digital_waveforms, on_controller)  # type: ignore[arg-type]
-
-    def adcs_ports_in_use(
-        self, on_controller: Optional[str] = None
-    ) -> Union[Mapping[str, Sequence[int]], Sequence[int]]:
-        return self._get_output_ports_in_use(self.adc_acquisitions, on_controller)  # type: ignore[arg-type]
 
     def to_string(self) -> str:
         """
@@ -361,23 +373,48 @@ class WaveformReport:
         adc_string = [adc.to_string() for adc in self.adc_acquisitions]
         return "\n".join(waveforms_str + adc_string)
 
-    def _transform_report_by_func(self, func: Callable[..., Any]) -> "WaveformReport":
-        new_report = WaveformReport(job_id=self.job_id)
-        new_report.analog_waveforms = list(filter(func, self.analog_waveforms))
-        new_report.digital_waveforms = list(filter(func, self.digital_waveforms))
-        new_report.adc_acquisitions = list(filter(func, self.adc_acquisitions))
-        return new_report
+    def _transform_report_by_func(self, func: Callable[[HasPortsProtocol], bool]) -> "WaveformReport":
+        return WaveformReport(
+            analog_waveforms=list(filter(func, self.analog_waveforms)),
+            digital_waveforms=list(filter(func, self.digital_waveforms)),
+            adc_acquisitions=list(filter(func, self.adc_acquisitions)),
+            job_id=self.job_id,
+        )
 
     def report_by_controllers(self) -> Mapping[str, "WaveformReport"]:
-        def _filter_func(r: HasPortsProtocol, conn: str) -> bool:
-            return r.controller == conn
+        def create_filter_func(controller: str) -> Callable[[HasPortsProtocol], bool]:
+            return lambda r: r.controller == controller
 
         by_controller_map: Dict[str, "WaveformReport"] = {}
         for con_name in self.controllers_in_use:
-            con_filter = functools.partial(_filter_func, conn=con_name)
+            con_filter = create_filter_func(con_name)
             by_controller_map[con_name] = self._transform_report_by_func(con_filter)
 
         return by_controller_map
+
+    def report_by_elements(self) -> Mapping[str, "WaveformReport"]:
+        def create_filter_func(_element: str) -> Callable[[HasPortsProtocol], bool]:
+            return lambda r: r.element == _element
+
+        by_element_map: Dict[str, "WaveformReport"] = {}
+        for element in self.elements_in_report:
+            element_filter = create_filter_func(element)
+            by_element_map[element] = self._transform_report_by_func(element_filter)
+
+        return by_element_map
+
+    def report_by_controller_and_fems(self) -> Mapping[str, Mapping[int, "WaveformReport"]]:
+        def create_filter_func(controller: str, _fem: int) -> Callable[[HasPortsProtocol], bool]:
+            return lambda r: r.controller == controller and r.fem == _fem
+
+        by_controller_fem_map: Dict[str, Dict[int, "WaveformReport"]] = {}
+        for con_name in self.controllers_in_use:
+            by_controller_fem_map[con_name] = {}
+            for fem in self.fems_in_use_by_controller[con_name]:
+                fem_filter = create_filter_func(con_name, fem)
+                by_controller_fem_map[con_name][fem] = self._transform_report_by_func(fem_filter)
+
+        return by_controller_fem_map
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -394,39 +431,44 @@ class WaveformReport:
             "adc_acquisitions": [acq.to_dict() for acq in self.adc_acquisitions],
         }
 
-    def get_report_by_output_ports(self, on_controller: Optional[str] = None) -> Dict[str, Any]:
+    def _strict_get_report_by_output_ports(self) -> Mapping[str, _SingleControllerMapping]:
+        report_by_controller_and_fem = self.report_by_controller_and_fems()
+        result = {}
+        for controller, fem_to_report_map in report_by_controller_and_fem.items():
+            per_controller = {}
+            for fem, report in fem_to_report_map.items():
+                analog_out, digital_out, analog_in = defaultdict(list), defaultdict(list), defaultdict(list)
+                for awf in report.analog_waveforms:
+                    for p in awf.output_ports:
+                        analog_out[p].append(awf)
+                for dwf in report.digital_waveforms:
+                    for p in dwf.output_ports:
+                        digital_out[p].append(dwf)
+                for adc in report.adc_acquisitions:
+                    for p in adc.adc_ports:
+                        analog_in[p].append(adc)
+                per_controller[fem] = FemToWaveformMap(
+                    analog_out=dict(analog_out), digital_out=dict(digital_out), analog_in=dict(analog_in)
+                )
+            result[controller] = _SingleControllerMapping(per_controller)
+        return result
 
-        map_by_output_ports: Dict[str, Dict[str, Any]] = {
-            con_name: {
-                "analog_out": {k: [] for k in self.analog_output_ports_in_use(on_controller=con_name)},
-                "digital_out": {k: [] for k in self.digital_output_ports_in_use(on_controller=con_name)},
-                "analog_in": {k: [] for k in self.adcs_ports_in_use(on_controller=con_name)},
-            }
-            for con_name in self.controllers_in_use
-        }
-
-        for awf in self.analog_waveforms:
-            for p in awf.output_ports:
-                map_by_output_ports[awf.controller]["analog_out"][p].append(awf)
-        for dwf in self.digital_waveforms:
-            for p in dwf.output_ports:
-                map_by_output_ports[dwf.controller]["digital_out"][p].append(dwf)
-        for adc in self.adc_acquisitions:
-            for p in adc.adc_ports:
-                map_by_output_ports[adc.controller]["analog_in"][p].append(adc)
-
+    def get_report_by_output_ports(
+        self, on_controller: Optional[str] = None
+    ) -> Union[Mapping[str, _SingleControllerMapping], _SingleControllerMapping]:
+        result = self._strict_get_report_by_output_ports()
         if on_controller is None:
             if self.num_controllers_in_use == 1:
-                return map_by_output_ports[self.controllers_in_use[0]]
+                return result[self.controllers_in_use[0]]
             else:
-                return map_by_output_ports
+                return result
         else:
-            return map_by_output_ports[on_controller]
+            return result[on_controller]
 
     def create_plot(
         self,
-        samples: Optional[Iterable[Any]] = None,  # TODO: detailed type
-        controllers: Optional[List[str]] = None,
+        samples: Optional[SimulatorSamples] = None,
+        controllers: Optional[Sequence[str]] = None,
         plot: bool = True,
         save_path: Optional[str] = None,
     ) -> None:
@@ -443,65 +485,110 @@ class WaveformReport:
         Returns:
             None
         """
-        if save_path is None:
-            dirname, filename = "./", f"waveform_report_{self.job_id}"
-        else:
-            dirname, filename = os.path.split(save_path)
-            if filename == "":
-                filename = f"waveform_report_{self.job_id}"
+        if controllers is None:
+            controllers = self.controllers_in_use
 
         report_by_controllers = self.report_by_controllers()
-        filter_func = (lambda item: item[0] in controllers) if controllers is not None else (lambda x: True)
-        for con_name, report in filter(filter_func, report_by_controllers.items()):
-            con_samples = None
-            if samples is not None:
-                con_samples = samples.__getattribute__(con_name)
-            con_builder = _WaveformPlotBuilder(report, con_samples, self.job_id)
-            con_builder.build()
+        for con_name, report in report_by_controllers.items():
+            if con_name not in controllers:
+                continue
+
+            if samples is None:
+                con_builder = _WaveformPlotBuilder(report, self.job_id)
+            else:
+                con_builder = _WaveformPlotBuilderWithSamples(report, samples[con_name], self.job_id)
+
             if save_path is not None:
+                dirname = os.path.dirname(save_path)
                 filename = f"waveform_report_{con_name}_{self.job_id}"
                 con_builder.save(dirname, filename)
             if plot:
                 con_builder.plot()
-        return
+
+
+@dataclass
+class _MaxParallelTracesPerRow:
+    analog: Dict[str, int]
+    digital: Dict[str, int]
 
 
 class _WaveformPlotBuilder:
-    def __init__(self, wf_report: WaveformReport, samples: Any = None, job_id: Union[int, str] = -1):
+    def __init__(self, wf_report: WaveformReport, job_id: Union[int, str] = -1):
         self._report = wf_report
         if wf_report.num_controllers_in_use > 1:
             raise RuntimeError(
                 f"Plot Builder does not support plotting more than 1 controllers, yet. {os.linesep}"
                 "Please provide a report containing a single controller."
             )
-        self._samples = samples
         self._job_id = job_id
-        self._figure: Optional[go.Figure] = None
+        self._figure = go.Figure()
         self._already_registered_qe: Set[str] = set()
-        self._colormap: Dict[str, Any] = {}
-        self._max_parallel_traces_per_row: Dict[str, Any] = {}  # TODO: detailed type
-        return
+        self._colormap = self._get_qe_colorscale(wf_report.elements_in_report)
+        report_by_output_ports = cast(_SingleControllerMapping, wf_report.get_report_by_output_ports())
+        self._max_parallel_traces_per_row = self._calculate_max_parallel_traces_per_row(report_by_output_ports)
+        self._num_rows = self._get_num_rows(report_by_output_ports)
+
+        self._report_by_output_ports = report_by_output_ports
+        self._setup_figure(self._num_rows)
+        self._add_data()
+        self._update_extra_features()
 
     @property
-    def _num_rows(self) -> int:
-        with_samples = self._samples is not None
-        num_rows = (
-            len(self._report.analog_output_ports_in_use()) + len(self._report.digital_output_ports_in_use())
-        ) * (1 + with_samples)
-        num_rows += len(self._report.adcs_ports_in_use())
+    def _samples_factor(self) -> int:
+        return 1
+
+    @staticmethod
+    def _get_qe_colorscale(qe_in_use: Sequence[str]) -> Dict[str, str]:
+        n_colors = len(qe_in_use)
+        samples = plotly.colors.qualitative.Pastel + plotly.colors.qualitative.Safe
+        if n_colors > len(samples):
+            samples += plotly.colors.sample_colorscale(
+                "turbo",
+                [n / (n_colors - len(samples)) for n in range(n_colors - len(samples))],
+            )
+        return dict(zip(qe_in_use, samples))
+
+    @staticmethod
+    def _calculate_max_parallel_traces_per_row(
+        report_by_output_port: _SingleControllerMapping,
+    ) -> _MaxParallelTracesPerRow:
+        def calc_row(_waveform_list: Sequence[PlayedWaveform]) -> int:
+            max_in_row = 0
+            functional_ts = sorted(
+                [(r.timestamp, 1) for r in _waveform_list] + [(r.ends_at, -1) for r in _waveform_list],
+                key=lambda t: t[0],
+            )
+            for _, f in functional_ts:
+                max_in_row = max(max_in_row, max_in_row + f)
+            return max_in_row
+
+        analog_traces_per_row = {}
+        digital_traces_per_row = {}
+        for fem_idx, report in report_by_output_port.items():
+            for output_port, waveform_list in report.analog_out.items():
+                analog_traces_per_row[f"{fem_idx}-{output_port}"] = calc_row(waveform_list)
+            for output_port, digital_waveform_list in report.digital_out.items():
+                digital_traces_per_row[f"{fem_idx}-{output_port}"] = calc_row(digital_waveform_list)
+
+        return _MaxParallelTracesPerRow(analog=analog_traces_per_row, digital=digital_traces_per_row)
+
+    def _get_num_rows(self, report_by_output_ports: _SingleControllerMapping) -> int:
+        num_rows = report_by_output_ports.num_analog_out_ports + report_by_output_ports.num_digital_out_ports
+        num_rows *= self._samples_factor
+        num_rows += report_by_output_ports.num_analog_in_ports
         return num_rows
 
     @property
     def _num_output_rows(self) -> int:
-        return self._num_rows - len(self._report.adcs_ports_in_use())
+        return self._num_rows - self._report_by_output_ports.num_analog_in_ports
 
     @property
     def _num_analog_rows(self) -> int:
-        return len(self._report.analog_output_ports_in_use()) * (1 + (self._samples is not None))
+        return self._report_by_output_ports.num_analog_out_ports * self._samples_factor
 
     @property
     def _num_digital_rows(self) -> int:
-        return len(self._report.digital_output_ports_in_use()) * (1 + (self._samples is not None))
+        return self._report_by_output_ports.num_digital_out_ports * self._samples_factor
 
     def _is_row_analog(self, r: int) -> bool:
         return 1 <= r <= self._num_analog_rows
@@ -514,63 +601,18 @@ class _WaveformPlotBuilder:
 
     @property
     def _xrange(self) -> int:
-        return (
-            len(self._samples.analog["1"])
-            if self._samples is not None
-            else max(self._report.waveforms, key=lambda x: x.ends_at).ends_at + 100
-        )
+        return max(self._report.waveforms, key=lambda x: x.ends_at).ends_at + 100
 
-    def _pre_setup(self) -> None:
-        self._setup_qe_colorscale()
-        self._calculate_max_parallel_traces_per_row()
-        return
-
-    def _get_all_qe_used(self) -> Sequence[str]:
-        return list(set([wf.element for wf in self._report.waveforms]))
-
-    def _setup_qe_colorscale(self) -> None:
-        qe_in_use = self._get_all_qe_used()
-        n_colors = len(qe_in_use)
-        samples = plotly.colors.qualitative.Pastel + plotly.colors.qualitative.Safe
-        if n_colors > len(samples):
-            samples += plotly.colors.sample_colorscale(
-                "turbo",
-                [n / (n_colors - len(samples)) for n in range(n_colors - len(samples))],
-            )
-        self._colormap = dict(zip(qe_in_use, samples))
-        return
-
-    def _calculate_max_parallel_traces_per_row(self) -> None:
-        report_by_output_port = self._report.get_report_by_output_ports()
-        self._max_parallel_traces_per_row["analog"] = {}
-        self._max_parallel_traces_per_row["digital"] = {}
-
-        def calc_row(waveform_list: List[Any]) -> int:  # TODO: detailed type
-            max_in_row = 0
-            functional_ts = sorted(
-                [(r.timestamp, 1) for r in waveform_list] + [(r.ends_at, -1) for r in waveform_list],
-                key=lambda t: t[0],
-            )
-            for _, f in functional_ts:
-                max_in_row = max(max_in_row, max_in_row + f)
-            return max_in_row
-
-        for output_port, waveform_list in report_by_output_port["analog_out"].items():
-            self._max_parallel_traces_per_row["analog"][output_port] = calc_row(waveform_list)
-
-        for output_port, waveform_list in report_by_output_port["digital_out"].items():
-            self._max_parallel_traces_per_row["digital"][output_port] = calc_row(waveform_list)
-
-        return
-
-    def _is_intersect(self, r1: Tuple[int, int], r2: Tuple[int, int]) -> bool:
+    @staticmethod
+    def _is_intersect(r1: Tuple[int, int], r2: Tuple[int, int]) -> bool:
         return (r1[0] <= r2[0] <= r1[1]) or (r1[0] <= r2[1] <= r1[1]) or (r2[0] < r1[0] and r2[1] > r1[1])
 
-    def _get_hover_text(self, played_waveform: PlayedWaveform) -> str:
+    @staticmethod
+    def _get_hover_text(played_waveform: PlayedWaveform) -> str:
         waveform_desc = played_waveform.to_string()
         if isinstance(played_waveform, PlayedAnalogWaveform):
             if played_waveform.chirp_info is not None:
-                waveform_desc = played_waveform._to_custom_string(False)
+                waveform_desc = played_waveform.to_custom_string(False)
                 s = (
                     f"rate={played_waveform.chirp_info['rate']},units={played_waveform.chirp_info['units']},"
                     f" times={played_waveform.chirp_info['times']}\n"
@@ -582,13 +624,10 @@ class _WaveformPlotBuilder:
         return "%{x}ns<br>" + waveform_desc.replace("\n", "</br>") + "<extra></extra>"
 
     def _get_output_port_waveform_plot_data(
-        self, port_played_waveforms: List[PlayedWaveform], gui_args: Dict[str, Any]
-    ) -> Any:  # TODO: detailed type, for for the rest of the Any's
-        graph_data: List[Any] = []
-        annotations: List[Any] = []
-        levels: List[Any] = []
-        x_axis_name = gui_args["x_axis_name"]
-        max_in_row = gui_args["max_in_row"]
+        self, port_played_waveforms: Sequence[PlayedWaveform], x_axis_name: str, max_in_row: int
+    ) -> List[go.Scatter]:
+        graph_data: List[go.Scatter] = []
+        levels: List[Tuple[int, int]] = []
         diff_between_traces, start_y = (0.2, 1.2) if max_in_row <= 7 else (1.4 / max_in_row, 1.45)
         y_level = [start_y] * 3
         for wf in port_played_waveforms:
@@ -623,95 +662,48 @@ class _WaveformPlotBuilder:
             )
             self._already_registered_qe.add(wf.element)
 
-        return graph_data, annotations
+        return graph_data
 
     def _add_plot_data_for_analog_output_port(
-        self, figure_row_number: int, output_port: int, port_waveforms: List[PlayedWaveform]
+        self, figure_row_number: int, output_port: str, port_waveforms: Sequence[PlayedWaveform]
+    ) -> None:
+        self._add_plot_data_for_port(
+            figure_row_number, self._max_parallel_traces_per_row.analog[output_port], port_waveforms
+        )
+
+    def _add_plot_data_for_port(
+        self, figure_row_number: int, _max_parallel_traces_per_row: int, port_waveforms: Sequence[PlayedWaveform]
     ) -> None:
         if len(port_waveforms) == 0:
             return
-        use_samples = self._samples is not None
 
-        xaxis_name = f"x{figure_row_number}"
-        port_wf_plot, annotations = self._get_output_port_waveform_plot_data(
+        x_axis_name = self._get_x_axis_name(figure_row_number)
+        port_wf_plot = self._get_output_port_waveform_plot_data(
             port_waveforms,
-            {
-                "x_axis_name": xaxis_name,
-                "max_in_row": self._max_parallel_traces_per_row["analog"][output_port],
-            },
+            x_axis_name,
+            max_in_row=_max_parallel_traces_per_row,
         )
-        row_number = figure_row_number * (1 + use_samples)
-        assert isinstance(self._figure, go.Figure)
+        row_number = figure_row_number * self._samples_factor
         self._figure.add_traces(port_wf_plot, rows=row_number, cols=1)
-        [self._figure.add_annotation(annot, row=row_number, col=1) for annot in annotations]
 
-        if use_samples:
-            port_samples = self._samples.analog[str(output_port)]
-
-            self._figure.add_trace(
-                go.Scatter(
-                    y=port_samples,
-                    showlegend=False,
-                    xaxis=xaxis_name,
-                    hovertemplate="%{x}ns, %{y}v<extra></extra>",
-                ),
-                row=(figure_row_number * 2 - 1),
-                col=1,
-            )
-
-        return
+    @staticmethod
+    def _get_x_axis_name(figure_row_number: int) -> str:
+        return f"x{figure_row_number}"
 
     def _add_plot_data_for_digital_output_port(
-        self, figure_row_number: int, output_port: int, port_waveforms: List[PlayedWaveform]
+        self, figure_row_number: int, output_port: str, port_waveforms: Sequence[PlayedWaveform]
     ) -> None:
-        if len(port_waveforms) == 0:
-            return
-        use_samples = self._samples is not None
-
-        xaxis_name = f"x{figure_row_number}"
-        port_wf_plot, annotations = self._get_output_port_waveform_plot_data(
-            port_waveforms,
-            {
-                "x_axis_name": xaxis_name,
-                "max_in_row": self._max_parallel_traces_per_row["digital"][output_port],
-            },
+        self._add_plot_data_for_port(
+            figure_row_number, self._max_parallel_traces_per_row.digital[output_port], port_waveforms
         )
-        row_number = figure_row_number * (1 + use_samples)
-        assert isinstance(self._figure, go.Figure)
-        self._figure.add_traces(port_wf_plot, rows=row_number, cols=1)
-        [self._figure.add_annotation(annot, row=row_number, col=1) for annot in annotations]
-
-        if use_samples:
-            port_samples = self._samples.digital.get(str(output_port), np.zeros(shape=self._xrange))
-            if port_samples is None:
-                logging.log(
-                    logging.WARNING,
-                    f"Could not find digital samples for output port {output_port}",
-                )
-            else:
-                port_samples = port_samples.astype(int)
-            samples_row_number = figure_row_number * 2 - 1
-            self._figure.add_trace(
-                go.Scatter(
-                    y=port_samples,
-                    showlegend=False,
-                    xaxis=xaxis_name,
-                    hovertemplate="%{x}ns, %{y}<extra></extra>",
-                ),
-                row=samples_row_number,
-                col=1,
-            )
-
-        return
 
     def _add_plot_data_for_adc_port(
         self,
         figure_row_number: int,
-        adc_port_number: int,
         adc_port_acquisitions: List[AdcAcquisition],
     ) -> None:
-        graph_data: List[Any] = []
-        levels: List[Any] = []
+        graph_data: List[go.Scatter] = []
+        levels: List[Tuple[int, int]] = []
         y_level = [1.2] * 3
         for adc in adc_port_acquisitions:
             x_axis_points = (adc.start_time, adc.end_time)
@@ -724,11 +716,7 @@ class _WaveformPlotBuilder:
                     x=[x_axis_points[0], sum(x_axis_points) // 2, x_axis_points[1]],
                     y=y_level,
                     mode="lines+markers+text",
-                    text=[
-                        "",
-                        f"{adc.process}",
-                        "",
-                    ],
+                    text=["", f"{adc.process}", ""],
                     textfont=dict(size=10),
                     hovertemplate="%{x}ns<br>" + adc.to_string().replace("\n", "</br>") + "<extra></extra>",
                     name=adc.quantum_element,
@@ -743,46 +731,35 @@ class _WaveformPlotBuilder:
             )
             self._already_registered_qe.add(adc.quantum_element)
 
-        assert isinstance(self._figure, go.Figure)
         self._figure.add_traces(graph_data, rows=figure_row_number, cols=1)
 
-        return
-
     def _add_data(self) -> None:
-        for (figure_row_number, (output_port, port_waveforms_list)) in enumerate(
-            self._report.get_report_by_output_ports()["analog_out"].items()
+        for figure_row_number, (output_port, port_waveforms_list) in enumerate(
+            self._report_by_output_ports.flat_analog_out.items()
         ):
             self._add_plot_data_for_analog_output_port(figure_row_number + 1, output_port, port_waveforms_list)
 
-        for (figure_row_number, (output_port, port_waveforms_list)) in enumerate(
-            self._report.get_report_by_output_ports()["digital_out"].items()
+        for (figure_row_number, (output_port, digital_port_waveforms_list)) in enumerate(
+            self._report_by_output_ports.flat_digital_out.items()
         ):
             self._add_plot_data_for_digital_output_port(
-                figure_row_number + len(self._report.analog_output_ports_in_use()) + 1,
+                figure_row_number + self._report_by_output_ports.num_analog_out_ports + 1,
                 output_port,
-                port_waveforms_list,
+                digital_port_waveforms_list,
             )
 
-        for (figure_row_number, (input_port, adc_acquisition_list)) in enumerate(
-            self._report.get_report_by_output_ports()["analog_in"].items()
-        ):
-            self._add_plot_data_for_adc_port(
-                figure_row_number + self._num_output_rows + 1,
-                input_port,
-                adc_acquisition_list,
-            )
-        return
+        for figure_row_number, adc_acquisition_list in enumerate(self._report_by_output_ports.flat_analog_in.values()):
+            self._add_plot_data_for_adc_port(figure_row_number + self._num_output_rows + 1, adc_acquisition_list)
 
     def _update_extra_features(self) -> None:
-        assert isinstance(self._figure, go.Figure)
-        all_xaxis_names = sorted(
+        all_x_axis_names = sorted(
             [a for a in self._figure.layout.__dir__() if a.startswith("xaxis")],
             key=lambda s: int(s.removeprefix("xaxis")) if s.removeprefix("xaxis").isnumeric() else 0,
         )
         all_xaxis_names_short = {
-            k: "x" + k.removeprefix("xaxis") if k.removeprefix("xaxis").isnumeric() else "" for k in all_xaxis_names
+            k: "x" + k.removeprefix("xaxis") if k.removeprefix("xaxis").isnumeric() else "" for k in all_x_axis_names
         }
-        bottomost_x_axis = all_xaxis_names[-1]
+        bottommost_x_axis = all_x_axis_names[-1]
         self._figure.update_layout(
             updatemenus=[
                 dict(
@@ -793,7 +770,7 @@ class _WaveformPlotBuilder:
                         [
                             dict(
                                 args=[
-                                    {k + ".matches": all_xaxis_names_short[bottomost_x_axis] for k in all_xaxis_names}
+                                    {k + ".matches": all_xaxis_names_short[bottommost_x_axis] for k in all_x_axis_names}
                                 ],
                                 label="Shared",
                                 method="relayout",
@@ -849,37 +826,27 @@ class _WaveformPlotBuilder:
             xanchor="center",
             yanchor="bottom",
         )
-        return
 
-    def _setup_figure(self) -> None:
-        self._figure = go.Figure()
-        with_samples = self._samples is not None
-        minimum_number_of_rows = 4
-        num_rows = max(self._num_rows, minimum_number_of_rows)
-        titles = [f"Analog-Out-{a}" for a in self._report.analog_output_ports_in_use()] + [
-            f"Digital-Out-{d}" for d in self._report.digital_output_ports_in_use()
-        ]
-        if with_samples:
-            zipped: List[Any] = list(zip(titles, [[]] * self._num_output_rows))
-            titles: List[Any] = [item for z in zipped for item in z]  # type: ignore[no-redef]
-        titles += [f"Analog-In-{a}" for a in self._report.adcs_ports_in_use()]
+    @property
+    def _subplot_titles(self) -> Sequence[Union[str, Sequence[str]]]:
+        titles = (
+            [f"Analog-Out-{a}" for a in self._report_by_output_ports.flat_analog_out]
+            + [f"Digital-Out-{d}" for d in self._report_by_output_ports.flat_digital_out]
+            + [f"Analog-In-{ai}" for ai in self._report_by_output_ports.flat_analog_in]
+        )
+        return titles
 
-        if with_samples:
-            specs = ([[{"t": 1.2 / (num_rows * 5)}]] + [[{"b": 1.2 / (num_rows * 5)}]]) * (
-                self._num_output_rows // 2
-            ) + [[{"t": 1 / (num_rows * 4)}]] * len(self._report.adcs_ports_in_use())
-        else:
-            specs = [[{"t": 1 / (num_rows * 4)}]] * num_rows
+    def _get_subplot_specs(self, num_rows: int) -> List[List[Dict[str, float]]]:
+        return [[{"t": 1 / (num_rows * 4)}]] * num_rows
 
-        if len(specs) < minimum_number_of_rows:
-            specs += [[{}]] * (4 - len(specs))
-
+    def _setup_figure(self, num_rows: int, minimum_number_of_rows: int = 4) -> None:
+        num_rows = max(num_rows, minimum_number_of_rows)
         self._figure.set_subplots(
             rows=num_rows,
             cols=1,
-            subplot_titles=titles,
+            subplot_titles=self._subplot_titles,
             vertical_spacing=0.1 / num_rows,
-            specs=specs,
+            specs=self._get_subplot_specs(num_rows),
         )
 
         self._figure.update_layout(
@@ -912,31 +879,18 @@ class _WaveformPlotBuilder:
             )
         )
 
-        for r in range(1, num_rows + 1):
-            self._figure.update_xaxes(range=[0, self._xrange], row=r, col=1)
+        for idx in range(1, num_rows + 1):
+            self._figure.update_xaxes(range=[0, self._xrange], row=idx, col=1)
 
-        if with_samples:
-            for r in range(1, self._num_output_rows, 2):
-                if self._is_row_digital(r):
-                    sample_y_range = [-0.1, 1.1]
-                else:
-                    sample_y_range = [-0.6, 0.6]
-                self._figure.update_yaxes(
-                    range=sample_y_range,
-                    row=r,
-                    col=1,
-                )
-                self._figure.update_xaxes(showticklabels=False, row=r, col=1)
-                title_text = "Voltage(v)"
-                self._figure.update_yaxes(
-                    title=dict(text=title_text, standoff=5, font=dict(size=9)),
-                    row=r,
-                    col=1,
-                )
+        self._update_axes_for_samples()
 
-        for r in list(range(1 + with_samples, self._num_output_rows + 1, 1 + with_samples)) + [
-            p + self._num_output_rows for p in self._report.adcs_ports_in_use()  # type: ignore[operator]
-        ]:
+        inc = self._samples_factor
+        input_rows_first_idx = self._num_output_rows + 1
+        output_rows_indices = list(range(inc, input_rows_first_idx, inc))
+        input_rows_indices = list(
+            range(input_rows_first_idx, input_rows_first_idx + self._report_by_output_ports.num_analog_in_ports)
+        )
+        for idx in output_rows_indices + input_rows_indices:
             self._figure.update_yaxes(
                 range=[-0.5, 1.5],
                 showticklabels=False,
@@ -945,31 +899,19 @@ class _WaveformPlotBuilder:
                 tickcolor="#000000",
                 showgrid=False,
                 zeroline=False,
-                row=r,
+                row=idx,
                 col=1,
             )
-            self._figure.update_xaxes(title=dict(text="Time(ns)", standoff=5, font=dict(size=9)), row=r, col=1)
-            title_text = ""
+            self._figure.update_xaxes(title=dict(text="Time(ns)", standoff=5, font=dict(size=9)), row=idx, col=1)
 
-        return
-
-    def build(self) -> None:
-        self._pre_setup()
-        self._setup_figure()
-        self._add_data()
-        self._update_extra_features()
+    def _update_axes_for_samples(self) -> None:
         return
 
     def plot(self) -> None:
-        if self._figure is None:
-            raise RuntimeError("No graph has been built. Use 'build' on the instance to first build the figure.")
-        self._figure.show()
-        return
+        self._figure.show(renderer="browser")
 
     def save(self, basedir: str = "", filename: str = "") -> None:
-        assert isinstance(self._figure, go.Figure)
-        if not os.path.exists(basedir):
-            os.makedirs(basedir)
+        os.makedirs(basedir, exist_ok=True)
         if filename == "":
             filename = f"waveform_report_{self._job_id}"
         if not os.path.splitext(filename)[1] == "html":
@@ -978,4 +920,97 @@ class _WaveformPlotBuilder:
         path = os.path.join(basedir, filename)
         with open(path, "w", encoding="UTF-8") as f:
             self._figure.write_html(f)
-        return
+
+
+class _WaveformPlotBuilderWithSamples(_WaveformPlotBuilder):
+    def __init__(self, wf_report: WaveformReport, samples: SimulatorControllerSamples, job_id: Union[int, str] = -1):
+        self._samples = samples
+        super().__init__(wf_report, job_id)
+
+    @property
+    def _samples_factor(self) -> int:
+        return 2
+
+    @property
+    def _xrange(self) -> int:
+        first_key = next(iter(self._samples.analog.keys()))
+        return len(self._samples.analog[first_key])
+
+    def _add_plot_data_for_analog_output_port(
+        self, figure_row_number: int, output_port: str, port_waveforms: Sequence[PlayedWaveform]
+    ) -> None:
+        if len(port_waveforms) == 0:
+            return
+
+        self._add_plot_data_for_port(
+            figure_row_number, self._max_parallel_traces_per_row.analog[output_port], port_waveforms
+        )
+
+        port_samples = self._samples.analog[output_port]
+        sampling_rate = self._samples.analog_sampling_rate[output_port] / 1e9
+        t = list(x / sampling_rate for x in range(len(port_samples)))
+        self._add_trace_to_figure(figure_row_number, t, np.real(port_samples).tolist())
+        if isinstance(port_samples[0], complex):
+            self._add_trace_to_figure(figure_row_number, t, np.imag(port_samples).tolist())
+
+    def _add_plot_data_for_digital_output_port(
+        self, figure_row_number: int, output_port: str, port_waveforms: Sequence[PlayedWaveform]
+    ) -> None:
+        if len(port_waveforms) == 0:
+            return
+
+        self._add_plot_data_for_port(
+            figure_row_number, self._max_parallel_traces_per_row.digital[output_port], port_waveforms
+        )
+
+        port_samples = self._fetch_digital_samples(output_port)
+        t = list(range(len(port_samples)))  # here we assume 1ns sampling rate
+        self._add_trace_to_figure(figure_row_number, t, port_samples)
+
+    def _fetch_digital_samples(self, output_port: Union[int, str]) -> Sequence[int]:
+        port_samples = self._samples.digital.get(str(output_port))
+        if port_samples is None:
+            logging.log(logging.WARNING, f"Could not find digital samples for output port {output_port}")
+            return [0] * self._xrange
+        return [int(_x) for _x in port_samples]
+
+    def _add_trace_to_figure(
+        self, figure_row_number: int, t: Sequence[float], port_samples: Union[Sequence[int], Sequence[float]]
+    ) -> None:
+        self._figure.add_trace(
+            go.Scatter(
+                x=t,
+                y=port_samples,
+                showlegend=False,
+                xaxis=self._get_x_axis_name(figure_row_number),
+                hovertemplate="%{x}ns, %{y}v<extra></extra>",
+            ),
+            row=figure_row_number * 2 - 1,
+            col=1,
+        )
+
+    @property
+    def _subplot_titles(self) -> Sequence[Union[str, Sequence[str]]]:
+        _titles = [f"Analog-Out-{a}" for a in self._report_by_output_ports.flat_analog_out] + [
+            f"Digital-Out-{d}" for d in self._report_by_output_ports.flat_digital_out
+        ]
+        zipped: Sequence[Tuple[str, Sequence[str]]] = list(zip(_titles, [[]] * len(_titles)))
+        titles: Sequence[Union[str, Sequence[str]]] = [item for z in zipped for item in z] + [
+            f"Analog-In-{a}" for a in self._report_by_output_ports.flat_analog_in
+        ]
+        return titles
+
+    def _get_subplot_specs(self, num_rows: int) -> List[List[Dict[str, float]]]:
+        specs = ([[{"t": 1.2 / (num_rows * 5)}]] + [[{"b": 1.2 / (num_rows * 5)}]]) * (self._num_output_rows // 2) + [
+            [{"t": 1 / (num_rows * 4)}]
+        ] * self._report_by_output_ports.num_analog_in_ports
+        if len(specs) < num_rows:
+            specs += [[{}]] * (num_rows - len(specs))
+        return specs
+
+    def _update_axes_for_samples(self) -> None:
+        for r in range(1, self._num_output_rows, 2):
+            sample_y_range = [-0.1, 1.1] if self._is_row_digital(r) else [-0.6, 0.6]
+            self._figure.update_yaxes(range=sample_y_range, row=r, col=1)
+            self._figure.update_xaxes(showticklabels=False, row=r, col=1)
+            self._figure.update_yaxes(title=dict(text="Voltage(v)", standoff=5, font=dict(size=9)), row=r, col=1)

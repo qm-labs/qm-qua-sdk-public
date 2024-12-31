@@ -9,21 +9,24 @@ from qm.grpc.qua_config import (
     QuaConfigControllerDec,
     QuaConfigOctoDacFemDec,
     QuaConfigPortReference,
+    QuaConfigMicrowaveFemDec,
     QuaConfigAdcPortReference,
     QuaConfigDacPortReference,
 )
 
+FemTypes = Union[QuaConfigControllerDec, QuaConfigOctoDacFemDec, QuaConfigMicrowaveFemDec]
 
-def get_fem_config_instance(fem_ref: QuaConfigFemTypes) -> Union[QuaConfigControllerDec, QuaConfigOctoDacFemDec]:
+
+def get_fem_config_instance(fem_ref: QuaConfigFemTypes) -> FemTypes:
     _, config = betterproto.which_one_of(fem_ref, "fem_type_one_of")
-    if not isinstance(config, (QuaConfigControllerDec, QuaConfigOctoDacFemDec)):
+    if not isinstance(config, (QuaConfigControllerDec, QuaConfigOctoDacFemDec, QuaConfigMicrowaveFemDec)):
         raise InvalidConfigError(f"FEM type {type(config)} is not supported")
     return config
 
 
 def get_fem_config(
     pb_config: QuaConfig, port: Union[QuaConfigDacPortReference, QuaConfigAdcPortReference, QuaConfigPortReference]
-) -> Union[QuaConfigControllerDec, QuaConfigOctoDacFemDec]:
+) -> FemTypes:
     if port.controller not in pb_config.v1_beta.control_devices:
         raise InvalidConfigError("Controller not found")
     controller = pb_config.v1_beta.control_devices[port.controller]

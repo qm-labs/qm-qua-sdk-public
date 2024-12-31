@@ -40,7 +40,7 @@ def validate_timetagging_parameters(data: ElementConfigType) -> None:
 
 
 def _element_has_outputs(data: ElementConfigType) -> bool:
-    return bool(data.get("outputs")) or bool(data.get("RF_outputs"))
+    return bool(data.get("outputs")) or bool(data.get("RF_outputs")) or bool(data.get("MWOutput"))
 
 
 def _validate_existence_of_field(data: ElementConfigType, field_name: str) -> None:
@@ -61,6 +61,8 @@ def validate_output_tof(data: ElementConfigType) -> None:
 
 
 def validate_output_smearing(data: ElementConfigType) -> None:
+    if _element_has_outputs(data) and "smearing" not in data:
+        data["smearing"] = 0
     _validate_existence_of_field(data, "smearing")
 
 

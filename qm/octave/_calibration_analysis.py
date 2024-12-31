@@ -1,9 +1,10 @@
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional, cast
+from typing import Dict, List, Tuple, Union, Optional, cast
 
 import numpy as np
 
+from qm.api.v2.job_api import JobApi
 from qm.jobs.running_qm_job import RunningQmJob
 from qm.octave._calibration_names import SavedVariablesNames as Names
 
@@ -129,7 +130,9 @@ def _paraboloid2d_fit(x: Array, y: Array, z: Array) -> FitResult:
     return FitResult(pol=p, x_min=xy_min[0], y_min=xy_min[1], theta=theta, pol_=p_)
 
 
-def _get_reshaped_data(job: RunningQmJob, n_samples: int, offset: int, count: int, *names: str) -> Dict[str, Array]:
+def _get_reshaped_data(
+    job: Union[RunningQmJob, JobApi], n_samples: int, offset: int, count: int, *names: str
+) -> Dict[str, Array]:
     data_first = offset * n_samples**2
     data_last = (offset + count) * n_samples**2
 
@@ -169,7 +172,7 @@ class LOAnalysisDebugData:
 
 
 def _get_and_analyze_lo_data(
-    job: RunningQmJob, lo_res: int, offset: int, count: int
+    job: Union[RunningQmJob, JobApi], lo_res: int, offset: int, count: int
 ) -> Tuple[Array, Array, List[LOAnalysisDebugData]]:
     data = _get_reshaped_data(job, lo_res, offset, count, Names.i_scan, Names.q_scan, Names.lo)
 
@@ -239,7 +242,7 @@ class ImageDataAnalysisResult:
 
 
 def _get_and_analyze_image_data(
-    job: RunningQmJob, image_res: int, offset: int, count: int
+    job: Union[RunningQmJob, JobApi], image_res: int, offset: int, count: int
 ) -> List[ImageDataAnalysisResult]:
     data = _get_reshaped_data(job, image_res, offset, count, Names.g_scan, Names.p_scan, Names.image)
 

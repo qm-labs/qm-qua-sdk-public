@@ -12,7 +12,7 @@ class CompilerOptionArguments:
     flags: List[str] = field(default_factory=list)
 
 
-def _get_request_compiler_options(
+def get_request_compiler_options(
     compiler_options: CompilerOptionArguments,
 ) -> QuaProgramCompilerOptions:
     flags = compiler_options.flags

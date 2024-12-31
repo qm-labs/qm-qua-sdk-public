@@ -1,9 +1,10 @@
 import logging
 import zipfile
 from collections.abc import Mapping
-from typing import Dict, List, Tuple, BinaryIO, KeysView, Optional, Generator, ItemsView, ValuesView, cast
+from typing import Dict, List, Tuple, Union, BinaryIO, KeysView, Optional, Generator, ItemsView, ValuesView, cast
 
 from qm.persistence import BaseStore
+from qm.api.v2.job_result_api import JobResultApi
 from qm.api.job_result_api import JobResultServiceApi
 from qm.api.models.capabilities import ServerCapabilities
 from qm.utils.general_utils import run_until_with_timeout
@@ -48,28 +49,27 @@ class StreamingResultFetcher(Mapping):
     def __init__(
         self,
         job_id: str,
-        service: JobResultServiceApi,
+        service: Union[JobResultServiceApi, JobResultApi],
         store: BaseStore,
         capabilities: ServerCapabilities,
     ) -> None:
         self._job_id = job_id
         self._service = service
         self._store = store
-        self._schema: JobResultSchema = JobResultSchema({})
+        self._schema = JobResultSchema({})
         self._capabilities = capabilities
 
         self._all_results: Dict[str, BaseStreamingResultFetcher] = {}
         self._add_job_results()
 
     def _add_job_results(self) -> None:
-        self._schema = StreamingResultFetcher._load_schema(self._job_id, self._service)
+        self._schema = StreamingResultFetcher._load_schema(self._service)
         stream_metadata_errors, stream_metadata_dict = self._get_stream_metadata()
         for name, item_schema in self._schema.items.items():
             stream_metadata = stream_metadata_dict.get(name)
             result: BaseStreamingResultFetcher
             if item_schema.is_single:
                 result = SingleStreamingResultFetcher(
-                    job_id=self._job_id,
                     schema=item_schema,
                     service=self._service,
                     store=self._store,
@@ -80,7 +80,6 @@ class StreamingResultFetcher(Mapping):
             else:
                 result = MultipleStreamingResultFetcher(
                     job_results=self,
-                    job_id=self._job_id,
                     schema=item_schema,
                     service=self._service,
                     store=self._store,
@@ -104,7 +103,7 @@ class StreamingResultFetcher(Mapping):
         return self.get(item)
 
     def _get_stream_metadata(self) -> Tuple[List[StreamMetadataError], Dict[str, StreamMetadata]]:
-        return self._service.get_program_metadata(job_id=self._job_id)
+        return self._service.get_program_metadata()
 
     def __iter__(self) -> Generator[Tuple[str, Optional[BaseStreamingResultFetcher]], None, None]:
         for item in self._schema.items.values():
@@ -145,8 +144,8 @@ class StreamingResultFetcher(Mapping):
         """Save all results to store (file system by default) in a single NPZ file
 
         Args:
-            writer: An optional writer to be used instead of the pre-
-                populated store passed to [qm.quantum_machines_manager.QuantumMachinesManager][]
+            writer: An optional writer to be used instead of the pre-populated
+            store passed to [qm.quantum_machines_manager.QuantumMachinesManager][]
             flat_struct: results will have a flat structure - dimensions
                 will be part of the shape and not of the type
 
@@ -169,8 +168,8 @@ class StreamingResultFetcher(Mapping):
                 writer.close()
 
     @staticmethod
-    def _load_schema(job_id: str, service: JobResultServiceApi) -> JobResultSchema:
-        response = service.get_job_result_schema(job_id)
+    def _load_schema(service: Union[JobResultServiceApi, JobResultApi]) -> JobResultSchema:
+        response = service.get_job_result_schema()
         return JobResultSchema(
             {
                 item.name: JobResultItemSchema(

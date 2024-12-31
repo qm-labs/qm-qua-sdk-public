@@ -5,7 +5,7 @@ from enum import Enum
 from enum import Enum as _Enum
 from dataclasses import dataclass
 from collections.abc import Iterable
-from typing import Set, Dict, List, Type, Tuple, Union, Optional
+from typing import Set, Dict, List, Type, Tuple, Union, Optional, Sequence, overload
 
 import betterproto
 import numpy as np
@@ -16,8 +16,10 @@ from qm.program import Program
 from qm.exceptions import QmQuaException
 from qm.utils import is_iter as _is_iter
 from qm.program._ResultAnalysis import _ResultAnalysis
+from qm.utils.general_utils import create_input_stream_name
 from qm.qua.DigitalMeasureProcess import DigitalMeasureProcess
 from qm.qua.AnalogMeasureProcess import RawTimeTagging as AnalogRawTimeTagging
+from qm.program.StatementsCollection import PortConditionedStatementsCollection
 from qm.qua.DigitalMeasureProcess import RawTimeTagging as DigitalRawTimeTagging
 from qm.qua.DigitalMeasureProcess import Counting as DigitalMeasureProcessCounting
 from qm.program.StatementsCollection import StatementsCollection as _StatementsCollection
@@ -93,6 +95,10 @@ AnalogProcessTargetType = Union[
 
 
 _RESULT_SYMBOL = "@re"
+
+
+DEFAULT_OUT1 = "out1"
+DEFAULT_OUT2 = "out2"
 
 
 def program():
@@ -1254,6 +1260,11 @@ def infinite_loop_() -> "_BodyScope":
     return _BodyScope(_StatementsCollection(for_statement.body))
 
 
+def port_condition(condition: QuaExpressionType = None) -> "_BodyScope":
+    body = _get_scope_as_blocks_body()
+    return _BodyScope(PortConditionedStatementsCollection(body._body, condition=_unwrap_exp(exp(condition))))
+
+
 def L(value) -> MessageExpressionType:
     """Creates an expression with a literal value
 
@@ -1324,7 +1335,7 @@ def _declare(
     if dec_type == DeclarationType.EmptyArray or dec_type == DeclarationType.InitArray:
         if is_input_stream:
             if name is not None:
-                var = f"input_stream_{name}"
+                var = create_input_stream_name(name)
                 if var in scope.declared_input_streams:
                     raise QmQuaException("input stream already declared")
                 scope.declared_input_streams.add(var)
@@ -1337,7 +1348,7 @@ def _declare(
     else:
         if is_input_stream:
             if name is not None:
-                var = f"input_stream_{name}"
+                var = create_input_stream_name(name)
                 if var in scope.declared_input_streams:
                     raise QmQuaException("input stream already declared")
                 scope.declared_input_streams.add(var)
@@ -2137,6 +2148,16 @@ class DualAccumulationMethod(AccumulationMethod):
             raise TypeError("base class may not be instantiated")
         return object.__new__(cls)
 
+    @overload
+    def full(
+        self,
+        iw1: str,
+        iw2: str,
+        target: QuaVariableType,
+    ):
+        pass
+
+    @overload
     def full(
         self,
         iw1: str,
@@ -2145,6 +2166,9 @@ class DualAccumulationMethod(AccumulationMethod):
         element_output2: str,
         target: QuaVariableType,
     ):
+        pass
+
+    def full(self, *args, **kwargs):
         """Perform an ordinary dual demodulation/integration. See [Dual demodulation](../../../Guides/demod/#dual-demodulation).
 
         Args:
@@ -2159,15 +2183,36 @@ class DualAccumulationMethod(AccumulationMethod):
             target (QUA variable): variable to which demod result is
                 saved
         """
+        if len(args) + len(kwargs) == 3:
+            kwargs.update(_make_dict_from_args(args, ["iw1", "iw2", "target"]))
+            kwargs["element_output1"] = DEFAULT_OUT1
+            kwargs["element_output2"] = DEFAULT_OUT2
+            return self.full(**kwargs)
+        elif len(args) + len(kwargs) == 5:
+            kwargs.update(_make_dict_from_args(args, ["iw1", "element_output1", "iw2", "element_output2", "target"]))
+        else:
+            raise QmQuaException("Invalid number of arguments")
+
         return self.return_func(
             self.loc,
-            element_output1,
-            element_output2,
-            iw1,
-            iw2,
-            self._full_target(target),
+            kwargs["element_output1"],
+            kwargs["element_output2"],
+            kwargs["iw1"],
+            kwargs["iw2"],
+            self._full_target(kwargs["target"]),
         )
 
+    @overload
+    def sliced(
+        self,
+        iw1: str,
+        iw2: str,
+        samples_per_chunk: int,
+        target: QuaVariableType,
+    ):
+        pass
+
+    @overload
     def sliced(
         self,
         iw1: str,
@@ -2177,17 +2222,45 @@ class DualAccumulationMethod(AccumulationMethod):
         samples_per_chunk: int,
         target: QuaVariableType,
     ):
+        pass
+
+    def sliced(self, *args, **kwargs):
         """This feature is currently not supported in QUA"""
+        if len(args) + len(kwargs) == 4:
+            kwargs.update(_make_dict_from_args(args, ["iw1", "iw2", "samples_per_chunk", "target"]))
+            kwargs["element_output1"] = DEFAULT_OUT1
+            kwargs["element_output2"] = DEFAULT_OUT2
+            return self.sliced(**kwargs)
+        elif len(args) + len(kwargs) == 6:
+            kwargs.update(
+                _make_dict_from_args(
+                    args,
+                    ["iw1", "element_output1", "iw2", "element_output2", "samples_per_chunk", "target"],
+                )
+            )
+        else:
+            raise QmQuaException("Invalid number of arguments")
 
         return self.return_func(
             self.loc,
-            element_output1,
-            element_output2,
-            iw1,
-            iw2,
-            self._sliced_target(target, samples_per_chunk),
+            kwargs["element_output1"],
+            kwargs["element_output2"],
+            kwargs["iw1"],
+            kwargs["iw2"],
+            self._sliced_target(kwargs["target"], kwargs["samples_per_chunk"]),
         )
 
+    @overload
+    def accumulated(
+        self,
+        iw1: str,
+        iw2: str,
+        samples_per_chunk: int,
+        target: QuaVariableType,
+    ):
+        pass
+
+    @overload
     def accumulated(
         self,
         iw1: str,
@@ -2197,17 +2270,46 @@ class DualAccumulationMethod(AccumulationMethod):
         samples_per_chunk: int,
         target: QuaVariableType,
     ):
+        pass
+
+    def accumulated(self, *args, **kwargs):
         """This feature is currently not supported in QUA"""
+        if len(args) + len(kwargs) == 4:
+            kwargs.update(_make_dict_from_args(args, ["iw1", "iw2", "samples_per_chunk", "target"]))
+            kwargs["element_output1"] = DEFAULT_OUT1
+            kwargs["element_output2"] = DEFAULT_OUT2
+            return self.accumulated(**kwargs)
+        elif len(args) + len(kwargs) == 6:
+            kwargs.update(
+                _make_dict_from_args(
+                    args,
+                    ["iw1", "element_output1", "iw2", "element_output2", "samples_per_chunk", "target"],
+                )
+            )
+        else:
+            raise QmQuaException("Invalid number of arguments")
 
         return self.return_func(
             self.loc,
-            element_output1,
-            element_output2,
-            iw1,
-            iw2,
-            self._accumulated_target(target, samples_per_chunk),
+            kwargs["element_output1"],
+            kwargs["element_output2"],
+            kwargs["iw1"],
+            kwargs["iw2"],
+            self._accumulated_target(kwargs["target"], kwargs["samples_per_chunk"]),
         )
 
+    @overload
+    def moving_window(
+        self,
+        iw1: str,
+        iw2: str,
+        samples_per_chunk: int,
+        chunks_per_window: int,
+        target: QuaVariableType,
+    ):
+        pass
+
+    @overload
     def moving_window(
         self,
         iw1: str,
@@ -2218,14 +2320,42 @@ class DualAccumulationMethod(AccumulationMethod):
         chunks_per_window: int,
         target: QuaVariableType,
     ):
+        pass
+
+    def moving_window(self, *args, **kwargs):
         """This feature is currently not supported in QUA"""
+        if len(args) + len(kwargs) == 5:
+            kwargs.update(
+                _make_dict_from_args(args, ["iw1", "iw2", "samples_per_chunk", "chunks_per_window", "target"])
+            )
+            kwargs["element_output1"] = DEFAULT_OUT1
+            kwargs["element_output2"] = DEFAULT_OUT2
+            return self.moving_window(**kwargs)
+        elif len(args) + len(kwargs) == 7:
+            kwargs.update(
+                _make_dict_from_args(
+                    args,
+                    [
+                        "iw1",
+                        "element_output1",
+                        "iw2",
+                        "element_output2",
+                        "samples_per_chunk",
+                        "chunks_per_window",
+                        "target",
+                    ],
+                )
+            )
+        else:
+            raise QmQuaException("Invalid number of arguments")
+
         return self.return_func(
             self.loc,
-            element_output1,
-            element_output2,
-            iw1,
-            iw2,
-            self._moving_window_target(target, samples_per_chunk, chunks_per_window),
+            kwargs["element_output1"],
+            kwargs["element_output2"],
+            kwargs["iw1"],
+            kwargs["iw2"],
+            self._moving_window_target(kwargs["target"], kwargs["samples_per_chunk"], kwargs["chunks_per_window"]),
         )
 
 
@@ -2637,6 +2767,12 @@ class _ResultStream:
         of the values in the stream starting from the beginning of the QUA program.
         """
         return _ResultStream(self, ["average"])
+
+    def real(self) -> "_ResultStream":
+        return _ResultStream(self, ["real"])
+
+    def image(self) -> "_ResultStream":
+        return _ResultStream(self, ["image"])
 
     def buffer(self, *args) -> "_ResultStream":
         """Gather items into vectors - creates an array of input stream items and outputs the array as one item.
@@ -3162,3 +3298,7 @@ def bins(start: PyNumberType, end: PyNumberType, number_of_bins: PyFloatType):
         bins_list = bins_list + [[start, step_end]]
         start += bin_size
     return bins_list
+
+
+def _make_dict_from_args(args: Sequence[object], names: Sequence[str]) -> Dict[str, object]:
+    return {name: arg for name, arg in zip(names, args)}

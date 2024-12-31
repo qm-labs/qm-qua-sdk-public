@@ -27,11 +27,13 @@ class AnalogInputPortConfigType(TypedDict, total=False):
     offset: Number
     gain_db: int
     shareable: bool
+    sampling_rate: float
 
 
 class DigitalOutputPortConfigType(TypedDict, total=False):
     shareable: bool
     inverted: bool
+    level: Literal["TTL", "LVTTL"]
 
 
 class DigitalInputPortConfigType(TypedDict, total=False):
@@ -54,8 +56,35 @@ class AnalogOutputPortConfigTypeOctoDac(TypedDict, total=False):
 
 
 class FemConfigType(TypedDict, total=False):
+    type: Literal["LF"]
     analog_outputs: Mapping[int, AnalogOutputPortConfigTypeOctoDac]
     analog_inputs: Mapping[int, AnalogInputPortConfigType]
+    digital_outputs: Mapping[int, DigitalOutputPortConfigType]
+    digital_inputs: Mapping[int, DigitalInputPortConfigType]
+
+
+Band = Literal[1, 2, 3]
+
+
+class MwFemAnalogInputPortConfigType(TypedDict, total=False):
+    sampling_rate: float
+    gain_db: int
+    shareable: bool
+    band: Band
+
+
+class MwFemAnalogOutputPortConfigType(TypedDict, total=False):
+    sampling_rate: float
+    full_scale_power_dbm: int
+    band: Band
+    delay: int
+    shareable: bool
+
+
+class MwFemConfigType(TypedDict, total=False):
+    type: Literal["MW"]
+    analog_outputs: Mapping[int, MwFemAnalogOutputPortConfigType]
+    analog_inputs: Mapping[int, MwFemAnalogInputPortConfigType]
     digital_outputs: Mapping[int, DigitalOutputPortConfigType]
     digital_inputs: Mapping[int, DigitalInputPortConfigType]
 
@@ -98,7 +127,7 @@ class OctaveIfOutputsConfigType(TypedDict, total=False):
 
 class OPX1000ControllerConfigType(TypedDict, total=False):
     type: Literal["opx1000"]
-    fems: Mapping[int, FemConfigType]
+    fems: Mapping[int, Union[FemConfigType, MwFemConfigType]]
 
 
 LoopbackType = Tuple[
@@ -156,7 +185,7 @@ class MixerConfigType(TypedDict, total=False):
 
 
 class PulseConfigType(TypedDict, total=False):
-    operation: str
+    operation: Literal["measurement", "control"]
     length: int
     waveforms: Mapping[str, str]
     digital_marker: str
@@ -165,6 +194,16 @@ class PulseConfigType(TypedDict, total=False):
 
 class SingleInputConfigType(TypedDict, total=False):
     port: PortReferenceType
+
+
+class MwInputConfigType(TypedDict, total=False):
+    port: PortReferenceType
+    oscillator_frequency: float
+
+
+class MwOutputConfigType(TypedDict, total=False):
+    port: PortReferenceType
+    oscillator_frequency: float
 
 
 class HoldOffsetConfigType(TypedDict, total=False):
@@ -210,6 +249,8 @@ class ElementConfigType(TypedDict, total=False):
     mixInputs: MixInputConfigType
     singleInputCollection: InputCollectionConfigType
     multipleInputs: InputCollectionConfigType
+    MWInput: MwInputConfigType
+    MWOutput: MwOutputConfigType
     time_of_flight: int
     smearing: int
     outputs: Mapping[str, PortReferenceType]

@@ -1,7 +1,6 @@
 from typing import List, Tuple, cast
 
-from qm.api.models.capabilities import OPX_FEM_IDX
-from qm.simulate.interface import SimulatorInterface, SupportedConnectionTypes, _get_opx_fem_number
+from qm.simulate.interface import SimulatorInterface, SupportedConnectionTypes, get_opx_fem_number
 from qm.grpc.frontend import (
     SimulationRequest,
     ExecutionRequestSimulateSimulationInterfaceRawInterface,
@@ -58,28 +57,14 @@ class RawInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInterfac
             tuple_3 = cast(Tuple[str, int, List[float]], connection)
             return ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections(
                 from_controller=tuple_3[0],
-                from_fem=OPX_FEM_IDX,
+                from_fem=get_opx_fem_number(),
                 from_port=tuple_3[1],
                 to_samples=tuple_3[2],
             )
         raise Exception("connection should be tuple of length of 3 or 4")
 
-    def _update_simulate_request(
-        self,
-        request: SimulationRequest,
-        connections: List[ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections],
-    ) -> SimulationRequest:
+    def update_simulate_request(self, request: SimulationRequest) -> SimulationRequest:
         request.simulate.simulation_interface.raw = ExecutionRequestSimulateSimulationInterfaceRawInterface(
-            noise_power=self.noisePower, connections=connections
+            noise_power=self.noisePower, connections=self._connections
         )
         return request
-
-    def _fix_connection(
-        self, connection: ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections
-    ) -> ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections:
-        return ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections(
-            from_controller=connection.from_controller,
-            from_fem=_get_opx_fem_number(),
-            from_port=connection.from_port,
-            to_samples=connection.to_samples,
-        )

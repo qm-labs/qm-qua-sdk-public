@@ -8,11 +8,14 @@ from qm.type_hinting.config_types import (
     DictQuaConfig,
     FemConfigType,
     MixerConfigType,
+    MwFemConfigType,
     PulseConfigType,
     StickyConfigType,
     ElementConfigType,
+    MwInputConfigType,
     PortReferenceType,
     MixInputConfigType,
+    MwOutputConfigType,
     ControllerConfigType,
     HoldOffsetConfigType,
     OscillatorConfigType,
@@ -29,12 +32,15 @@ from qm.type_hinting.config_types import (
     IntegrationWeightConfigType,
     OPX1000ControllerConfigType,
     CompressedWaveFormConfigType,
+    MwFemAnalogInputPortConfigType,
+    MwFemAnalogOutputPortConfigType,
     AnalogOutputPortConfigTypeOctoDac,
 )
 from qm.grpc.qua_config import (
     QuaConfig,
     QuaConfigMatrix,
     QuaConfigSticky,
+    QuaConfigFemTypes,
     QuaConfigMixerDec,
     QuaConfigPulseDec,
     QuaConfigDeviceDec,
@@ -50,6 +56,8 @@ from qm.grpc.qua_config import (
     QuaConfigOctoDacFemDec,
     QuaConfigPortReference,
     QuaConfigMultipleInputs,
+    QuaConfigMicrowaveFemDec,
+    QuaConfigMultipleOutputs,
     QuaConfigAdcPortReference,
     QuaConfigDacPortReference,
     QuaConfigPulseDecOperation,
@@ -67,6 +75,12 @@ from qm.grpc.qua_config import (
     QuaConfigDigitalOutputPortReference,
     QuaConfigOctoDacAnalogOutputPortDec,
     QuaConfigDigitalInputPortDecPolarity,
+    QuaConfigMicrowaveAnalogInputPortDec,
+    QuaConfigMicrowaveInputPortReference,
+    QuaConfigMicrowaveAnalogOutputPortDec,
+    QuaConfigMicrowaveOutputPortReference,
+    QuaConfigOctoDacAnalogOutputPortDecOutputMode,
+    QuaConfigOctoDacAnalogOutputPortDecSamplingRateMode,
 )
 
 
@@ -180,7 +194,9 @@ def _convert_pulses(pulses: Dict[str, QuaConfigPulseDec]) -> Dict[str, PulseConf
             "length": data.length,
             "waveforms": data.waveforms,
             "integration_weights": data.integration_weights,
-            "operation": QuaConfigPulseDecOperation(data.operation).name.lower(),
+            "operation": cast(
+                Literal["measurement", "control"], QuaConfigPulseDecOperation(data.operation).name.lower()
+            ),
         }
         if isinstance(data.digital_marker, str):
             temp_dict["digital_marker"] = data.digital_marker
@@ -224,20 +240,72 @@ def _convert_controller_types(
 ) -> Dict[str, Union[ControllerConfigType, OPX1000ControllerConfigType]]:
     ret: Dict[str, Union[ControllerConfigType, OPX1000ControllerConfigType]] = {}
     for name, data in controllers.items():
-        if len(data.fems) == 1 and betterproto.serialized_on_wire(data.fems[1].opx):
+        if len(data.fems) == 1 and 1 in data.fems and betterproto.serialized_on_wire(data.fems[1].opx):
             ret[name] = _convert_controller(data.fems[1].opx)
         else:
             to_attach: OPX1000ControllerConfigType = {
                 "type": "opx1000",
-                "fems": {fem_idx: _convert_fem(fem.octo_dac) for fem_idx, fem in data.fems.items()},
+                "fems": {fem_idx: _convert_fem(fem) for fem_idx, fem in data.fems.items()},
             }
             ret[name] = to_attach
 
     return ret
 
 
-def _convert_fem(data: QuaConfigOctoDacFemDec) -> FemConfigType:
-    ret: FemConfigType = {}
+def _convert_fem(data: QuaConfigFemTypes) -> Union[FemConfigType, MwFemConfigType]:
+    _, fem_config = betterproto.which_one_of(data, "fem_type_one_of")
+    if isinstance(fem_config, QuaConfigOctoDacFemDec):
+        return _convert_octo_dac(fem_config)
+    elif isinstance(fem_config, QuaConfigMicrowaveFemDec):
+        return _convert_mw_fem(fem_config)
+    else:
+        raise ValueError(f"Unknown FEM type - {fem_config}")
+
+
+def _convert_mw_fem(data: QuaConfigMicrowaveFemDec) -> MwFemConfigType:
+    ret: MwFemConfigType = {"type": "MW"}
+    if data.analog_outputs:
+        ret["analog_outputs"] = _convert_mw_analog_outputs(data.analog_outputs)
+    if data.analog_inputs:
+        ret["analog_inputs"] = _convert_mw_analog_inputs(data.analog_inputs)
+    if data.digital_outputs:
+        ret["digital_outputs"] = _convert_controller_digital_outputs(data.digital_outputs)
+    if data.digital_inputs:
+        ret["digital_inputs"] = _convert_controller_digital_inputs(data.digital_inputs)
+    return ret
+
+
+def _convert_mw_analog_outputs(
+    outputs: Dict[int, QuaConfigMicrowaveAnalogOutputPortDec]
+) -> Dict[int, MwFemAnalogOutputPortConfigType]:
+    return {
+        idx: {
+            "sampling_rate": output.sampling_rate,
+            "full_scale_power_dbm": output.full_scale_power_dbm,
+            "band": cast(Literal[1, 2, 3], output.band),
+            "delay": output.delay,
+            "shareable": output.shareable,
+        }
+        for idx, output in outputs.items()
+    }
+
+
+def _convert_mw_analog_inputs(
+    inputs: Dict[int, QuaConfigMicrowaveAnalogInputPortDec]
+) -> Dict[int, MwFemAnalogInputPortConfigType]:
+    return {
+        idx: {
+            "band": cast(Literal[1, 3, 3], _input.band),
+            "shareable": _input.shareable,
+            "gain_db": _input.gain_db,
+            "sampling_rate": _input.sampling_rate,
+        }
+        for idx, _input in inputs.items()
+    }
+
+
+def _convert_octo_dac(data: QuaConfigOctoDacFemDec) -> FemConfigType:
+    ret: FemConfigType = {"type": "LF"}
     if data.analog_outputs:
         ret["analog_outputs"] = _convert_octo_dac_fem_analog_outputs(data.analog_outputs)
     if data.analog_inputs:
@@ -311,16 +379,26 @@ def _convert_elements(elements: Dict[str, QuaConfigElementDec]) -> Dict[str, Ele
         element_config_data: ElementConfigType = {
             "digitalInputs": _convert_inputs(data.digital_inputs),
             "digitalOutputs": _convert_digital_output(data.digital_outputs),
-            "outputs": _convert_element_output(data.outputs),
+            "outputs": _convert_element_output(data.outputs, data.multiple_outputs),
             "operations": data.operations,
-            "singleInput": _convert_single_inputs(data.single_input),
-            "mixInputs": _convert_mix_inputs(data.mix_inputs),
-            "singleInputCollection": _convert_single_input_collection(data.single_input_collection),
-            "multipleInputs": _convert_multiple_inputs(data.multiple_inputs),
             "hold_offset": _convert_hold_offset(data.hold_offset),
             "sticky": _convert_sticky(data.sticky),
             "thread": _convert_element_thread(data.thread),
         }
+        if betterproto.serialized_on_wire(data.single_input):
+            element_config_data["singleInput"] = _convert_single_inputs(data.single_input)
+        if betterproto.serialized_on_wire(data.mix_inputs):
+            element_config_data["mixInputs"] = _convert_mix_inputs(data.mix_inputs)
+        if betterproto.serialized_on_wire(data.single_input_collection):
+            element_config_data["singleInputCollection"] = _convert_single_input_collection(
+                data.single_input_collection
+            )
+        if betterproto.serialized_on_wire(data.multiple_inputs):
+            element_config_data["multipleInputs"] = _convert_multiple_inputs(data.multiple_inputs)
+        if betterproto.serialized_on_wire(data.microwave_output):
+            element_config_data["MWOutput"] = _convert_element_mw_output(data.microwave_output)
+        if betterproto.serialized_on_wire(data.microwave_input):
+            element_config_data["MWInput"] = _convert_element_mw_input(data.microwave_input)
         if data.smearing is not None:
             element_config_data["smearing"] = data.smearing
         if data.time_of_flight is not None:
@@ -374,6 +452,20 @@ def _convert_sticky(sticky: QuaConfigSticky) -> StickyConfigType:
     return res
 
 
+def _convert_element_mw_input(data: QuaConfigMicrowaveInputPortReference) -> MwInputConfigType:
+    return {
+        "port": _port_reference(data.port),
+        "oscillator_frequency": data.oscillator_frequency_hz,
+    }
+
+
+def _convert_element_mw_output(data: QuaConfigMicrowaveOutputPortReference) -> MwOutputConfigType:
+    return {
+        "port": _port_reference(data.port),
+        "oscillator_frequency": data.oscillator_frequency_hz,
+    }
+
+
 def _convert_element_thread(element_thread: QuaConfigElementThread) -> str:
     return element_thread.thread_name
 
@@ -405,11 +497,16 @@ def _convert_octo_dac_fem_analog_outputs(
             "shareable": data.shareable,
             "filter": {"feedforward": data.filter.feedforward, "feedback": data.filter.feedback},
             "crosstalk": data.crosstalk,
-            "upsampling_mode": cast(Literal["mw", "pulse"], data.upsampling_mode.name),
-            "output_mode": cast(Literal["direct", "amplified"], data.output_mode.name),
+            "output_mode": cast(
+                Literal["direct", "amplified"], QuaConfigOctoDacAnalogOutputPortDecOutputMode(data.output_mode).name
+            ),
         }
-        if data.sampling_rate.value:
-            port_info["sampling_rate"] = {1: 1e9, 2: 2e9}[data.sampling_rate.value]
+        if data.sampling_rate:
+            port_info["sampling_rate"] = {1: 1e9, 2: 2e9}[data.sampling_rate]
+        if data.upsampling_mode:
+            port_info["upsampling_mode"] = cast(
+                Literal["mw", "pulse"], QuaConfigOctoDacAnalogOutputPortDecSamplingRateMode(data.upsampling_mode).name
+            )
         ret[int(name)] = port_info
     return ret
 
@@ -431,7 +528,17 @@ def _convert_controller_analog_inputs(
 def _convert_controller_digital_outputs(
     outputs: Dict[int, QuaConfigDigitalOutputPortDec]
 ) -> Dict[int, DigitalOutputPortConfigType]:
-    return {idx: {"shareable": data.shareable, "inverted": data.inverted} for idx, data in outputs.items()}
+    return {idx: _convert_controller_digital_output(data) for idx, data in outputs.items()}
+
+
+def _convert_controller_digital_output(data: QuaConfigDigitalOutputPortDec) -> DigitalOutputPortConfigType:
+    to_return: DigitalOutputPortConfigType = {
+        "shareable": data.shareable,
+        "inverted": data.inverted,
+    }
+    if data.level is not None:
+        to_return["level"] = "TTL" if data.level == 1 else "LVTTL"
+    return to_return
 
 
 def _convert_controller_digital_inputs(
@@ -449,7 +556,11 @@ def _convert_controller_digital_inputs(
     return ret
 
 
-def _convert_element_output(outputs: Dict[str, QuaConfigAdcPortReference]) -> Dict[str, PortReferenceType]:
+def _convert_element_output(
+    outputs: Dict[str, QuaConfigAdcPortReference], multiple_outputs: QuaConfigMultipleOutputs
+) -> Dict[str, PortReferenceType]:
+    if multiple_outputs:
+        return {name: _port_reference(data) for name, data in multiple_outputs.port_references.items()}
     return {name: _port_reference(data) for name, data in outputs.items()}
 
 

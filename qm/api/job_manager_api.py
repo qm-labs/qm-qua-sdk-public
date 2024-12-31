@@ -1,7 +1,8 @@
 import logging
-from typing import List, Tuple, Optional, cast
+from abc import ABCMeta
+from typing import Any, List, Type, Tuple, Union, TypeVar, Optional, cast
 
-from dependency_injector.wiring import Provide
+from dependency_injector.wiring import Provide, inject
 
 from qm.type_hinting import Value
 from qm.exceptions import QmValueError
@@ -11,8 +12,10 @@ from qm.api.models.jobs import PendingJobData
 from qm.grpc.qm_manager import GetRunningJobRequest
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
+from qm.utils.general_utils import create_input_stream_name
 from qm.api.base_api import BaseApi, connection_error_handle
 from qm.containers.capabilities_container import CapabilitiesContainer
+from qm.api.stubs.deprecated_job_manager_stub import DeprecatedJobManagerServiceStub
 from qm.grpc.job_manager import (
     JobManagerServiceStub,
     InsertInputStreamRequest,
@@ -46,21 +49,13 @@ from qm.grpc.frontend import (
 logger = logging.getLogger(__name__)
 
 
-@connection_error_handle()
-class JobManagerApi(BaseApi):
-    def __init__(
-        self,
-        connection_details: ConnectionDetails,
-        capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
-    ):
-        super().__init__(connection_details)
-        if capabilities.supports_new_grpc_structure:
-            self._job_manager_stub = JobManagerServiceStub(self._channel)
-        else:
-            from qm.api.stubs.deprecated_job_manager_stub import DeprecatedJobManagerServiceStub
+JobStubType = TypeVar("JobStubType", JobManagerServiceStub, DeprecatedJobManagerServiceStub)
 
-            # TODO: add deprecation warning
-            self._job_manager_stub = DeprecatedJobManagerServiceStub(self._channel)
+
+@connection_error_handle()
+class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
+    def __init__(self, connection_details: ConnectionDetails):
+        super().__init__(connection_details)
         self._frontend_stub = FrontendStub(self._channel)
 
     def set_element_correction(
@@ -68,7 +63,7 @@ class JobManagerApi(BaseApi):
     ) -> Tuple[float, float, float, float]:
         request = SetElementCorrectionRequest(job_id=job_id, qe_name=element_name, correction=correction)
 
-        response = run_async(self._job_manager_stub.set_element_correction(request, timeout=self._timeout))
+        response = run_async(self._stub.set_element_correction(request, timeout=self._timeout))
 
         valid_errors = (
             MissingElementError,
@@ -87,7 +82,7 @@ class JobManagerApi(BaseApi):
     def get_element_correction(self, job_id: str, element_name: str) -> Tuple[float, float, float, float]:
         request = GetElementCorrectionRequest(job_id=job_id, qe_name=element_name)
 
-        response = run_async(self._job_manager_stub.get_element_correction(request, timeout=self._timeout))
+        response = run_async(self._stub.get_element_correction(request, timeout=self._timeout))
         valid_errors = (
             MissingElementError,
             ElementWithSingleInputError,
@@ -102,7 +97,8 @@ class JobManagerApi(BaseApi):
         )
 
     def insert_input_stream(self, job_id: str, stream_name: str, data: List[Value]) -> None:
-        request = InsertInputStreamRequest(job_id=job_id, stream_name=f"input_stream_{stream_name}")
+        stream_name = create_input_stream_name(stream_name)
+        request = InsertInputStreamRequest(job_id=job_id, stream_name=stream_name)
 
         if all(type(element) == bool for element in data):
             request.bool_stream_data.data.extend(cast(List[bool], data))
@@ -116,7 +112,7 @@ class JobManagerApi(BaseApi):
                 f"excepted types are bool | int | float"
             )
 
-        response = run_async(self._job_manager_stub.insert_input_stream(request, timeout=self._timeout))
+        response = run_async(self._stub.insert_input_stream(request, timeout=self._timeout))
 
         valid_errors = (
             MissingJobError,
@@ -183,7 +179,7 @@ class JobManagerApi(BaseApi):
         position: Optional[int] = None,
         user_id: Optional[str] = None,
     ) -> int:
-        request = JobManagerApi._create_job_query_params(quantum_machine_id, job_id, position, user_id)
+        request = JobManagerBaseApi._create_job_query_params(quantum_machine_id, job_id, position, user_id)
 
         response = run_async(self._frontend_stub.remove_pending_jobs(request, timeout=self._timeout))
         return response.numbers_of_jobs_removed
@@ -195,7 +191,7 @@ class JobManagerApi(BaseApi):
         position: Optional[int],
         user_id: Optional[str],
     ) -> List[PendingJobData]:
-        request = JobManagerApi._create_job_query_params(quantum_machine_id, job_id, position, user_id)
+        request = JobManagerBaseApi._create_job_query_params(quantum_machine_id, job_id, position, user_id)
         response = run_async(self._frontend_stub.get_pending_jobs(request, timeout=self._timeout))
         return [
             PendingJobData(
@@ -214,3 +210,24 @@ class JobManagerApi(BaseApi):
         if response.job_id:
             return response.job_id
         return None
+
+
+class JobManagerApi(JobManagerBaseApi[JobManagerServiceStub]):
+    @property
+    def _stub_class(self) -> Type[JobManagerServiceStub]:
+        return JobManagerServiceStub
+
+
+class DeprecatedJobManagerApi(JobManagerBaseApi[DeprecatedJobManagerServiceStub]):
+    @property
+    def _stub_class(self) -> Type[DeprecatedJobManagerServiceStub]:
+        return DeprecatedJobManagerServiceStub
+
+
+@inject
+def create_job_manager_from_api(
+    api: BaseApi[Any], capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]
+) -> Union[JobManagerApi, DeprecatedJobManagerApi]:
+    if capabilities.supports_new_grpc_structure:
+        return JobManagerApi(api.connection_details)
+    return DeprecatedJobManagerApi(api.connection_details)

@@ -3,31 +3,33 @@ import logging
 import warnings
 from typing import Any, Dict, List, Tuple, Union, Mapping, Optional, Sequence, cast
 
+from qm import QmQueue
 from qm.program import Program
 from qm.jobs.qm_job import QmJob
 from qm.octave import QmOctaveConfig
 from qm.persistence import BaseStore
-from qm.jobs.job_queue import QmQueue
 from qm.octave.qm_octave import QmOctave
 from qm.utils import deprecation_message
 from qm.api.models.devices import Polarity
 from qm.api.frontend_api import FrontendApi
 from qm.jobs.pending_job import QmPendingJob
+from qm.jobs.job_queue_mock import QmQueueMock
 from qm.jobs.simulated_job import SimulatedJob
 from qm.api.simulation_api import SimulationApi
 from qm.grpc.frontend import JobExecutionStatus
 from qm.jobs.running_qm_job import RunningQmJob
-from qm.api.job_manager_api import JobManagerApi
+from qm.utils.config_utils import get_fem_config
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
+from qm.api.v2.job_api.job_api import OldJobApiMock
 from qm.elements_db import ElementsDB, init_elements
 from qm.utils.types_utils import convert_object_type
 from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.elements.up_converted_input import UpconvertedInput
 from qm._QmJobErrors import InvalidDigitalInputPolarityError
 from qm.octave._calibration_names import COMMON_OCTAVE_PREFIX
+from qm.api.job_manager_api import create_job_manager_from_api
 from qm.api.models.capabilities import OPX_FEM_IDX, ServerCapabilities
-from qm.utils.config_utils import get_fem_config, get_simulation_sampling_rate
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
 from qm.type_hinting.config_types import StandardPort, DictQuaConfig, PortReferenceType
 from qm.elements.element_inputs import MixInputs, SingleInput, static_set_mixer_correction
@@ -37,6 +39,7 @@ from qm.grpc.qua_config import (
     QuaConfig,
     QuaConfigQuaConfigV1,
     QuaConfigPortReference,
+    QuaConfigMicrowaveFemDec,
     QuaConfigDigitalInputPortDec,
     QuaConfigDigitalInputPortDecPolarity,
 )
@@ -68,9 +71,12 @@ class QuantumMachine:
         self._id = machine_id
         self._config = pb_config
         self._frontend = frontend_api
-        self._simulation_api = SimulationApi.from_api(self._frontend)
-        self._job_manager = JobManagerApi.from_api(frontend_api)
+
         self._capabilities = capabilities
+
+        self._simulation_api = SimulationApi(self._frontend.connection_details)
+        self._job_manager = create_job_manager_from_api(frontend_api)
+
         self._store = store
         self._queue = QmQueue(
             config=self._config,
@@ -79,6 +85,7 @@ class QuantumMachine:
             capabilities=self._capabilities,
             store=self._store,
         )
+
         self._elements: ElementsDB = init_elements(
             pb_config, frontend_api, machine_id=machine_id, octave_config=octave_config
         )
@@ -108,22 +115,11 @@ class QuantumMachine:
         return self._id
 
     @property
-    def queue(self) -> QmQueue:
-        """Returns the queue for the Quantum Machine"""
+    def queue(self) -> Union[QmQueue, QmQueueMock]:
         return self._queue
 
     @property
     def octave(self) -> QmOctave:
-        # warnings.warn(
-        #     deprecation_message(
-        #         method="QuantumMachine.octave",
-        #         deprecated_in="1.1.0",
-        #         removed_in="1.2.0",
-        #         details="Use ElementWithOctave instead. For further details, see elements API.",
-        #     ),
-        #     DeprecationWarning,
-        #     stacklevel=2,
-        # )
         return self._octave
 
     def close(self) -> bool:
@@ -175,7 +171,7 @@ class QuantumMachine:
             a ``QmJob`` object (see QM Job API).
         """
         standardized_compiler_options = standardize_compiler_params(compiler_options, strict, flags)
-        job: SimulatedJob = cast(
+        job = cast(
             SimulatedJob, self.execute(program, simulate=simulate, compiler_options=standardized_compiler_options)
         )
         return job
@@ -214,7 +210,7 @@ class QuantumMachine:
         Returns:
             A ``QmJob`` object (see QM Job API).
         """
-        if type(program) is not Program:
+        if not isinstance(program, Program):
             raise Exception("program argument must be of type qm.program.Program")
         if program.metadata.uses_command_timestamps and not self._capabilities.supports_command_timestamps:
             raise UnsupportedCapabilityError("timestamping commands is supported from QOP 2.2 or above")
@@ -233,14 +229,12 @@ class QuantumMachine:
                 capabilities=self._capabilities,
                 store=self._store,
                 simulated_response=simulated_response_part,
-                sampling_rate=get_simulation_sampling_rate(self._config),
             )
 
         self._queue.clear()
         current_running_job = self.get_running_job()
         if current_running_job is not None:
-            current_running_job.halt()
-
+            current_running_job.cancel()
         pending_job = self._queue.add(program, standardized_compiler_options)
         logger.info("Executing program")
         return pending_job.wait_for_execution(timeout=5)
@@ -275,9 +269,9 @@ class QuantumMachine:
             raise UnsupportedCapabilityError("fast frame rotation is supported from QOP 2.2 or above")
 
         logger.info("Compiling program")
+
         if compiler_options is None:
             compiler_options = CompilerOptionArguments()
-
         return self._frontend.compile(self._id, program.qua_program, compiler_options)
 
     def list_controllers(self) -> Tuple[str, ...]:
@@ -286,7 +280,6 @@ class QuantumMachine:
         Returns:
             The names of the controllers configured in this qm
         """
-        # TODO (YR) - why is this function here, QM should not be aware of the controllers
         config = self._get_config_as_object()
         return tuple(config.control_devices) or tuple(config.controllers)
 
@@ -445,6 +438,8 @@ class QuantumMachine:
         port_number = port.number
 
         specific_fem = get_fem_config(config, port)
+        if isinstance(specific_fem, QuaConfigMicrowaveFemDec):
+            raise InvalidConfigError(f"Port num {port_number} is a MW-FEM port, has no offset")
         if port_number in specific_fem.analog_outputs:
             return specific_fem.analog_outputs[port_number].offset
         else:
@@ -594,6 +589,8 @@ class QuantumMachine:
             raise Exception("Output does not exist")
 
         specific_fem = get_fem_config(config, port)
+        if isinstance(specific_fem, QuaConfigMicrowaveFemDec):
+            raise InvalidConfigError(f"Port num {port.number} is a MW-FEM port, has no offset")
 
         if port.number in specific_fem.analog_outputs:
             return specific_fem.analog_inputs[port.number].offset
@@ -875,8 +872,9 @@ class QuantumMachine:
         with open(filename, "w") as writer:
             writer.write(json_str)
 
-    def get_running_job(self) -> Optional[QmJob]:
+    def get_running_job(self) -> Optional[Union[QmJob, OldJobApiMock]]:
         """Gets the currently running job. Returns None if there isn't one."""
+
         job_id = self._job_manager.get_running_job(self._id)
         if job_id is None:
             return None
@@ -895,7 +893,7 @@ class QuantumMachine:
             # wait for execution
             return None
 
-    def get_job(self, job_id: str) -> Union[QmJob, QmPendingJob]:
+    def get_job(self, job_id: str) -> Union[QmJob, QmPendingJob, OldJobApiMock]:
         status: JobExecutionStatus = self._job_manager.get_job_execution_status(job_id, self._id)
         if status.running or status.completed:
             return QmJob(

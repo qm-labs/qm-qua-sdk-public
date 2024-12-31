@@ -7,6 +7,10 @@ SERVICE_HEADER_NAME = "x-grpc-service"
 T = TypeVar("T")
 
 
+def create_input_stream_name(name: str) -> str:
+    return f"input_stream_{name}"
+
+
 def run_until_with_timeout(
     on_iteration_callback: Callable[[], bool],
     # The type ignore can be removed in 3.12 with `T = TypeVar("T", default=None)`

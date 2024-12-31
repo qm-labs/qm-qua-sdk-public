@@ -34,17 +34,8 @@ class SimulatorInterface(Generic[T], metaclass=abc.ABCMeta):
         self.noisePower = self._validate_and_standardize_noise_power(noisePower)
         self._connections: List[T] = self._validate_and_standardize_connections(connections)
 
+    @abc.abstractmethod
     def update_simulate_request(self, request: SimulationRequest) -> SimulationRequest:
-        connections = [self._fix_connection(connection) for connection in self._connections]
-        return self._update_simulate_request(request, connections)
-
-    @abc.abstractmethod
-    def _update_simulate_request(self, request: SimulationRequest, connections: List[T]) -> SimulationRequest:
-        pass
-
-    @abc.abstractmethod
-    def _fix_connection(self, connection: T) -> T:
-        """This functions comes to overcome a bug in the GW that expects the FEM to be 0"""
         pass
 
     @staticmethod
@@ -74,7 +65,7 @@ class SimulatorInterface(Generic[T], metaclass=abc.ABCMeta):
 
 
 @inject
-def _get_opx_fem_number(capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]) -> int:
+def get_opx_fem_number(capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]) -> int:
     """This function is here to overcome a bug in the GW, that expects the FEM to be 0"""
     return capabilities.fem_number_in_simulator
 

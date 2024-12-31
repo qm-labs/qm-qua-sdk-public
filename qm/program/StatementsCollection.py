@@ -3,9 +3,48 @@ from typing import TYPE_CHECKING, List, Tuple, Union, Optional
 import betterproto
 from betterproto.lib.google.protobuf import Empty
 
-import qm.grpc.qua as _qua
 from qm._loc import _get_loc
 from qm.exceptions import QmQuaException
+from qm.grpc.qua import (
+    QuaProgramChirp,
+    QuaProgramRampPulse,
+    QuaProgramCorrection,
+    QuaProgramIfStatement,
+    QuaProgramAnyStatement,
+    QuaProgramForStatement,
+    QuaProgramAmpMultiplier,
+    QuaProgramPlayStatement,
+    QuaProgramSaveStatement,
+    QuaProgramWaitStatement,
+    QuaProgramAlignStatement,
+    QuaProgramMeasureProcess,
+    QuaProgramPauseStatement,
+    QuaProgramPulseReference,
+    QuaProgramForEachStatement,
+    QuaProgramMeasureStatement,
+    QuaProgramVarRefExpression,
+    QuaProgramZRotationStatement,
+    QuaProgramAnyScalarExpression,
+    QuaProgramAssignmentStatement,
+    QuaProgramRampToZeroStatement,
+    QuaProgramResetFrameStatement,
+    QuaProgramResetPhaseStatement,
+    QuaProgramSaveStatementSource,
+    QuaProgramSetDcOffsetStatement,
+    QuaProgramStatementsCollection,
+    QuaProgramArrayVarRefExpression,
+    QuaProgramStrictTimingStatement,
+    QuaProgramQuantumElementReference,
+    QuaProgramWaitForTriggerStatement,
+    QuaProgramUpdateFrequencyStatement,
+    QuaProgramAssignmentStatementTarget,
+    QuaProgramUpdateCorrectionStatement,
+    QuaProgramFastFrameRotationStatement,
+    QuaProgramAdvanceInputStreamStatement,
+    QuaProgramUpdateFrequencyStatementUnits,
+    QuaProgramForEachStatementVariableWithValues,
+    QuaProgramWaitForTriggerStatementElementOutput,
+)
 
 if TYPE_CHECKING:
     from qm.qua._dsl import _ResultSource
@@ -14,16 +53,60 @@ if TYPE_CHECKING:
 
 
 class StatementsCollection:
-    def __init__(self, body: _qua.QuaProgramStatementsCollection):
+    def __init__(self, body: QuaProgramStatementsCollection):
         self._body = body
 
     @staticmethod
-    def _check_serialised_on_wire(message: _qua.QuaProgramAnyStatement, name: str) -> None:
+    def _check_serialised_on_wire(message: QuaProgramAnyStatement, name: str) -> None:
         if (
             not betterproto.serialized_on_wire(getattr(message, name))
             or not betterproto.which_one_of(message, "statement_oneof")[0] == name
         ):
             raise QmQuaException(f"Failed to serialize of wire {name}")
+
+    def _create_play_statement(
+        self,
+        pulse: "PlayPulseType",
+        element: str,
+        duration: Optional["MessageExpressionType"] = None,
+        condition: Optional["MessageExpressionType"] = None,
+        target: str = "",
+        chirp: Optional[QuaProgramChirp] = None,
+        truncate: Optional["MessageExpressionType"] = None,
+        timestamp_label: Optional[str] = None,
+    ) -> QuaProgramPlayStatement:
+        amp = None
+        if isinstance(pulse, tuple):
+            pulse, amp = pulse
+
+        loc = _get_loc()
+        play_statement = QuaProgramPlayStatement(
+            loc=loc,
+            qe=QuaProgramQuantumElementReference(name=element, loc=loc),
+            target_input=target,
+        )
+        if isinstance(pulse, QuaProgramRampPulse):
+            play_statement.ramp_pulse = QuaProgramRampPulse().from_dict(pulse.to_dict())
+        else:
+            play_statement.named_pulse = QuaProgramPulseReference(name=pulse, loc=loc)
+
+        if duration is not None:
+            play_statement.duration = QuaProgramAnyScalarExpression().from_dict(duration.to_dict())
+        if condition is not None:
+            play_statement.condition = QuaProgramAnyScalarExpression().from_dict(condition.to_dict())
+        if chirp is not None:
+            play_statement.chirp = QuaProgramChirp().from_dict(chirp.to_dict())
+            play_statement.chirp.loc = loc
+        if amp is not None:
+            play_statement.amp = QuaProgramAmpMultiplier(loc=loc, v0=amp[0])
+            for i in range(1, 4, 1):
+                if amp[i] is not None:
+                    setattr(play_statement.amp, "v" + str(i), amp[i])
+        if truncate is not None:
+            play_statement.truncate = QuaProgramAnyScalarExpression().from_dict(truncate.to_dict())
+        if timestamp_label is not None:
+            play_statement.timestamp_label = timestamp_label
+        return play_statement
 
     def play(
         self,
@@ -32,7 +115,7 @@ class StatementsCollection:
         duration: Optional["MessageExpressionType"] = None,
         condition: Optional["MessageExpressionType"] = None,
         target: str = "",
-        chirp: Optional[_qua.QuaProgramChirp] = None,
+        chirp: Optional[QuaProgramChirp] = None,
         truncate: Optional["MessageExpressionType"] = None,
         timestamp_label: Optional[str] = None,
     ) -> None:
@@ -52,41 +135,10 @@ class StatementsCollection:
         Returns:
 
         """
-
-        amp = None
-        if isinstance(pulse, tuple):
-            pulse, amp = pulse
-
-        loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            play=_qua.QuaProgramPlayStatement(
-                loc=loc,
-                qe=_qua.QuaProgramQuantumElementReference(name=element, loc=loc),
-                target_input=target,
-            )
+        play_statement = self._create_play_statement(
+            pulse, element, duration, condition, target, chirp, truncate, timestamp_label
         )
-        if isinstance(pulse, _qua.QuaProgramRampPulse):
-            statement.play.ramp_pulse = _qua.QuaProgramRampPulse().from_dict(pulse.to_dict())
-        else:
-            statement.play.named_pulse = _qua.QuaProgramPulseReference(name=pulse, loc=loc)
-
-        if duration is not None:
-            statement.play.duration = _qua.QuaProgramAnyScalarExpression().from_dict(duration.to_dict())
-        if condition is not None:
-            statement.play.condition = _qua.QuaProgramAnyScalarExpression().from_dict(condition.to_dict())
-        if chirp is not None:
-            statement.play.chirp = _qua.QuaProgramChirp().from_dict(chirp.to_dict())
-            statement.play.chirp.loc = loc
-        if amp is not None:
-            statement.play.amp = _qua.QuaProgramAmpMultiplier(loc=loc, v0=amp[0])
-            for i in range(1, 4, 1):
-                if amp[i] is not None:
-                    setattr(statement.play.amp, "v" + str(i), amp[i])
-        if truncate is not None:
-            statement.play.truncate = _qua.QuaProgramAnyScalarExpression().from_dict(truncate.to_dict())
-        if timestamp_label is not None:
-            statement.play.timestamp_label = timestamp_label
-
+        statement = QuaProgramAnyStatement(play=play_statement)
         self._check_serialised_on_wire(statement, "play")
         self._body.statements.append(statement)
 
@@ -100,10 +152,10 @@ class StatementsCollection:
 
         """
         loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            pause=_qua.QuaProgramPauseStatement(
+        statement = QuaProgramAnyStatement(
+            pause=QuaProgramPauseStatement(
                 loc=_get_loc(),
-                qes=[_qua.QuaProgramQuantumElementReference(name=element, loc=loc) for element in elements],
+                qes=[QuaProgramQuantumElementReference(name=element, loc=loc) for element in elements],
             )
         )
         self._check_serialised_on_wire(statement, "pause")
@@ -128,18 +180,18 @@ class StatementsCollection:
 
         """
         try:
-            units_enum = _qua.QuaProgramUpdateFrequencyStatementUnits[units]
+            units_enum = QuaProgramUpdateFrequencyStatementUnits[units]
         except KeyError:
             raise QmQuaException(f'unknown units "{units}"')
 
         loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            update_frequency=_qua.QuaProgramUpdateFrequencyStatement(
+        statement = QuaProgramAnyStatement(
+            update_frequency=QuaProgramUpdateFrequencyStatement(
                 loc=loc,
-                qe=_qua.QuaProgramQuantumElementReference(name=element, loc=loc),
+                qe=QuaProgramQuantumElementReference(name=element, loc=loc),
                 units=units_enum,
                 keep_phase=keep_phase,
-                value=_qua.QuaProgramAnyScalarExpression().from_dict(new_frequency.to_dict()),
+                value=QuaProgramAnyScalarExpression().from_dict(new_frequency.to_dict()),
             )
         )
         self._check_serialised_on_wire(statement, "update_frequency")
@@ -163,11 +215,11 @@ class StatementsCollection:
             c11: The bottom right matrix element
         """
         loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            update_correction=_qua.QuaProgramUpdateCorrectionStatement(
+        statement = QuaProgramAnyStatement(
+            update_correction=QuaProgramUpdateCorrectionStatement(
                 loc=loc,
-                qe=_qua.QuaProgramQuantumElementReference(name=element, loc=loc),
-                correction=_qua.QuaProgramCorrection(c0=c00, c1=c01, c2=c10, c3=c11),
+                qe=QuaProgramQuantumElementReference(name=element, loc=loc),
+                correction=QuaProgramCorrection(c0=c00, c1=c01, c2=c10, c3=c11),
             )
         )
         self._body.statements.append(statement)
@@ -183,10 +235,10 @@ class StatementsCollection:
             offset: Desired dc offset for single
         """
         loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            set_dc_offset=_qua.QuaProgramSetDcOffsetStatement(
+        statement = QuaProgramAnyStatement(
+            set_dc_offset=QuaProgramSetDcOffsetStatement(
                 loc=loc,
-                qe=_qua.QuaProgramQuantumElementReference(name=element, loc=loc),
+                qe=QuaProgramQuantumElementReference(name=element, loc=loc),
                 qe_input_reference=element_input,
                 offset=offset,
             )
@@ -200,14 +252,12 @@ class StatementsCollection:
         Args:
             input_stream: The input stream to advance
         """
-        statement = _qua.QuaProgramAnyStatement(
-            advance_input_stream=_qua.QuaProgramAdvanceInputStreamStatement(loc=_get_loc())
-        )
+        statement = QuaProgramAnyStatement(advance_input_stream=QuaProgramAdvanceInputStreamStatement(loc=_get_loc()))
 
-        if isinstance(input_stream, _qua.QuaProgramArrayVarRefExpression):
+        if isinstance(input_stream, QuaProgramArrayVarRefExpression):
             statement.advance_input_stream.stream_array = input_stream
         elif (
-            isinstance(input_stream, _qua.QuaProgramAnyScalarExpression)
+            isinstance(input_stream, QuaProgramAnyScalarExpression)
             and betterproto.which_one_of(input_stream, "expression_oneof")[0] == "variable"
         ):
             statement.advance_input_stream.stream_variable = input_stream.variable
@@ -227,10 +277,10 @@ class StatementsCollection:
 
         """
         loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            align=_qua.QuaProgramAlignStatement(
+        statement = QuaProgramAnyStatement(
+            align=QuaProgramAlignStatement(
                 loc=loc,
-                qe=[_qua.QuaProgramQuantumElementReference(name=element, loc=loc) for element in elements],
+                qe=[QuaProgramQuantumElementReference(name=element, loc=loc) for element in elements],
             )
         )
         self._check_serialised_on_wire(statement, "align")
@@ -246,9 +296,9 @@ class StatementsCollection:
 
         """
         loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            reset_phase=_qua.QuaProgramResetPhaseStatement(
-                loc=loc, qe=_qua.QuaProgramQuantumElementReference(name=element, loc=loc)
+        statement = QuaProgramAnyStatement(
+            reset_phase=QuaProgramResetPhaseStatement(
+                loc=loc, qe=QuaProgramQuantumElementReference(name=element, loc=loc)
             )
         )
         self._check_serialised_on_wire(statement, "reset_phase")
@@ -265,11 +315,11 @@ class StatementsCollection:
 
         """
         loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            wait=_qua.QuaProgramWaitStatement(
+        statement = QuaProgramAnyStatement(
+            wait=QuaProgramWaitStatement(
                 loc=loc,
-                time=_qua.QuaProgramAnyScalarExpression().from_dict(duration.to_dict()),
-                qe=[_qua.QuaProgramQuantumElementReference(name=element, loc=loc) for element in elements],
+                time=QuaProgramAnyScalarExpression().from_dict(duration.to_dict()),
+                qe=[QuaProgramQuantumElementReference(name=element, loc=loc) for element in elements],
             )
         )
         self._check_serialised_on_wire(statement, "wait")
@@ -283,10 +333,10 @@ class StatementsCollection:
         *elements: str,
     ) -> None:
         loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            wait_for_trigger=_qua.QuaProgramWaitForTriggerStatement(
+        statement = QuaProgramAnyStatement(
+            wait_for_trigger=QuaProgramWaitForTriggerStatement(
                 loc=loc,
-                qe=[_qua.QuaProgramQuantumElementReference(name=element, loc=loc) for element in elements],
+                qe=[QuaProgramQuantumElementReference(name=element, loc=loc) for element in elements],
             )
         )
 
@@ -295,11 +345,11 @@ class StatementsCollection:
         if trigger_element is not None:
             if isinstance(trigger_element, tuple):
                 el, out = trigger_element
-                statement.wait_for_trigger.element_output = _qua.QuaProgramWaitForTriggerStatementElementOutput(
+                statement.wait_for_trigger.element_output = QuaProgramWaitForTriggerStatementElementOutput(
                     element=el, output=out
                 )
             else:
-                statement.wait_for_trigger.element_output = _qua.QuaProgramWaitForTriggerStatementElementOutput(
+                statement.wait_for_trigger.element_output = QuaProgramWaitForTriggerStatementElementOutput(
                     element=trigger_element
                 )
         else:
@@ -310,9 +360,9 @@ class StatementsCollection:
         self._check_serialised_on_wire(statement, "wait_for_trigger")
         self._body.statements.append(statement)
 
-    def save(self, source: _qua.QuaProgramSaveStatementSource, result: "_ResultSource") -> None:
-        statement = _qua.QuaProgramAnyStatement(
-            save=_qua.QuaProgramSaveStatement(loc=_get_loc(), source=source, tag=result.get_var_name())
+    def save(self, source: QuaProgramSaveStatementSource, result: "_ResultSource") -> None:
+        statement = QuaProgramAnyStatement(
+            save=QuaProgramSaveStatement(loc=_get_loc(), source=source, tag=result.get_var_name())
         )
 
         self._check_serialised_on_wire(statement, "save")
@@ -321,11 +371,11 @@ class StatementsCollection:
     def z_rotation(self, angle: "MessageExpressionType", *elements: str) -> None:
         loc = _get_loc()
         for element in elements:
-            statement = _qua.QuaProgramAnyStatement(
-                z_rotation=_qua.QuaProgramZRotationStatement(
+            statement = QuaProgramAnyStatement(
+                z_rotation=QuaProgramZRotationStatement(
                     loc=loc,
-                    value=_qua.QuaProgramAnyScalarExpression().from_dict(angle.to_dict()),
-                    qe=_qua.QuaProgramQuantumElementReference(name=element, loc=loc),
+                    value=QuaProgramAnyScalarExpression().from_dict(angle.to_dict()),
+                    qe=QuaProgramQuantumElementReference(name=element, loc=loc),
                 )
             )
 
@@ -335,10 +385,10 @@ class StatementsCollection:
     def reset_frame(self, *elements: str) -> None:
         loc = _get_loc()
         for element in elements:
-            statement = _qua.QuaProgramAnyStatement(
-                reset_frame=_qua.QuaProgramResetFrameStatement(
+            statement = QuaProgramAnyStatement(
+                reset_frame=QuaProgramResetFrameStatement(
                     loc=loc,
-                    qe=_qua.QuaProgramQuantumElementReference(name=element, loc=loc),
+                    qe=QuaProgramQuantumElementReference(name=element, loc=loc),
                 )
             )
 
@@ -346,16 +396,16 @@ class StatementsCollection:
             self._body.statements.append(statement)
 
     def fast_frame_rotation(
-        self, cosine: _qua.QuaProgramAnyScalarExpression, sine: _qua.QuaProgramAnyScalarExpression, *elements: str
+        self, cosine: QuaProgramAnyScalarExpression, sine: QuaProgramAnyScalarExpression, *elements: str
     ) -> None:
         loc = _get_loc()
         for element in elements:
-            statement = _qua.QuaProgramAnyStatement(
-                fast_frame_rotation=_qua.QuaProgramFastFrameRotationStatement(
+            statement = QuaProgramAnyStatement(
+                fast_frame_rotation=QuaProgramFastFrameRotationStatement(
                     loc=loc,
                     cosine=cosine,
                     sine=sine,
-                    qe=_qua.QuaProgramQuantumElementReference(name=element, loc=loc),
+                    qe=QuaProgramQuantumElementReference(name=element, loc=loc),
                 )
             )
             self._check_serialised_on_wire(statement, "fast_frame_rotation")
@@ -363,10 +413,10 @@ class StatementsCollection:
 
     def ramp_to_zero(self, element: str, duration: Optional[int]) -> None:
         loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            ramp_to_zero=_qua.QuaProgramRampToZeroStatement(
+        statement = QuaProgramAnyStatement(
+            ramp_to_zero=QuaProgramRampToZeroStatement(
                 loc=loc,
-                qe=_qua.QuaProgramQuantumElementReference(name=element, loc=loc),
+                qe=QuaProgramQuantumElementReference(name=element, loc=loc),
                 duration=duration if duration else None,
             )
         )
@@ -379,7 +429,7 @@ class StatementsCollection:
         pulse: "MeasurePulseType",
         element: str,
         stream: Optional["_ResultSource"] = None,
-        *processes: _qua.QuaProgramMeasureProcess,
+        *processes: QuaProgramMeasureProcess,
         timestamp_label: Optional[str] = None,
     ) -> None:
         """Measure an element using the given pulse, process the result with the integration weights and
@@ -400,11 +450,11 @@ class StatementsCollection:
             pulse, amp = pulse
 
         loc = _get_loc()
-        statement = _qua.QuaProgramAnyStatement(
-            measure=_qua.QuaProgramMeasureStatement(
+        statement = QuaProgramAnyStatement(
+            measure=QuaProgramMeasureStatement(
                 loc=loc,
-                pulse=_qua.QuaProgramPulseReference(name=pulse, loc=loc),
-                qe=_qua.QuaProgramQuantumElementReference(name=element, loc=loc),
+                pulse=QuaProgramPulseReference(name=pulse, loc=loc),
+                qe=QuaProgramQuantumElementReference(name=element, loc=loc),
             )
         )
         if stream is not None:
@@ -427,12 +477,12 @@ class StatementsCollection:
         self._body.statements.append(statement)
 
     def if_block(self, condition: "MessageExpressionType", unsafe: bool = False) -> "StatementsCollection":
-        statement = _qua.QuaProgramAnyStatement(
-            if_=_qua.QuaProgramIfStatement(
+        statement = QuaProgramAnyStatement(
+            if_=QuaProgramIfStatement(
                 loc=_get_loc(),
                 condition=condition,
                 unsafe=unsafe,
-                body=_qua.QuaProgramStatementsCollection(statements=[]),
+                body=QuaProgramStatementsCollection(statements=[]),
             )
         )
 
@@ -441,14 +491,14 @@ class StatementsCollection:
         return StatementsCollection(statement.if_.body)
 
     def for_each(
-        self, iterators: List[Tuple["_qua.QuaProgramVarRefExpression", "_qua.QuaProgramArrayVarRefExpression"]]
+        self, iterators: List[Tuple[QuaProgramVarRefExpression, QuaProgramArrayVarRefExpression]]
     ) -> "StatementsCollection":
-        statement = _qua.QuaProgramAnyStatement(
-            for_each=_qua.QuaProgramForEachStatement(
+        statement = QuaProgramAnyStatement(
+            for_each=QuaProgramForEachStatement(
                 loc=_get_loc(),
-                body=_qua.QuaProgramStatementsCollection(statements=[]),
+                body=QuaProgramStatementsCollection(statements=[]),
                 iterator=[
-                    _qua.QuaProgramForEachStatementVariableWithValues(variable=var, array=arr) for var, arr in iterators
+                    QuaProgramForEachStatementVariableWithValues(variable=var, array=arr) for var, arr in iterators
                 ],
             )
         )
@@ -457,26 +507,26 @@ class StatementsCollection:
         self._body.statements.append(statement)
         return StatementsCollection(statement.for_each.body)
 
-    def get_last_statement(self) -> Optional[_qua.QuaProgramAnyStatement]:
+    def get_last_statement(self) -> Optional[QuaProgramAnyStatement]:
         statements = self._body.statements
         length_statements = len(statements)
         if length_statements == 0:
             return None
         return statements[-1]
 
-    def for_block(self) -> _qua.QuaProgramForStatement:
-        statement = _qua.QuaProgramAnyStatement(
-            for_=_qua.QuaProgramForStatement(loc=_get_loc(), body=_qua.QuaProgramStatementsCollection(statements=[]))
+    def for_block(self) -> QuaProgramForStatement:
+        statement = QuaProgramAnyStatement(
+            for_=QuaProgramForStatement(loc=_get_loc(), body=QuaProgramStatementsCollection(statements=[]))
         )
 
         self._check_serialised_on_wire(statement, "for_")
         self._body.statements.append(statement)
         return statement.for_
 
-    def strict_timing_block(self) -> _qua.QuaProgramStrictTimingStatement:
-        statement = _qua.QuaProgramAnyStatement(
-            strict_timing=_qua.QuaProgramStrictTimingStatement(
-                loc=_get_loc(), body=_qua.QuaProgramStatementsCollection(statements=[])
+    def strict_timing_block(self) -> QuaProgramStrictTimingStatement:
+        statement = QuaProgramAnyStatement(
+            strict_timing=QuaProgramStrictTimingStatement(
+                loc=_get_loc(), body=QuaProgramStatementsCollection(statements=[])
             )
         )
 
@@ -486,7 +536,7 @@ class StatementsCollection:
 
     def assign(
         self,
-        target: _qua.QuaProgramAssignmentStatementTarget,
+        target: QuaProgramAssignmentStatementTarget,
         expression: "MessageExpressionType",
     ) -> None:
         """Assign a value calculated by :expression into :target
@@ -498,9 +548,32 @@ class StatementsCollection:
         Returns:
 
         """
-        statement = _qua.QuaProgramAnyStatement(
-            assign=_qua.QuaProgramAssignmentStatement(loc=_get_loc(), target=target, expression=expression)
+        statement = QuaProgramAnyStatement(
+            assign=QuaProgramAssignmentStatement(loc=_get_loc(), target=target, expression=expression)
         )
 
         self._check_serialised_on_wire(statement, "assign")
         self._body.statements.append(statement)
+
+
+class PortConditionedStatementsCollection(StatementsCollection):
+    def __init__(self, body: QuaProgramStatementsCollection, condition: "MessageExpressionType"):
+        super().__init__(body)
+        self._port_condition = condition
+
+    def _create_play_statement(
+        self,
+        pulse: "PlayPulseType",
+        element: str,
+        duration: Optional["MessageExpressionType"] = None,
+        condition: Optional["MessageExpressionType"] = None,
+        target: str = "",
+        chirp: Optional[QuaProgramChirp] = None,
+        truncate: Optional["MessageExpressionType"] = None,
+        timestamp_label: Optional[str] = None,
+    ) -> QuaProgramPlayStatement:
+        play_statement = super()._create_play_statement(
+            pulse, element, duration, condition, target, chirp, truncate, timestamp_label
+        )
+        play_statement.port_condition = QuaProgramAnyScalarExpression().from_dict(self._port_condition.to_dict())
+        return play_statement

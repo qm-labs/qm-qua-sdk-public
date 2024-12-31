@@ -16,6 +16,7 @@ from qm.grpc.qua_config import (
     QuaConfigMultipleInputs,
     QuaConfigDacPortReference,
     QuaConfigSingleInputCollection,
+    QuaConfigMicrowaveInputPortReference,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ ElementInputGRPCType = TypeVar(
     QuaConfigMixInputs,
     QuaConfigSingleInputCollection,
     QuaConfigMultipleInputs,
+    QuaConfigMicrowaveInputPortReference,
     None,
 )
 
@@ -108,6 +110,10 @@ class ElementInput(Generic[ElementInputGRPCType]):
 
 
 class NoInput(ElementInput[None]):
+    pass
+
+
+class MicrowaveInput(ElementInput[QuaConfigMicrowaveInputPortReference]):
     pass
 
 

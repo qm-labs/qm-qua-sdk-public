@@ -14,11 +14,11 @@ from qm.program import load_config
 from qm.grpc.qua_config import QuaConfig
 from qm.utils.protobuf_utils import Node
 from qm import Program, DictQuaConfig, version
-from qm.grpc.qua import QuaProgram, QuaResultAnalysis
 from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.serialization.qua_node_visitor import QuaNodeVisitor
 from qm.utils.list_compression_utils import Chunk, split_list_to_chunks
 from qm.serialization.qua_serializing_visitor import QuaSerializingVisitor
+from qm.grpc.qua import QuaProgram, QuaResultAnalysis, QuaProgramCompilerOptions
 from qm.exceptions import ConfigValidationException, ConfigSerializationException
 
 SERIALIZATION_VALIDATION_ERROR = "SERIALIZATION VALIDATION ERROR"
@@ -41,6 +41,7 @@ def standardize_program_for_comparison(prog: QuaProgram) -> QuaProgram:
     3. the order of the variables in the result analysis
     """
     prog.result_analysis = QuaResultAnalysis().from_dict(prog.result_analysis.to_dict())
+    prog.compiler_options = QuaProgramCompilerOptions()
     StripLocationVisitor.strip(prog)
     RenameStreamVisitor().visit(prog)
     prog.result_analysis.model = sorted(prog.result_analysis.model, key=str)
