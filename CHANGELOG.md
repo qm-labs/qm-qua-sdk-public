@@ -6,8 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
-## 1.2.0a1 - 2024-07-02
-Tested against QOP 1.2, 2.4.1, 3.1 
+## [1.2.1a1] - 2024-07-30
+Tested against QOP 2.4.1
+### Added
+- Added new math functions - atan, atan_2pi, atan2, atan2_2pi - supported from QOP 2.4.
+- When getting the devices using 'qmm.get_devices()', temperature information will also be returned (not available for OPX1000 yet).
+- Added an optional flag 'keep_dc_offsets_when_closing' to 'open_qm()' that prevents resetting the DC voltages back to zero when the QM is closed.
+
+### Fixed
+- At the end of the calibration, dc-offsets are set to their initial values, and not to the last values calibrated (both inputs and outputs).
+
+### Changed
+- After calibration, dc offsets are set only if found LO *and* IF frequencies that match the current element state. 
+
+## [1.2.0a1] - 2024-07-02
+Tested against QOP 3.1 
 ### Changed
 #### QMM (QuantumMachinesManager API)
 - `qmm.get_controllers()` - returns also the types of the FEMs they contain.  For QOP2.x (OPX+) it returns single FEM.

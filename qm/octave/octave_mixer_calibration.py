@@ -150,6 +150,16 @@ class NoCalibrationElements(QmQuaException):
     pass
 
 
+@dataclass
+class _StateRestoreParams:
+    octave_updates: List[SingleUpdate]
+    lo_frequency: float
+    i_offset: float
+    q_offset: float
+    input1_offset: float
+    input2_offset: float
+
+
 def convert_to_old_calibration_result(
     calibration_result: MixerCalibrationResults, mixer_id: str
 ) -> DeprecatedMixerCalibrationResults:
@@ -402,7 +412,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
 
     def _set_octave_for_calibration(
         self, output_channel_index: int, params: AutoCalibrationParams, element_input: UpconvertedInput
-    ) -> Tuple[float, List[SingleUpdate]]:
+    ) -> _StateRestoreParams:
         current_state = self._low_level_client.aquire_modules(
             modules=[
                 ModuleReference(type=OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=1),
@@ -537,7 +547,16 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 )
 
         self._low_level_client.update(updates=updates)
-        return restore_lo_frequency, state_restore_updates
+        i_offset, q_offset, input1_offset, input2_offset = self._get_element_idle_offsets(element_input._name)
+        restore_params = _StateRestoreParams(
+            octave_updates=state_restore_updates,
+            lo_frequency=restore_lo_frequency,
+            i_offset=i_offset,
+            q_offset=q_offset,
+            input1_offset=input1_offset,
+            input2_offset=input2_offset,
+        )
+        return restore_params
 
     @staticmethod
     def _set_input_lo_frequency(element_input: UpconvertedInput, lo_freq: Number) -> None:
@@ -607,14 +626,9 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         i0_shift, q0_shift, debug_fine = _get_and_analyze_lo_data(job, n_lo, lo_offset, 2)
         return i0_shift, q0_shift, debug_fine
 
-    def _restore_octave_state(
-        self,
-        element_input: UpconvertedInput,
-        restore_lo_frequency: float,
-        state_restore_updates: List[SingleUpdate],
-    ) -> None:
-        self._low_level_client.update(state_restore_updates)
-        self._set_input_lo_frequency(element_input, restore_lo_frequency)
+    def _restore_previous_state(self, restore_params: _StateRestoreParams, element_input: UpconvertedInput) -> None:
+        self._low_level_client.update(updates=restore_params.octave_updates)
+        self._set_input_lo_frequency(element_input, restore_params.lo_frequency)
 
     def calibrate(
         self,
@@ -635,9 +649,9 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
 
         port_idx = octave_port[1]
 
-        restore_lo_frequency, state_restore_updates = self._set_octave_for_calibration(port_idx, params, element_input)
-
         self._names = CalibrationElementsNames(self._low_level_client.octave_name, port_idx)
+
+        restore_params = self._set_octave_for_calibration(port_idx, params, element_input)
 
         compiled = self._compile_program(self._generate_program(params))
 
@@ -759,8 +773,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 curr_lo_freq_result.plugin_data = params.callback(lo_freq, curr_lo_freq_result)
             logger.debug(f"Calibration for LO {lo_freq} took {time.time() - t0_lo}")
 
-        # set to previous state
-        self._restore_octave_state(element_input, restore_lo_frequency, state_restore_updates)
+        self._restore_previous_state(restore_params, element_input)
 
         logger.debug(f"Total calibration sweep process took {time.time() - start_lo_sweep}")
         logger.debug(f"Total calibration process took {time.time() - t_start}")
@@ -803,6 +816,10 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
     def _compile_program(self, _program: Program) -> str:
         pass
 
+    @abc.abstractmethod
+    def _get_element_idle_offsets(self, element: str) -> Tuple[float, float, float, float]:
+        pass
+
 
 class OctaveMixerCalibration(OctaveMixerCalibrationBase):
     def __init__(self, client: Octave, quantum_machine: "QuantumMachine"):
@@ -838,6 +855,20 @@ class OctaveMixerCalibration(OctaveMixerCalibrationBase):
 
     def _compile_program(self, _program: Program) -> str:
         return self._qm.compile(_program)
+
+    def _get_element_idle_offsets(self, element: str) -> Tuple[float, float, float, float]:
+        i_offset = self._qm.get_output_dc_offset_by_element(element, "I")
+        q_offset = self._qm.get_output_dc_offset_by_element(element, "Q")
+        input1_offset = self._qm.get_input_dc_offset_by_element(self.names.lo_analyzer, "out1")
+        input2_offset = self._qm.get_input_dc_offset_by_element(self.names.lo_analyzer, "out2")
+        return i_offset, q_offset, input1_offset, input2_offset
+
+    def _restore_previous_state(self, restore_params: _StateRestoreParams, element_input: UpconvertedInput) -> None:
+        super()._restore_previous_state(restore_params, element_input)
+        element_input.set_output_dc_offset(i_offset=restore_params.i_offset, q_offset=restore_params.q_offset)
+        self._set_analyzer_element_outputs_dc_offsets(
+            out1=restore_params.input1_offset, out2=restore_params.input2_offset
+        )
 
 
 class NewApiOctaveMixerCalibration(OctaveMixerCalibrationBase):
@@ -879,3 +910,7 @@ class NewApiOctaveMixerCalibration(OctaveMixerCalibrationBase):
 
     def _compile_program(self, _program: Program) -> str:
         return self._qm_api.compile(_program)
+
+    def _get_element_idle_offsets(self, element: str) -> Tuple[float, float, float, float]:
+        """This is not necessary as the offsets are set through the job"""
+        return 0, 0, 0, 0

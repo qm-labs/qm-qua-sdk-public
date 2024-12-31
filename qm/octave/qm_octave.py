@@ -14,11 +14,7 @@ from qm.elements.up_converted_input import UpconvertedInput
 from qm.octave.octave_manager import ClockMode, OctaveManager
 from qm.octave.calibration_db import IFCalibrationDBSchema, LOCalibrationDBSchema
 from qm.type_hinting.config_types import DictQuaConfig, MixerConfigType, OPX1000ControllerConfigType
-from qm.octave.octave_mixer_calibration import (
-    DeprecatedCalibrationResult,
-    LOFrequencyCalibrationResult,
-    convert_to_old_calibration_result,
-)
+from qm.octave.octave_mixer_calibration import DeprecatedCalibrationResult, convert_to_old_calibration_result
 
 if TYPE_CHECKING:
     from qm.api.v2.qm_api import QmApi
@@ -378,7 +374,7 @@ class QmOctaveForNewApi(QmOctaveBase["QmApi", "JobApi"]):
         self, qe: Element[QuaConfigMixInputs], lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
     ) -> None:
         assert isinstance(qe.input, UpconvertedInput)
-        update = create_dc_offset_octave_update(qe.input, lo_cal)
+        update = create_dc_offset_octave_update(qe.input, i_offset=lo_cal.i0, q_offset=lo_cal.q0)
         update["mixers"] = {
             qe.input.mixer: [
                 create_mixer_correction(qe.intermediate_frequency, qe.input.lo_frequency, if_cal.correction)
@@ -393,16 +389,14 @@ class QmOctaveForNewApi(QmOctaveBase["QmApi", "JobApi"]):
         job.set_element_correction(element, if_cal.correction)
 
 
-def create_dc_offset_octave_update(
-    qe_input: UpconvertedInput, lo_cal: Union[LOCalibrationDBSchema, LOFrequencyCalibrationResult]
-) -> DictQuaConfig:
+def create_dc_offset_octave_update(qe_input: UpconvertedInput, i_offset: float, q_offset: float) -> DictQuaConfig:
     con_i, fem_i, port_i = qe_input.i_port.controller, qe_input.i_port.fem, qe_input.i_port.number
     con_q, fem_q, port_q = qe_input.q_port.controller, qe_input.q_port.fem, qe_input.q_port.number
     controllers: Dict[str, OPX1000ControllerConfigType] = {con_i: {"fems": {}}, con_q: {"fems": {}}}
     controllers[con_i]["fems"][fem_i] = {"analog_outputs": {}}  # type: ignore[index]
     controllers[con_q]["fems"][fem_q] = {"analog_outputs": {}}  # type: ignore[index]
-    controllers[con_i]["fems"][fem_i]["analog_outputs"][port_i] = {"offset": lo_cal.i0}  # type: ignore[index]
-    controllers[con_q]["fems"][fem_q]["analog_outputs"][port_q] = {"offset": lo_cal.q0}  # type: ignore[index]
+    controllers[con_i]["fems"][fem_i]["analog_outputs"][port_i] = {"offset": i_offset}  # type: ignore[index]
+    controllers[con_q]["fems"][fem_q]["analog_outputs"][port_q] = {"offset": q_offset}  # type: ignore[index]
     update: DictQuaConfig = {"version": 1, "controllers": controllers}
     return update
 

@@ -379,7 +379,8 @@ class QuantumMachine:
         key = (inst.input.lo_frequency, cast(float, inst.input.gain))
         if key in res:
             qe_cal = res[key]
-            inst.input.set_output_dc_offset(i_offset=qe_cal.i0, q_offset=qe_cal.q0)
+            if inst.intermediate_frequency in qe_cal.image:
+                inst.input.set_output_dc_offset(i_offset=qe_cal.i0, q_offset=qe_cal.q0)
 
         for (lo_freq, _), lo_cal in res.items():
             for if_freq, if_cal in lo_cal.image.items():
@@ -592,7 +593,7 @@ class QuantumMachine:
         if isinstance(specific_fem, QuaConfigMicrowaveFemDec):
             raise InvalidConfigError(f"Port num {port.number} is a MW-FEM port, has no offset")
 
-        if port.number in specific_fem.analog_outputs:
+        if port.number in specific_fem.analog_inputs:
             return specific_fem.analog_inputs[port.number].offset
         else:
             raise InvalidConfigError(f"Port num {port.number} does not exist")

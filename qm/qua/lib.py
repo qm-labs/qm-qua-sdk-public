@@ -320,6 +320,37 @@ class Math:
         return (x,)
 
     @staticmethod
+    @_library_function("math", "atan_2pi")
+    def atan_2pi(x):
+        r"""Computes $\mathrm{1/2 \pi * atan}(x)$
+
+        -- Available from QOP 2.4 --
+
+        Args:
+            x (a QUA fixed)
+
+        Returns:
+            a QUA fixed
+        """
+        return (x,)
+
+    @staticmethod
+    @_library_function("math", "atan2_2pi")
+    def atan2_2pi(y, x):
+        r"""Computes $\mathrm{1/2 \pi * atan2}(y,x)$
+
+        -- Available from QOP 2.4 --
+
+        Args:
+            y (a QUA fixed)
+            x (a QUA fixed)
+
+        Returns:
+            a QUA fixed
+        """
+        return (y, x)
+
+    @staticmethod
     @_library_function("math", "abs")
     def abs(x):
         r"""Computes the absolute value of x
@@ -344,6 +375,37 @@ class Math:
             a QUA fixed
         """
         return (x,)
+
+    @staticmethod
+    @_library_function("math", "atan")
+    def atan(x):
+        r"""Computes $\mathrm{atan}(x)$
+
+        -- Available from QOP 2.4 --
+
+        Args:
+            x (a QUA fixed which is -1 <= x <= 1))
+
+        Returns:
+            a QUA fixed
+        """
+        return (x,)
+
+    @staticmethod
+    @_library_function("math", "atan2")
+    def atan2(y, x):
+        r"""Computes $\mathrm{atan2}(y,x)$
+
+        -- Available from QOP 2.4 --
+
+        Args:
+            y (a QUA fixed)
+            x (a QUA fixed)
+
+        Returns:
+            a QUA fixed
+        """
+        return (y, x)
 
     @staticmethod
     @_library_function("math", "cos")

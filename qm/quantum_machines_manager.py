@@ -3,9 +3,10 @@ import json
 import logging
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Union, Iterable, Optional, TypedDict
+from typing import Any, Dict, List, Union, Mapping, Iterable, Optional, TypedDict
 
 import marshmallow
+from octave_sdk.octave import OctaveDetails
 
 from qm.api.v2.qm_api import QmApi
 from qm.octave import QmOctaveConfig
@@ -28,11 +29,11 @@ from qm.api.job_result_api import JobResultServiceApi
 from qm.persistence import BaseStore, SimpleFileStore
 from qm.api.models.server_details import ServerDetails
 from qm.type_hinting.config_types import DictQuaConfig
-from qm.api.v2.qmm_api import Controller, OldQmmApiMock
 from qm.program._qua_config_to_pb import load_config_pb
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm._octaves_container import load_config_from_calibration_db
 from qm.program._qua_config_schema import validate_config_capabilities
+from qm.api.v2.qmm_api import Controller, OldQmmApiMock, ControllerBase
 from qm.api.simulation_api import SimulationApi, create_simulation_request
 from qm.containers.capabilities_container import create_capabilities_container
 from qm.octave.octave_manager import OctaveManager, prep_config_for_calibration
@@ -70,14 +71,8 @@ SERVER_TO_QOP_VERSION_MAP = {
 
 
 @dataclass
-class OctaveDetails:
-    host: str
-    port: int
-
-
-@dataclass
 class Devices:
-    controllers: Dict[str, Controller]
+    controllers: Mapping[str, ControllerBase]
     octaves: Dict[str, OctaveDetails]
 
 
@@ -209,7 +204,8 @@ class QuantumMachinesManager:
             self._frontend.healthcheck(strict)
         if self._octave_config is not None:
             for octave in self._octave_config.get_devices():
-                self._octave_manager.get_client(octave)
+                octave_client = self._octave_manager.get_client(octave)
+                octave_client.perform_healthcheck()
 
     def version_dict(self) -> Version:
         """
@@ -289,6 +285,7 @@ class QuantumMachinesManager:
         validate_with_protobuf: bool = False,
         add_calibration_elements_to_config: bool = True,
         use_calibration_data: bool = True,
+        keep_dc_offsets_when_closing: bool = False,
         **kwargs: Any,
     ) -> Union[QuantumMachine, QmApi]:
         """Opens a new quantum machine. A quantum machine can use multiple OPXes, and a
@@ -326,9 +323,19 @@ class QuantumMachinesManager:
 
         self._octave_manager.set_octaves_from_qua_config(loaded_config.v1_beta.octaves)
         if self._api:
+            if keep_dc_offsets_when_closing:
+                raise NotImplementedError("keep_dc_offsets_when_closing is not supported in the current QOP version")
             return self._api.open_qm(loaded_config, close_other_machines)
 
-        machine_id = self._frontend.open_qm(loaded_config, close_other_machines)
+        if not self._caps.supports_keeping_dc_offsets:
+            if keep_dc_offsets_when_closing:
+                raise QmmException(
+                    "The server does not support keeping DC offsets when closing. "
+                    "Please upgrade the server to a version that supports this feature."
+                )
+        machine_id = self._frontend.open_qm(
+            loaded_config, close_other_machines, keep_dc_offsets_when_closing=keep_dc_offsets_when_closing
+        )
 
         return QuantumMachine(
             machine_id=machine_id,
@@ -537,7 +544,7 @@ class QuantumMachinesManager:
         )
         self.close_all_qms()
 
-    def get_controllers(self) -> List[Controller]:
+    def get_controllers(self) -> List[ControllerBase]:
         """Returns a list of all the controllers that are available"""
         if self._api:
             warnings.warn(
@@ -554,20 +561,22 @@ class QuantumMachinesManager:
             return list(new_response.values())
         else:
             old_response = self._frontend.get_controllers()
-            return [Controller.build_from_message(message) for message in old_response]
+            return [Controller(message.name, message.temperature) for message in old_response]
 
-    def _get_controllers_as_dict(self) -> Dict[str, Controller]:
+    def _get_controllers_as_dict(self) -> Mapping[str, ControllerBase]:
         if self._api:
             return self._api.get_controllers()
         else:
             old_response = self._frontend.get_controllers()
-            return {message.name: Controller.build_from_message(message) for message in old_response}
+            return {message.name: Controller(message.name, message.temperature) for message in old_response}
 
     def get_devices(self) -> Devices:
         controllers = self._get_controllers_as_dict()
-        octaves = {}
+        octaves: Dict[str, OctaveDetails] = {}
         if self._octave_config is not None:
-            octaves = {k: OctaveDetails(v.host, v.port) for k, v in self._octave_config.get_devices().items()}
+            for octave_name in self._octave_config.devices:
+                octave_client = self._octave_manager.get_client(octave_name)
+                octaves[octave_name] = octave_client.get_details()
         return Devices(controllers=controllers, octaves=octaves)
 
     def clear_all_job_results(self) -> None:

@@ -467,9 +467,10 @@ class AnalogOutputPortDefSchemaMwFem(Schema):
         metadata={"description": "Sampling rate of the port, can be 1e9 (default) or 2e9 Hz"},
     )
     full_scale_power_dbm = fields.Int(
+        strict=True,
         metadata={
             "description": "The power in dBm of the full scale of the output, "
-            "should be an integer between -40 and 10"
+            "should be an integer between -41 and 10 in steps of 3"
         },
     )
     band = fields.Int(

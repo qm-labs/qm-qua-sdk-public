@@ -35,7 +35,7 @@ certifi = { version = "*", optional = true }
 datadog-api-client = "^2.6.0"
 deprecation = "^2.1.0"
 dependency_injector = "^4.41.0"
-qm-octave = "2.1.0"
+qm-octave = "2.1.1"
 typing-extensions = "^4.5"
 
 grpclib = { version = "^0.4.5", python = ">=3.10", allow-prereleases = true }
@@ -140,7 +140,7 @@ branch = true
 
 [tool.poetry-dynamic-versioning]
 enable = true
-format-jinja = "{{ base }}{{ env['VERSION_SUFFIX'] }}"
+format-jinja = "{{ env['BASE_VERSION'] | default(base) }}{{ env['VERSION_SUFFIX'] | default('') }}"
 
 [tool.poetry-dynamic-versioning.substitution]
 files = ["qm/version.py"]

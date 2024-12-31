@@ -216,7 +216,7 @@ def mw_fem_analog_output_to_pb(
 ) -> QuaConfigMicrowaveAnalogOutputPortDec:
     item = QuaConfigMicrowaveAnalogOutputPortDec(
         sampling_rate=data.get("sampling_rate", 1e9),
-        full_scale_power_dbm=data.get("full_scale_power_dbm", 0),
+        full_scale_power_dbm=data.get("full_scale_power_dbm", -11),
         band=data["band"],
         delay=data.get("delay", 0),
         shareable=data.get("shareable", False),

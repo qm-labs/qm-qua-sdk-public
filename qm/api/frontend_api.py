@@ -101,8 +101,8 @@ class FrontendApi(BaseApi[FrontendStub]):
     def reset_data_processing(self) -> None:
         run_async(self._stub.reset_data_processing(ResetDataProcessingRequest(), timeout=self._timeout))
 
-    def open_qm(self, config: QuaConfig, close_other_machines: bool) -> str:
-        request = OpenQuantumMachineRequest(config=config)
+    def open_qm(self, config: QuaConfig, close_other_machines: bool, keep_dc_offsets_when_closing: bool = False) -> str:
+        request = OpenQuantumMachineRequest(config=config, keep_dc_offsets_when_closing=keep_dc_offsets_when_closing)
 
         if close_other_machines:
             request.always = True

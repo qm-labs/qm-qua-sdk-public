@@ -1,9 +1,8 @@
 import logging
 import warnings
-from dataclasses import dataclass
-from typing import Dict, List, Type, Union, Literal, Iterable, Optional
+from dataclasses import field, dataclass
+from typing import Dict, List, Type, Union, Literal, Mapping, Iterable, Optional
 
-from qm.grpc import qm_manager
 from qm.grpc.qua import QuaProgram
 from qm.utils import LOG_LEVEL_MAP
 from qm.octave import QmOctaveConfig
@@ -47,21 +46,53 @@ class VersionResponse:
 
 ControllerTypes = Literal["OPX", "OPX1000"]
 FemTypes = Literal["LF", "MW"]
-CONTROLLER_TYPES_MAPPING: Dict[int, ControllerTypes] = {1: "OPX1000"}
 FEM_TYPES_MAPPING: Dict[int, FemTypes] = {1: "LF", 2: "MW"}
 
 
 @dataclass
-class Controller:
+class ControllerBase:
     name: str
+
+    @property
+    def temperature(self) -> Optional[float]:
+        return None
+
+    @property
+    def controller_type(self) -> ControllerTypes:
+        raise NotImplementedError
+
+
+@dataclass
+class Controller(ControllerBase):
+    _temperature: Optional[float] = field(repr=False)
+
+    @property
+    def temperature(self) -> Optional[float]:
+        if self._temperature is None:
+            logger.warning(
+                "Temperature is not available for this controller, "
+                "Either because it uses an old gateway or its state is not known."
+            )
+        return self._temperature
+
+    @property
+    def controller_type(self) -> ControllerTypes:
+        return "OPX"
+
+
+@dataclass
+class ControllerOPX1000(ControllerBase):
     hostname: str
-    controller_type: ControllerTypes
     fems: Dict[int, FemTypes]
 
-    @staticmethod
-    def build_from_message(message: qm_manager.Controller) -> "Controller":
-        """For backwards compatibility with the old API."""
-        return Controller(message.name, hostname="UNKNOWN", controller_type="OPX", fems={1: "LF"})
+    @property
+    def controller_type(self) -> ControllerTypes:
+        return "OPX1000"
+
+    @property
+    def temperature(self) -> Optional[float]:
+        logger.warning("Temperature is not yet available for OPX1000 controllers.")
+        return None
 
 
 class QmmApi(BaseApiV2[QmmServiceStub]):
@@ -182,17 +213,18 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
             controllers={k: v for k, v in response.controllers.items()},
         )
 
-    def get_controllers(self) -> Dict[str, Controller]:
+    def get_controllers(self) -> Mapping[str, ControllerBase]:
         response = self._run(self._stub.get_controllers(GetControllersRequest(), timeout=self._timeout))
-        to_return = {
-            name: Controller(
-                name=name,
-                hostname=v.hostname,
-                controller_type=CONTROLLER_TYPES_MAPPING[v.controller_type],
-                fems={int(i) + 1: FEM_TYPES_MAPPING[f.type] for i, f in v.fems.items() if f.type > 0},
-            )
-            for name, v in response.control_devices.items()
-        }
+        to_return = {}
+        for name, value in response.control_devices.items():
+            if value.controller_type == 1:
+                to_return[name] = ControllerOPX1000(
+                    name=name,
+                    hostname=value.hostname,
+                    fems={int(i) + 1: FEM_TYPES_MAPPING[f.type] for i, f in value.fems.items() if f.type > 0},
+                )
+            else:
+                raise NotImplementedError(f"Controller type {value.controller_type} is not supported.")
         return to_return
 
     def reset_data_processing(self) -> None:

@@ -26,6 +26,7 @@ class ServerCapabilities:
     set_zero_frequency_in_calibration: bool = False
     # TODO - remove set_zero_frequency_in_calibration and once we fix the bug in the OPY of the CSF allocation
     supports_api_v2: bool = False
+    supports_keeping_dc_offsets: bool = False
 
     @staticmethod
     def build(qua_implementation: Optional[QuaMachineInfo] = None) -> "ServerCapabilities":
@@ -66,4 +67,5 @@ class ServerCapabilities:
             supports_octave_reset="qm.octave_reset" in caps,
             supports_fast_frame_rotation="qm.fast_frame_rotation" in caps,
             fem_number_in_simulator=0,
+            supports_keeping_dc_offsets="qm.keep_dc_offsets_when_closing" in caps,
         )

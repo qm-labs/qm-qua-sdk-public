@@ -291,7 +291,10 @@ class QmApi(BaseApiV2[QmServiceStub]):
         key = (inst_input.lo_frequency, cast(float, inst_input.gain))
         if key in res:
             qe_cal = res[key]
-            update = create_dc_offset_octave_update(inst_input, qe_cal)
+            if inst.intermediate_frequency in qe_cal.image:
+                update = create_dc_offset_octave_update(inst_input, i_offset=qe_cal.i0, q_offset=qe_cal.q0)
+            else:
+                update = {"version": 1}
             mixers = [
                 create_mixer_correction(if_freq, inst_input.lo_frequency, if_cal.fine.correction)
                 for if_freq, if_cal in qe_cal.image.items()
