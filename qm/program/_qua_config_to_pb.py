@@ -86,6 +86,7 @@ from qm.grpc.qua_config import (
     QuaConfigOctaveLoopback,
     QuaConfigCorrectionEntry,
     QuaConfigMicrowaveFemDec,
+    QuaConfigMultipleOutputs,
     QuaConfigAdcPortReference,
     QuaConfigDacPortReference,
     QuaConfigPulseDecOperation,
@@ -628,7 +629,7 @@ def element_to_pb(
     if "outputs" in data:
         for k, v in data["outputs"].items():
             element.outputs[k] = adc_port_ref_to_pb(*_get_port_reference_with_fem(v))
-        element.multiple_outputs.port_references = element.outputs
+        element.multiple_outputs = QuaConfigMultipleOutputs(port_references=element.outputs)
 
     if "digitalInputs" in data:
         for digital_input_k, digital_input_v in data["digitalInputs"].items():
@@ -938,7 +939,13 @@ def set_octave_downconverter_connection_to_elements(pb_config: QuaConfig) -> Non
                                 )
                         else:
                             element.outputs[k] = v
-                            element.multiple_outputs.port_references[k] = v
+                            _, element_outputs = betterproto.which_one_of(element, "element_outputs_one_of")
+                            if isinstance(element_outputs, QuaConfigMicrowaveOutputPortReference):
+                                raise ConfigValidationException("Cannot connect octave to microwave output")
+                            elif isinstance(element_outputs, QuaConfigMultipleOutputs):
+                                element_outputs.port_references[k] = v
+                            else:
+                                element.multiple_outputs = QuaConfigMultipleOutputs(port_references={k: v})
 
 
 def set_non_existing_mixers_in_mix_input_elements(pb_config: QuaConfig) -> None:

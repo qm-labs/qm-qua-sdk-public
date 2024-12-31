@@ -45,6 +45,7 @@ from qm.grpc.qua import (
     QuaProgramUpdateCorrectionStatement,
     QuaProgramFastFrameRotationStatement,
     QuaProgramAdvanceInputStreamStatement,
+    QuaProgramWaitForTriggerStatementElementOutput,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ class QuaSerializingVisitor(QuaNodeVisitor):
         self.tags: List[str] = []
 
     def out(self) -> str:
-        return "\n".join(["from qm.qua import *", ""] + self._lines + [""])
+        return "\n".join(["from qm import CompilerOptionArguments", "from qm.qua import *", ""] + self._lines + [""])
 
     def _out_lines(self) -> List[str]:
         return self._lines
@@ -79,7 +80,11 @@ class QuaSerializingVisitor(QuaNodeVisitor):
 
     @staticmethod
     def _search_auto_added_stream(values: List[Value]) -> bool:
-        is_auto_added_result = isinstance(values[2], Value) and values[2].string_value == "auto"
+        v2 = values[2]
+        is_auto_added_result = isinstance(v2, Value) and betterproto.which_one_of(v2, "kind") == (
+            "string_value",
+            "auto",
+        )
         return is_auto_added_result
 
     def _fix_legacy_save(self, sp_line: str, node: ListValue) -> None:
@@ -97,6 +102,18 @@ class QuaSerializingVisitor(QuaNodeVisitor):
                 self._lines[i] = self._lines[i].replace(trace_name, f'"{save_name}"')
             if line_to_remove_index:
                 self._lines.pop(line_to_remove_index)
+
+    def enter_qm_grpc_qua_QuaProgramCompilerOptions(self, node: qua.QuaProgramCompilerOptions):
+        options_list = []
+        if node.strict:
+            options_list.append(f"strict={node.strict}")
+        if len(node.flags) > 0:
+            options_list.append(f"flags={node.flags}")
+        options_string = ", ".join(options_list)
+        if len(options_string) > 0:
+            self._lines.insert(0, f"compiler_options = CompilerOptionArguments({options_string})\n")
+
+        return False
 
     def enter_qm_grpc_qua_QuaResultAnalysis(self, node: qua.QuaResultAnalysis) -> bool:
         if len(node.model) > 0:
@@ -127,7 +144,9 @@ class QuaSerializingVisitor(QuaNodeVisitor):
 
         return False
 
-    def enter_betterproto_lib_google_protobuf_ListValue(self, node: betterproto.lib.google.protobuf.ListValue) -> bool:
+    def enter_betterproto_lib_std_google_protobuf_ListValue(
+        self, node: betterproto.lib.google.protobuf.ListValue
+    ) -> bool:
         line = _stream_processing_terminal_statement(node)
         self._line(line)
         self._fix_legacy_save(line, node)
@@ -378,12 +397,13 @@ def _wait_for_trigger_statement(node: qua.QuaProgramWaitForTriggerStatement) -> 
         args.append(f'"{qe.name}"')
     if node.pulse_to_play.name:
         args.append(f'"{node.pulse_to_play.name}"')
-    if node.element_output.element:
+    output = betterproto.which_one_of(node, "source")[1]
+    if isinstance(output, QuaProgramWaitForTriggerStatementElementOutput) and output.element:
         if node.element_output.output:
             args.append(f'trigger_element=("{node.element_output.element}", "{node.element_output.output}")')
         else:
             args.append(f'trigger_element="{node.element_output.element}"')
-    if node.time_tag_target.name != "":
+    if betterproto.which_one_of(node.time_tag_target, "var_oneof")[0] == "name":
         args.append(f"time_tag_target={node.time_tag_target.name}")
     return f'wait_for_trigger({", ".join(args)})'
 
@@ -427,10 +447,11 @@ def _set_dc_offset_statement(node: qua.QuaProgramSetDcOffsetStatement) -> str:
 
 
 def _advance_input_stream_statement(node: QuaProgramAdvanceInputStreamStatement) -> str:
-    if node.stream_array.name != "":
-        input_stream = ExpressionSerializingVisitor.serialize(node.stream_array)
-    elif node.stream_variable.name != "":
-        input_stream = ExpressionSerializingVisitor.serialize(node.stream_variable)
+    stream_value = betterproto.which_one_of(node, "stream_oneof")[1]
+    if isinstance(stream_value, QuaProgramArrayVarRefExpression) and stream_value.name != "":
+        input_stream = ExpressionSerializingVisitor.serialize(stream_value)
+    elif isinstance(stream_value, QuaProgramVarRefExpression) and stream_value.name != "":
+        input_stream = ExpressionSerializingVisitor.serialize(stream_value)
     else:
         raise RuntimeError("unsupported type for pop input stream")
     return f"advance_input_stream({input_stream})"
@@ -487,10 +508,14 @@ def _stream_processing_function(array: List[Value]) -> str:
 
     if function == "average":
         if len(array) > 1:
-            if array[1].string_value:
-                var = array[1].string_value
+            first_element = array[1]
+            v = betterproto.which_one_of(first_element, "kind")[1]
+            if isinstance(v, str):
+                var = v
+            elif isinstance(v, ListValue):
+                var = _stream_processing_operator(v.values)
             else:
-                var = _stream_processing_operator(array[1].list_value.values)
+                raise NotImplementedError
         else:
             var = ""
         return f"average({var})"
@@ -621,6 +646,14 @@ def _stream_processing_operator(array: List[Value]) -> str:
         chain = _default_stream_processing_chain(array)
         return f"{chain}.average()"
 
+    if operator == "real":
+        chain = _default_stream_processing_chain(array)
+        return f"{chain}.real()"
+
+    if operator == "image":
+        chain = _default_stream_processing_chain(array)
+        return f"{chain}.image()"
+
     if operator == "flatten":
         chain = _default_stream_processing_chain(array)
         return f"{chain}.flatten()"
@@ -655,10 +688,13 @@ def _default_stream_processing_chain(array: List[Value]) -> str:
 
 
 def _stream_processing_statement(node: Value) -> str:
-    if len(node.list_value.values) > 0:
-        return _stream_processing_operator(node.list_value.values)
+    _value = betterproto.which_one_of(node, "kind")[1]
+    if isinstance(_value, ListValue) and len(_value.values) > 0:
+        return _stream_processing_operator(_value.values)
+    elif isinstance(_value, str):
+        return _value
     else:
-        return node.string_value
+        raise NotImplementedError(f"Unsupported stream processing statement: {_value}")
 
 
 def _stream_processing_terminal_statement(node: ListValue) -> str:

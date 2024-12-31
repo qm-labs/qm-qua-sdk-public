@@ -6,6 +6,8 @@ from qm.exceptions import InvalidConfigError
 from qm.grpc.qua_config import (
     QuaConfig,
     QuaConfigFemTypes,
+    QuaConfigMixInputs,
+    QuaConfigElementDec,
     QuaConfigControllerDec,
     QuaConfigOctoDacFemDec,
     QuaConfigPortReference,
@@ -36,6 +38,11 @@ def get_fem_config(
     fem_ref = controller.fems[port.fem]
     config = get_fem_config_instance(fem_ref)
     return config
+
+
+def element_has_mix_inputs(element: QuaConfigElementDec) -> bool:
+    _, inputs_inst = betterproto.which_one_of(element, "element_inputs_one_of")
+    return isinstance(inputs_inst, QuaConfigMixInputs)
 
 
 def get_simulation_sampling_rate(pb_config: QuaConfig) -> float:

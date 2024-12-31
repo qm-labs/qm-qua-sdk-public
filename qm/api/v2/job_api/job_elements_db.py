@@ -2,9 +2,9 @@ from typing import Dict, cast
 
 import betterproto
 
-from qm.grpc.qua_config import QuaConfigElementDec
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.job_api.element_api import ElementApi, JobElement
+from qm.grpc.qua_config import QuaConfigElementDec, QuaConfigMicrowaveOutputPortReference
 from qm.api.v2.job_api.element_input_api import InputConfigType, create_element_input_class
 from qm.api.v2.job_api.element_port_api import MwOutputApi, AnalogOutputApi, DigitalInputApi
 
@@ -48,7 +48,10 @@ class JobElementsDB(Dict[str, JobElement]):
         }
         mw_output_api = (
             MwOutputApi(connection_details, job_id, element_name)
-            if (betterproto.serialized_on_wire(element_config.microwave_output))
+            if isinstance(
+                betterproto.which_one_of(element_config, "element_outputs_one_of"),
+                QuaConfigMicrowaveOutputPortReference,
+            )
             else None
         )
         return JobElement(

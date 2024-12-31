@@ -381,26 +381,30 @@ def _convert_elements(elements: Dict[str, QuaConfigElementDec]) -> Dict[str, Ele
         element_config_data: ElementConfigType = {
             "digitalInputs": _convert_inputs(data.digital_inputs),
             "digitalOutputs": _convert_digital_output(data.digital_outputs),
-            "outputs": _convert_element_output(data.outputs, data.multiple_outputs),
+            "outputs": _convert_element_output(
+                data.outputs, betterproto.which_one_of(data, "element_outputs_one_of")[1]
+            ),
             "operations": data.operations,
             "hold_offset": _convert_hold_offset(data.hold_offset),
             "sticky": _convert_sticky(data.sticky),
             "thread": _convert_element_thread(data.thread),
         }
-        if betterproto.serialized_on_wire(data.single_input):
-            element_config_data["singleInput"] = _convert_single_inputs(data.single_input)
-        if betterproto.serialized_on_wire(data.mix_inputs):
-            element_config_data["mixInputs"] = _convert_mix_inputs(data.mix_inputs)
-        if betterproto.serialized_on_wire(data.single_input_collection):
-            element_config_data["singleInputCollection"] = _convert_single_input_collection(
-                data.single_input_collection
-            )
-        if betterproto.serialized_on_wire(data.multiple_inputs):
-            element_config_data["multipleInputs"] = _convert_multiple_inputs(data.multiple_inputs)
-        if betterproto.serialized_on_wire(data.microwave_output):
-            element_config_data["MWOutput"] = _convert_element_mw_output(data.microwave_output)
-        if betterproto.serialized_on_wire(data.microwave_input):
-            element_config_data["MWInput"] = _convert_element_mw_input(data.microwave_input)
+        input_value = betterproto.which_one_of(data, "element_inputs_one_of")[1]
+        if isinstance(input_value, QuaConfigSingleInput):
+            element_config_data["singleInput"] = _convert_single_inputs(input_value)
+        elif isinstance(input_value, QuaConfigMixInputs):
+            element_config_data["mixInputs"] = _convert_mix_inputs(input_value)
+        elif isinstance(input_value, QuaConfigSingleInputCollection):
+            element_config_data["singleInputCollection"] = _convert_single_input_collection(input_value)
+        elif isinstance(input_value, QuaConfigMultipleInputs):
+            element_config_data["multipleInputs"] = _convert_multiple_inputs(input_value)
+        elif isinstance(input_value, QuaConfigMicrowaveInputPortReference):
+            element_config_data["MWInput"] = _convert_element_mw_input(input_value)
+
+        output_value = betterproto.which_one_of(data, "element_outputs_one_of")[1]
+        if isinstance(output_value, QuaConfigMicrowaveOutputPortReference):
+            element_config_data["MWOutput"] = _convert_element_mw_output(output_value)
+
         if data.smearing is not None:
             element_config_data["smearing"] = data.smearing
         if data.time_of_flight is not None:
@@ -408,7 +412,8 @@ def _convert_elements(elements: Dict[str, QuaConfigElementDec]) -> Dict[str, Ele
         if data.measurement_qe:
             element_config_data["measurement_qe"] = data.measurement_qe
 
-        if data.named_oscillator:
+        oscillator = betterproto.which_one_of(data, "oscillator_one_of")[0]
+        if oscillator == "named_oscillator":
             element_config_data["oscillator"] = data.named_oscillator
         else:
             sign = (-1) ** data.intermediate_frequency_negative
@@ -560,9 +565,10 @@ def _convert_controller_digital_inputs(
 
 
 def _convert_element_output(
-    outputs: Dict[str, QuaConfigAdcPortReference], multiple_outputs: QuaConfigMultipleOutputs
+    outputs: Dict[str, QuaConfigAdcPortReference],
+    multiple_outputs: Union[QuaConfigMultipleOutputs, QuaConfigMicrowaveOutputPortReference],
 ) -> Dict[str, PortReferenceType]:
-    if multiple_outputs:
+    if isinstance(multiple_outputs, QuaConfigMultipleOutputs):
         return {name: _port_reference(data) for name, data in multiple_outputs.port_references.items()}
     return {name: _port_reference(data) for name, data in outputs.items()}
 

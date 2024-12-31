@@ -1,6 +1,6 @@
 import datetime
 import warnings
-from typing import List, Optional, Protocol
+from typing import List, Optional
 
 import betterproto
 
@@ -9,14 +9,15 @@ from qm.persistence import BaseStore
 from qm.exceptions import QmQuaException
 from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
-from qm.grpc.frontend import JobExecutionStatus
+from qm.grpc.frontend import (
+    JobExecutionStatus,
+    JobExecutionStatusPending,
+    JobExecutionStatusRunning,
+    JobExecutionStatusCompleted,
+    JobExecutionStatusLoading,
+)
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.job_manager_api import create_job_manager_from_api
-
-
-class JobStateProtocol(Protocol):
-    added_by: Optional[str]
-    time_added: Optional[datetime.datetime]
 
 
 class QmBaseJob:
@@ -42,10 +43,17 @@ class QmBaseJob:
 
     def _initialize_from_job_status(self) -> None:
         status: JobExecutionStatus = self._job_manager.get_job_execution_status(self._id, self._machine_id)
-        name, one_of = betterproto.which_one_of(status, "status")
+        _, job_state = betterproto.which_one_of(status, "status")
 
-        if name in ("pending", "running", "completed", "loading") and one_of is not None:
-            job_state: JobStateProtocol = one_of
+        if isinstance(
+            job_state,
+            (
+                JobExecutionStatusPending,
+                JobExecutionStatusRunning,
+                JobExecutionStatusCompleted,
+                JobExecutionStatusLoading,
+            ),
+        ):
             self._added_user_id = job_state.added_by
             self._time_added = job_state.time_added
 

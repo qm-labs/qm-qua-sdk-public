@@ -1,10 +1,20 @@
 import logging
 
+import betterproto
+
 from qm.jobs.qm_job import QmJob
 from qm.jobs.base_job import QmBaseJob
 from qm.utils import run_until_with_timeout
-from qm.grpc.frontend import JobExecutionStatus
 from qm.exceptions import JobCancelledError, ErrorJobStateError, UnknownJobStateError
+from qm.grpc.frontend import (
+    JobExecutionStatus,
+    JobExecutionStatusError,
+    JobExecutionStatusLoading,
+    JobExecutionStatusPending,
+    JobExecutionStatusRunning,
+    JobExecutionStatusCanceled,
+    JobExecutionStatusCompleted,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +36,8 @@ class QmPendingJob(QmBaseJob):
             ```
         """
         status = self._job_manager.get_job_execution_status(self._id, self._machine_id)
-        if status.pending:
+        _, status_inst = betterproto.which_one_of(status, "status")
+        if isinstance(status_inst, JobExecutionStatusPending):
             return status.pending.position_in_queue
 
         logger.warning(f"Job {self.id} is not pending, therefor it does not have a position in queue")
@@ -48,19 +59,20 @@ class QmPendingJob(QmBaseJob):
 
         def on_iteration() -> bool:
             status: JobExecutionStatus = self._job_manager.get_job_execution_status(self._id, self._machine_id)
-            if status.running or status.completed:
+            value = betterproto.which_one_of(status, "status")[1]
+            if isinstance(value, (JobExecutionStatusRunning, JobExecutionStatusCompleted)):
                 return True
 
-            if status.pending or status.loading:
+            if isinstance(value, (JobExecutionStatusPending, JobExecutionStatusLoading)):
                 return False
 
-            if status.error:
+            if isinstance(value, JobExecutionStatusError):
                 raise ErrorJobStateError(
                     f"job {self._id} encountered an error",
-                    error_list=[value.string_value for value in status.error.error_messages.values],
+                    error_list=[value.string_value for value in value.error_messages.values],
                 )
 
-            elif status.canceled:
+            elif isinstance(value, JobExecutionStatusCanceled):
                 raise JobCancelledError(f"job {self._id} was cancelled")
 
             else:

@@ -564,7 +564,7 @@ def reset_phase(element: str):
 
 def reset_if_phase(element: str) -> None:
     r"""
-    Resets the phase of the oscillator associated with `element`,
+    Resets the intermediate frequency phase of the oscillator associated with `element`,
     setting the phase of the next pulse to absolute zero.
     This sets the phase of the currently playing intermediate frequency
     to the value it had at the beginning of the program (t=0).
@@ -583,7 +583,8 @@ def reset_if_phase(element: str) -> None:
 
 def reset_global_phase() -> None:
     """
-    Resets global phase of all the elements in the program (IF, and DUC if exists).
+    Resets the global phase of all the elements in the program.
+    This will reset both the intermediate frequency phase and the upconverters/downconverters in use.
     """
     body = _get_scope_as_blocks_body()
     body.reset_global_phase()
@@ -1033,12 +1034,17 @@ def elif_(expression: QuaExpressionType) -> "_BodyScope":
     """
     body = _get_scope_as_blocks_body()
     last_statement = body.get_last_statement()
-    if last_statement is None or betterproto.serialized_on_wire(last_statement.if_) is False:
+    if last_statement is None:
+        raise QmQuaException(
+            "'elif' statement must directly follow 'if' statement - Please make sure it is aligned with the corresponding if statement."
+        )
+    _, statement_if_inst = betterproto.which_one_of(last_statement, "statement_oneof")
+    if not isinstance(statement_if_inst, _qua.QuaProgramIfStatement):
         raise QmQuaException(
             "'elif' statement must directly follow 'if' statement - Please make sure it is aligned with the corresponding if statement."
         )
 
-    if betterproto.serialized_on_wire(last_statement.if_.else_):
+    if betterproto.serialized_on_wire(statement_if_inst.else_):
         raise QmQuaException("'elif' must come before 'else' statement")
 
     elseif = _qua.QuaProgramElseIf(
@@ -1071,8 +1077,13 @@ def else_() -> "_BodyScope":
     """
     body = _get_scope_as_blocks_body()
     last_statement = body.get_last_statement()
-
-    if last_statement is None or betterproto.serialized_on_wire(last_statement.if_) is False:
+    if last_statement is None:
+        raise QmQuaException(
+            "'else' statement must directly follow 'if' statement - "
+            "Please make sure it is aligned with the corresponding if statement."
+        )
+    _, statement_if = betterproto.which_one_of(last_statement, "statement_oneof")
+    if not isinstance(statement_if, _qua.QuaProgramIfStatement):
         raise QmQuaException(
             "'else' statement must directly follow 'if' statement - "
             "Please make sure it is aligned with the corresponding if statement."

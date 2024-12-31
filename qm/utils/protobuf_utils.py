@@ -27,7 +27,10 @@ def list_fields(node: Node) -> Dict[str, Node]:
     fields = dataclasses.fields(cast(DataclassProtocol, node))
     output = {}
     for field in fields:
-        field_value = getattr(node, field.name)
+        try:
+            field_value = getattr(node, field.name)
+        except AttributeError:  # this deals with non-serialized fields in betterproto
+            continue
         if isinstance(field_value, Iterable) or (
             isinstance(field_value, betterproto.Message) and betterproto.serialized_on_wire(field_value)
         ):

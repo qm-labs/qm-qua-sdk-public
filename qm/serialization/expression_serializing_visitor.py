@@ -120,7 +120,8 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
             raise QmQuaException(f"Unknown library function argument {name}")
 
     def visit_qm_grpc_qua_QuaProgramVarRefExpression(self, node: QuaProgramVarRefExpression) -> None:
-        self._out = node.name if node.name else f"IO{node.io_number}"
+        var_ref = betterproto.which_one_of(node, "var_oneof")[1]
+        self._out = node.name if isinstance(var_ref, str) else f"IO{var_ref}"
 
     def visit_qm_grpc_qua_QuaProgramArrayVarRefExpression(self, node: QuaProgramArrayVarRefExpression) -> None:
         self._out = node.name

@@ -59,10 +59,9 @@ class StatementsCollection:
 
     @staticmethod
     def _check_serialised_on_wire(message: QuaProgramAnyStatement, name: str) -> None:
-        if (
-            not betterproto.serialized_on_wire(getattr(message, name))
-            or not betterproto.which_one_of(message, "statement_oneof")[0] == name
-        ):
+        try:
+            getattr(message, name)
+        except AttributeError:
             raise QmQuaException(f"Failed to serialize of wire {name}")
 
     def _create_play_statement(

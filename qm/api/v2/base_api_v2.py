@@ -20,9 +20,7 @@ class BaseApiV2(BaseApi[StubType], metaclass=ABCMeta):
     @connection_error_handle_decorator
     def _run(coroutine: Coroutine[Any, Any, ResponseProtocol[SuccessType, ErrorType]]) -> SuccessType:
         response = run_async(coroutine)
-        if betterproto.serialized_on_wire(response.error):
-            raise QopResponseError(error=response.error)
-        elif betterproto.serialized_on_wire(response.success):
+        try:  # This one replaces the serialized-on-wire method, while we don't know the group name of the object
             return response.success
-        else:
-            raise ValueError(f"Unknown response type: {response}")
+        except AttributeError:
+            raise QopResponseError(error=response.error)

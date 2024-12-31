@@ -118,6 +118,7 @@ from qm.grpc.qua_config import (
     QuaConfigMultipleInputs,
     QuaConfigCorrectionEntry,
     QuaConfigMicrowaveFemDec,
+    QuaConfigMultipleOutputs,
     QuaConfigAdcPortReference,
     QuaConfigDacPortReference,
     QuaConfigPulseDecOperation,
@@ -211,7 +212,9 @@ def validate_config_capabilities(pb_config: QuaConfig, server_capabilities: Serv
 
     if not server_capabilities.supports_multiple_inputs_for_element:
         for el_name, el in pb_config.v1_beta.elements.items():
-            if el is not None and el.multiple_inputs:
+            if el is not None and isinstance(
+                betterproto.which_one_of(el, "element_inputs_one_of")[1], QuaConfigMultipleInputs
+            ):
                 raise ConfigValidationException(
                     f"Server does not support multiple inputs for elements used in '{el_name}'"
                 )
@@ -225,7 +228,7 @@ def validate_config_capabilities(pb_config: QuaConfig, server_capabilities: Serv
 
     if not server_capabilities.supports_shared_oscillators:
         for el_name, el in pb_config.v1_beta.elements.items():
-            if el is not None and el.named_oscillator:
+            if el is not None and betterproto.which_one_of(el, "oscillator_one_of")[0] == "named_oscillator":
                 raise ConfigValidationException(
                     f"Server does not support shared oscillators for elements used in " f"'{el_name}'"
                 )
@@ -282,7 +285,7 @@ def validate_config_capabilities(pb_config: QuaConfig, server_capabilities: Serv
                     )
                 )
             if (
-                betterproto.serialized_on_wire(el.mix_inputs)
+                isinstance(betterproto.which_one_of(el, "element_inputs_one_of"), QuaConfigMixInputs)
                 and el.mix_inputs.lo_frequency_double
                 and el.mix_inputs.lo_frequency != el.mix_inputs.lo_frequency_double
             ):
@@ -410,11 +413,11 @@ def validate_string_is_one_of(valid_values: Collection[str]) -> Callable[[str], 
 class AnalogOutputFilterDefSchema(Schema):
     feedforward = fields.List(
         fields.Float(),
-        metadata={"description": "Feedforward taps for the analog output filter, range: [-1,1]. List of double"},
+        metadata={"description": "Feedforward taps for the analog output filter. List of double"},
     )
     feedback = fields.List(
         fields.Float(),
-        metadata={"description": "Feedback taps for the analog output filter, range: (-1,1). List of double"},
+        metadata={"description": "Feedback taps for the analog output filter. List of double"},
     )
 
 
@@ -422,7 +425,7 @@ class AnalogOutputPortDefSchema(Schema):
     grpc_class = QuaConfigAnalogOutputPortDec
     offset = fields.Number(
         metadata={
-            "description": "DC offset to the output, range: (-0.5, 0.5). "
+            "description": "DC offset to the output."
             "Will be applied while quantum machine is open."
         },
         required=True,
@@ -478,7 +481,7 @@ class MwUpconverterSchema(Schema):
 
 class AnalogOutputPortDefSchemaMwFem(Schema):
     sampling_rate = fields.Number(
-        metadata={"description": "Sampling rate of the port, can be 1e9 (default) or 2e9 Hz"},
+        metadata={"description": "Sampling rate of the port."},
     )
     full_scale_power_dbm = fields.Int(
         strict=True,
@@ -515,11 +518,11 @@ class AnalogOutputPortDefSchemaMwFem(Schema):
 
 class AnalogInputPortDefSchemaMwFem(Schema):
     sampling_rate = fields.Number(
-        metadata={"description": "Sampling rate of the port, can be 1e9 (default) or 2e9 Hz"},
+        metadata={"description": "Sampling rate of the port."},
     )
     gain_db = fields.Int(
         strict=True,
-        metadata={"description": "Gain of the pre-ADC amplifier, in dB. Accepts integers, the range is decided by the device."},
+        metadata={"description": "Gain of the pre-ADC amplifier, in dB. Accepts integers."},
     )
     shareable = fields.Bool(
         dump_default=False,
@@ -546,7 +549,7 @@ class AnalogOutputPortDefSchemaOPX1000(AnalogOutputPortDefSchema):
     grpc_class = QuaConfigOctoDacAnalogOutputPortDec  # type: ignore[assignment]
 
     sampling_rate = fields.Number(
-        metadata={"description": "Sampling rate of the port, can be 1e9 (default) or 2e9 Hz"},
+        metadata={"description": "Sampling rate of the port."},
     )
     upsampling_mode = fields.String(
         metadata={"description": "Mode of sampling rate, can be mw (default) or pulse"},
@@ -574,13 +577,13 @@ class AnalogOutputPortDefSchemaOPX1000(AnalogOutputPortDefSchema):
 
 class AnalogInputPortDefSchema(Schema):
     offset = fields.Number(
-        metadata={"description": "DC offset to the input, range: (-0.5, 0.5). Will be applied only when program runs."},
+        metadata={"description": "DC offset to the input."},
         required=True,
     )
 
     gain_db = fields.Int(
         strict=True,
-        metadata={"description": "Gain of the pre-ADC amplifier, in dB. Accepts integers, the range is decided by the device."},
+        metadata={"description": "Gain of the pre-ADC amplifier, in dB. Accepts integers."},
     )
 
     shareable = fields.Bool(
@@ -591,7 +594,7 @@ class AnalogInputPortDefSchema(Schema):
     sampling_rate = fields.Number(
         strict=True,
         dump_default=1e9,
-        metadata={"description": "Sampling rate for this port in samples/second: 1e9 or 2e9"},
+        metadata={"description": "Sampling rate for this port."},
     )
 
     class Meta:
@@ -622,8 +625,7 @@ class DigitalOutputPortDefSchema(Schema):
     level = fields.String(
         validate=validate_string_is_one_of({"ttl", "lvttl"}),
         metadata={
-            "description": "The voltage level of the digital output, can be TTL or LVTTL (default) - "
-            "for now this option is available only for MW-FEM"
+            "description": "The voltage level of the digital output, can be TTL or LVTTL (default)"
         },
     )
 
@@ -929,8 +931,8 @@ class OctoDacControllerSchema(FemSchema):
     )
 
     class Meta:
-        title = "controller"
-        description = "The specification of a single controller and its properties."
+        title = "LF-FEM"
+        description = "The specification of a single LF-FEM and its properties."
 
     @post_load(pass_many=False)
     def build(self, data: _SemiBuiltOctoDacConfig, **kwargs: Any) -> QuaConfigOctoDacFemDec:
@@ -967,8 +969,8 @@ class MwFemSchema(FemSchema):
     )
 
     class Meta:
-        title = "controller"
-        description = "The specification of a single controller and its properties."
+        title = "MW-FEM"
+        description = "The specification of a single MW-FEM and its properties."
 
     @post_load(pass_many=False)
     def build(self, data: _SemiBuiltMwFemConfig, **kwargs: Any) -> QuaConfigMicrowaveFemDec:
@@ -1074,7 +1076,7 @@ class DigitalInputSchema(Schema):
     delay = fields.Int(
         metadata={
             "description": "The delay to apply to the digital pulses. In ns. "
-            "An intrinsic negative delay of 136 ns exists by default"
+            "An intrinsic negative delay exists by default"
         }
     )
     buffer = fields.Int(
@@ -1149,7 +1151,7 @@ class WaveFormSchema(Schema):
 class ConstantWaveFormSchema(WaveFormSchema):
     type = fields.String(metadata={"description": '"constant"'}, validate=validate.Equal("constant"))
     sample = fields.Float(
-        metadata={"description": "Waveform amplitude, range: (-0.5, 0.5)"},
+        metadata={"description": "Waveform amplitude"},
         required=True,
     )
 
@@ -1167,7 +1169,7 @@ class ArbitraryWaveFormSchema(WaveFormSchema):
     type = fields.String(metadata={"description": '"arbitrary"'}, validate=validate.Equal("arbitrary"))
     samples = fields.List(
         fields.Float(),
-        metadata={"description": "list of values of an arbitrary waveforms, range: (-0.5, 0.5)"},
+        metadata={"description": "list of values of an arbitrary waveforms."},
         required=True,
     )
     max_allowed_error = fields.Float(metadata={"description": '"Maximum allowed error for automatic compression"'})
@@ -1186,7 +1188,7 @@ class ArbitraryWaveFormSchema(WaveFormSchema):
     )
 
     class Meta:
-        title = "arbitrary waveform"
+        title = "Arbitrary waveform"
         description = "The modulating envelope of an arbitrary waveform"
 
     @post_load(pass_many=False)
@@ -1259,7 +1261,7 @@ class MixerSchema(Schema):
     lo_frequency = fields.Float(metadata={"description": "The LO frequency associated with the correction matrix"})
     correction = _create_tuple_field(
         [fields.Number(), fields.Number(), fields.Number(), fields.Number()],
-        "A 2x2 matrix entered as a 4 elements list specifying the correction matrix. Each element is a double in the range of (-2,2)",
+        "A 2x2 matrix entered as a 4 elements list specifying the correction matrix.",
     )
 
     class Meta:
@@ -1307,7 +1309,7 @@ class PulseSchema(Schema):
         validate=validate.OneOf(["control", "measurement"]),
     )
     length = fields.Int(
-        metadata={"description": "The length of pulse [ns]. Possible values: 16 to 2^31-1 in steps of 4"},
+        metadata={"description": "The length of pulse [ns]."},
         required=True,
     )
     waveforms = fields.Dict(
@@ -1316,7 +1318,7 @@ class PulseSchema(Schema):
         metadata={
             "description": "The specification of the analog waveform to be played. "
             "If the associated element has a single input, then the key is 'single'. "
-            "If the associated element has 'mixInputs', then the keys are 'I' and 'Q'."
+            "If the associated element has 'mixInputs', 'MWInput', or 'RFInput', then the keys are 'I' and 'Q'."
         },
     )
     digital_marker = fields.String(
@@ -1327,7 +1329,7 @@ class PulseSchema(Schema):
         fields.String(
             metadata={
                 "description": "The name of the integration weights as it appears under the"
-                ' "integration_weights" entry in the configuration dict.'
+                ' "integration_weights" entry in the configuration.'
             }
         ),
         metadata={"description": "The name of the integration weight to be used in the program."},
@@ -1423,9 +1425,9 @@ class HoldOffsetSchema(Schema):
 
 
 class StickySchema(Schema):
-    analog = fields.Boolean(metadata={"description": """the analog flag must be a True of False"""}, required=True)
-    digital = fields.Boolean(metadata={"description": """the digital flag must be a True of False"""})
-    duration = fields.Int(metadata={"description": """The ramp to zero duration, in ns"""})
+    analog = fields.Boolean(metadata={"description": """Whether the analog part of the pulse is sticky."""}, required=True)
+    digital = fields.Boolean(metadata={"description": """Whether the digital part of the pulse is sticky."""})
+    duration = fields.Int(metadata={"description": """The analog's ramp to zero duration, in ns"""})
 
     class Meta:
         title = "Sticky"
@@ -1616,8 +1618,7 @@ class ElementSchema(Schema):
     time_of_flight = fields.Int(
         metadata={
             "description": """The delay time, in ns, from the start of pulse until it reaches 
-            the controller. Needs to be calibrated by looking at the raw ADC data. 
-            Needs to be a multiple of 4 and the minimal value is 24. """
+            back into the controller. Needs to be calibrated by looking at the raw ADC data."""
         }
     )
     smearing = fields.Int(
@@ -1694,9 +1695,9 @@ class ElementSchema(Schema):
         if "operations" in data:
             for op_name, operation in data["operations"].items():
                 el.operations[op_name] = operation
-        if "outputs" in data:
+        if data.get("outputs"):
             el.outputs = _build_port(data["outputs"])
-            el.multiple_outputs.port_references = el.outputs
+            el.multiple_outputs = QuaConfigMultipleOutputs(port_references=el.outputs)
         if "digitalInputs" in data:
             for digital_input_name, digital_input in data["digitalInputs"].items():
                 el.digital_inputs[digital_input_name] = digital_input

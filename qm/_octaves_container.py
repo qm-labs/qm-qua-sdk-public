@@ -1,15 +1,14 @@
 from typing import Dict, List, Tuple, Optional
 
-import betterproto
 from octave_sdk.octave import RFInput
 from octave_sdk import Octave, OctaveOutput, OctaveLOSource
 
 from qm.api.frontend_api import FrontendApi
 from qm.elements.element_inputs import MixInputs
-from qm.utils.config_utils import get_fem_config
 from qm.octave import CalibrationDB, QmOctaveConfig
 from qm.api.models.capabilities import ServerCapabilities
 from qm.octave.calibration_db import convert_to_correction
+from qm.utils.config_utils import get_fem_config, element_has_mix_inputs
 from qm.octave.octave_manager import logger, get_device, get_loopbacks_from_pb
 from qm.elements.up_converted_input import UpconvertedInput, UpconvertedInputNewApi
 from qm.exceptions import OctaveCableSwapError, OctaveConnectionError, ElementUpconverterDeclarationError
@@ -49,10 +48,11 @@ class OctavesContainer:
         if element_config.rf_inputs:
             rf_input = list(element_config.rf_inputs.values())[0]
             return rf_input.device_name, rf_input.port
-        if not betterproto.serialized_on_wire(element_config.mix_inputs):
+        if not element_has_mix_inputs(element_config):
             return None
 
-        element_i_port, element_q_port = element_config.mix_inputs.i, element_config.mix_inputs.q
+        mix_inputs = element_config.mix_inputs
+        element_i_port, element_q_port = mix_inputs.i, mix_inputs.q
 
         key_i = (element_i_port.controller, element_i_port.fem, element_i_port.number)
         key_q = (element_q_port.controller, element_q_port.fem, element_q_port.number)
@@ -174,10 +174,10 @@ def load_config_from_calibration_db(
     logger.debug("Loading mixer calibration data onto the config")
 
     for element_name, element in pb_config.v1_beta.elements.items():
-        if not betterproto.serialized_on_wire(element.mix_inputs):
+        if not element_has_mix_inputs(element):
             continue
-        mix_inputs = element.mix_inputs
 
+        mix_inputs = element.mix_inputs
         lo_freq = mix_inputs.lo_frequency or mix_inputs.lo_frequency_double
         if not lo_freq:
             logger.debug(f"Element '{element_name}' has no LO frequency specified")

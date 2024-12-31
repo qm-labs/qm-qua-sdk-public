@@ -568,7 +568,7 @@ class OctaveManager:
 
 
 def get_som_temp(monitor_data: MonitorResult) -> float:
-    return cast(float, monitor_data.modules[OctaveModule.OCTAVE_MODULE_SOM][0].temp)
+    return cast(float, monitor_data.modules[OctaveModule.SOM][0].temp)
 
 
 def _set_clock_in(octave: Octave, clock_in: ClockInfo) -> None:
@@ -736,18 +736,32 @@ def prep_config_for_calibration(
 
 
 def _find_dummy_controller_outputs(
-    adc: QuaConfigAdcPortReference, pb_config: QuaConfig
+    adc: QuaConfigAdcPortReference, pb_config: QuaConfig, all_octave_connections: OctaveConnectionsType
 ) -> Tuple[QuaConfigDacPortReference, QuaConfigDacPortReference]:
     controller_config = get_fem_config(pb_config, adc)
-    if len(controller_config.analog_outputs) < 2:
+    port_candidates = list(controller_config.analog_outputs)
+    if len(port_candidates) < 2:
         raise NoOutputPortDeclared(
             f"Could not find a controller outputs for input port {adc}. "
             f"For now, at least two output ports of the measuring controller must be declared"
         )
-    ports = list(controller_config.analog_outputs)[:2]
+    controller, fem = adc.controller, adc.fem
+    # This loop comes so the chosen ports will not be arbitrary and raise "cable swap error".
+    # So we take ports that are connected correctly to some octave
+    for octave_connections in all_octave_connections.values():
+        for channel_connections in octave_connections.values():
+            cond_i = channel_connections.dacs.I.controller == controller and channel_connections.dacs.I.fem == fem
+            cond_q = channel_connections.dacs.Q.controller == controller and channel_connections.dacs.Q.fem == fem
+            ports_declared = {channel_connections.dacs.I.number, channel_connections.dacs.Q.number} <= set(
+                port_candidates
+            )
+            if cond_i and cond_q and ports_declared:
+                return channel_connections.dacs.I, channel_connections.dacs.Q
+
+    # If we don't find such, we take arbitrary ports.
     return (
-        QuaConfigDacPortReference(controller=adc.controller, fem=adc.fem, number=ports[0]),
-        QuaConfigDacPortReference(controller=adc.controller, fem=adc.fem, number=ports[1]),
+        QuaConfigDacPortReference(controller=controller, fem=fem, number=port_candidates[0]),
+        QuaConfigDacPortReference(controller=controller, fem=fem, number=port_candidates[1]),
     )
 
 
@@ -783,7 +797,7 @@ def _add_calibration_entries_to_config(
 
             def _create_mix_inputs(set_dummy_ports: bool) -> QuaConfigMixInputs:
                 if set_dummy_ports:
-                    i, q = _find_dummy_controller_outputs(channel_connections.adcs.I, pb_config)
+                    i, q = _find_dummy_controller_outputs(channel_connections.adcs.I, pb_config, all_octave_connections)
                 else:
                     i, q = channel_connections.dacs.I, channel_connections.dacs.Q
 

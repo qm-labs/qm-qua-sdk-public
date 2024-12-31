@@ -415,16 +415,16 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
     ) -> _StateRestoreParams:
         current_state = self._low_level_client.aquire_modules(
             modules=[
-                ModuleReference(type=OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=1),
-                ModuleReference(type=OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=2),
-                ModuleReference(type=OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=3),
-                ModuleReference(type=OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=4),
-                ModuleReference(type=OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=5),
-                ModuleReference(type=OctaveModule.OCTAVE_MODULE_RF_DOWNCONVERTER, index=CALIBRATION_INPUT),
-                ModuleReference(type=OctaveModule.OCTAVE_MODULE_IF_DOWNCONVERTER, index=CALIBRATION_INPUT),
-                ModuleReference(type=OctaveModule.OCTAVE_MODULE_SYNTHESIZER, index=4),
-                ModuleReference(type=OctaveModule.OCTAVE_MODULE_RF_DOWNCONVERTER, index=OTHER_INPUT),
-                ModuleReference(type=OctaveModule.OCTAVE_MODULE_IF_DOWNCONVERTER, index=OTHER_INPUT),
+                ModuleReference(type=OctaveModule.RF_UPCONVERTER, index=1),
+                ModuleReference(type=OctaveModule.RF_UPCONVERTER, index=2),
+                ModuleReference(type=OctaveModule.RF_UPCONVERTER, index=3),
+                ModuleReference(type=OctaveModule.RF_UPCONVERTER, index=4),
+                ModuleReference(type=OctaveModule.RF_UPCONVERTER, index=5),
+                ModuleReference(type=OctaveModule.RF_DOWNCONVERTER, index=CALIBRATION_INPUT),
+                ModuleReference(type=OctaveModule.IF_DOWNCONVERTER, index=CALIBRATION_INPUT),
+                ModuleReference(type=OctaveModule.SYNTHESIZER, index=4),
+                ModuleReference(type=OctaveModule.RF_DOWNCONVERTER, index=OTHER_INPUT),
+                ModuleReference(type=OctaveModule.IF_DOWNCONVERTER, index=OTHER_INPUT),
             ]
         ).state.updates
 

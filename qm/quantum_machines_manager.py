@@ -57,6 +57,10 @@ class DevicesVersion:
     qm_qua: str
     octaves: Dict[str, str]
 
+    @property
+    def QOP(self) -> Optional[str]:
+        return SERVER_TO_QOP_VERSION_MAP.get(self.gateway)
+
 
 SERVER_TO_QOP_VERSION_MAP = {
     "2.40-144e7bb": "2.0.0",
@@ -68,9 +72,10 @@ SERVER_TO_QOP_VERSION_MAP = {
     "2.60-b62e6b6": "2.2.1",
     "2.60-0b17cac": "2.2.2",
     "2.70-7abf0e0": "2.4.0",
-    "2.70-ed75211": "2.4.1",
+    "2.70-ed75211": "2.4.2",
     "a6f8bc5": "3.1.0",
     "fcdfb69": "3.1.1",
+    "3.0-beta-78b5e00": "3.2.0",
 }
 
 
@@ -163,14 +168,13 @@ class QuantumMachinesManager:
 
         raise_on_error = self._user_config.strict_healthcheck is not False
         self.perform_healthcheck(raise_on_error)
-        if octave_calibration_db_path is not None:
-            if self._octave_config:
-                if self._octave_config.calibration_db is not None:
-                    raise QmmException(
-                        "Duplicate calibration_db path detected, please set the calibration db only through the QMM."
-                    )
-                else:
-                    self._octave_config.set_calibration_db_without_warning(octave_calibration_db_path)
+        if octave_calibration_db_path is not None and self._octave_config:
+            if self._octave_config.calibration_db is not None:
+                raise QmmException(
+                    "Duplicate calibration_db path detected, please set the calibration db only through the QMM."
+                )
+            else:
+                self._octave_config.set_calibration_db_without_warning(octave_calibration_db_path)
 
     def _initialize_connection(
         self,
@@ -247,26 +251,28 @@ class QuantumMachinesManager:
     def version(self) -> Union[Version, DevicesVersion]:
         """
         Returns:
-            A dictionary with the qm-qua and QOP versions
+            An object with the qm-qua and QOP versions
         """
-        if self._api is None:
-            raise NotImplementedError(
-                "QuantumMachineManager.version() has a different return type in 1.2.0. Use `QuantumMachineManager.version_dict()` instead"
-            )
-        else:
-            from qm.version import __version__
+        from qm.version import __version__
 
+        octaves = {}
+        if self._octave_config is not None:
+            for octave_name in self._octave_config.get_devices():
+                octaves[octave_name] = self._octave_manager.get_client(octave_name).get_version()
+
+        if self._api is None:
+            gateway = self._server_details.server_version
+            controllers = self._get_controllers_as_dict()
+        else:
             response = self._api.get_version()
-            octaves = {}
-            if self._octave_config is not None:
-                for octave_name in self._octave_config.get_devices():
-                    octaves[octave_name] = self._octave_manager.get_client(octave_name).get_version()
-            return DevicesVersion(
-                gateway=response.gateway,
-                controllers=response.controllers,
-                qm_qua=__version__,
-                octaves=octaves,
-            )
+            gateway = response.gateway
+            controllers = response.controllers
+        return DevicesVersion(
+            gateway=gateway,
+            controllers={k: None for k in controllers},
+            qm_qua=__version__,
+            octaves=octaves,
+        )
 
     def reset_data_processing(self) -> None:
         """Stops current data processing for ALL running jobs"""
@@ -310,7 +316,7 @@ class QuantumMachinesManager:
 
         loaded_config = self._load_config(config, disable_marshmallow_validation=validate_with_protobuf)
 
-        if use_calibration_data and self._octave_config is not None:
+        if use_calibration_data and self._octave_config is not None and self._octave_config.devices:
             if self._octave_config.calibration_db is not None:
                 loaded_config = load_config_from_calibration_db(
                     loaded_config, self._octave_config.calibration_db, self._octave_config, self._caps
@@ -318,7 +324,7 @@ class QuantumMachinesManager:
             else:
                 logger.warning("No calibration_db set in octave config, skipping loading calibration data")
 
-        if add_calibration_elements_to_config and self._octave_config is not None:
+        if add_calibration_elements_to_config and self._octave_config is not None and self._octave_config.devices:
             loaded_config = prep_config_for_calibration(loaded_config, self._octave_config, self._caps)
 
         self._octave_manager.set_octaves_from_qua_config(loaded_config.v1_beta.octaves)

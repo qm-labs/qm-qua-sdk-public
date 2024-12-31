@@ -6,8 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
+## [1.2.1a3] - 2024-11-06
+
+### Fixed
+- Fixed serialization for the `.image()` and `.real()` operations in the stream processor.
+- Fixed a false positive `Cable swap detected` error when opening a QuantumMachine with an octave when the order of the ports in the controller does not match the octave definition.
+
+### Added
+- Python 3.12 is now supported.
+- Serializing a QUA program after it was executed will now also include the `CompilerOptions` it was executed with.
+
 ## [1.2.1a2] - 2024-09-16
 Tested against QOP 3.2
+
+### Changed
+- Changed the package license to BSD-3
+- The configuration of the digital upconverters of the MW-FEM (OPX1000) is now done in ports instead of elements, the elements now reference the relevant upconverter through the MWInput/MWOutput part of the config.
+- `qmm.version()` - Return type has changed, `qmm.version_dict()` will give the same output as `qmm.version()` did in previous versions.
+- Setting `close_other_qm=True` when opening a qm will no longer close **all** qms, it will only close those that are blocking the new qm (Using the same ports). If you wish to close **all** qms, please use `qmm.close_all_qms()` before.
 
 ### Fixed
 - Fixed an octave bug that raised an error when trying to run get_lo_source() from RF input 2
@@ -16,7 +32,7 @@ Tested against QOP 3.2
 - Fixed a bug when opening a QM with an OPX1000, when `close_other_qm` to false, it will no longer close other quantum machines and will raise an error if a QM cannot be opened. 
 
 ### Added
-- Added support of 2GSPS sampling rate in LF-FEM analog inputs (OPX1000 only)
+- Added support of 2 Gs/s sampling rate in LF-FEM analog inputs (OPX1000 only)
 - Added a QUA function for resetting global phase - `reset_global_phase`
 - Octave calibrations can be done now with the octave connected to two different FEMS/controllers.
 - Added an `octave_calibration_db_path` argument to the `QuantumMachinesManager` constructor that can be set when opening a `QuantumMachinesManager`.
@@ -25,10 +41,6 @@ Tested against QOP 3.2
 ### Deprecated
 - The method `reset_phase` is replaced by `reset_if_phase` and will be removed in the future.
 - `octave_config.set_calibration_db` in moved to the `QuantumMachinesManager` class.
-
-### Changed
-- The configuration of the digital upconverters of the MW-FEM (OPX1000) is now done in ports instead of elements, the elements now reference the relevant upconverter through the MWInput/MWOutput part of the config.
-- `qmm.version()` - Return type has changed, `qmm.version_dict()` will give the same output as `qmm.version()` did in previous versions. 
 
 ### Removed
 - The following deprecated files were removed:
@@ -238,7 +250,7 @@ Tested against QOP 1.2, 2.2
 ### Known Issues
 - At the end of the Octave calibration, dc-offsets stay at the last values calibrated.
 - Connecting an octave to two or more FEMs / OPX+es is unsupported and will give an undescriptive error.
-- An Octave connected to a 2 GSPS OPX1000 port will not calibrate and will give a compilation error. As a workaround, set the port to 1 GSPS, calibrate, and then set it back to 2 GSPS.
+- An Octave connected to a 2 Gs/s OPX1000 port will not calibrate and will give a compilation error. As a workaround, set the port to 1 Gs/s, calibrate, and then set it back to 2 Gs/s.
 
 
 ## [1.1.6] - 2023-11-19

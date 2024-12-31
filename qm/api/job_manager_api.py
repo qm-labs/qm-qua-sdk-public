@@ -17,6 +17,9 @@ from qm.api.base_api import BaseApi, connection_error_handle
 from qm.containers.capabilities_container import CapabilitiesContainer
 from qm.api.stubs.deprecated_job_manager_stub import DeprecatedJobManagerServiceStub
 from qm.grpc.job_manager import (
+    IntStreamData,
+    BoolStreamData,
+    FixedStreamData,
     JobManagerServiceStub,
     InsertInputStreamRequest,
     GetElementCorrectionRequest,
@@ -101,11 +104,11 @@ class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
         request = InsertInputStreamRequest(job_id=job_id, stream_name=stream_name)
 
         if all(type(element) == bool for element in data):
-            request.bool_stream_data.data.extend(cast(List[bool], data))
+            request.bool_stream_data = BoolStreamData(data=cast(List[bool], data))
         elif all(type(element) == int for element in data):
-            request.int_stream_data.data.extend(cast(List[int], data))
+            request.int_stream_data = IntStreamData(data=cast(List[int], data))
         elif all(type(element) == float for element in data):
-            request.fixed_stream_data.data.extend(cast(List[float], data))
+            request.fixed_stream_data = FixedStreamData(data=cast(List[float], data))
         else:
             raise QmValueError(
                 f"Invalid type in data, type is '{set(type(el) for el in data)}', "

@@ -2,6 +2,8 @@ import json
 import logging
 from typing import Dict, List, Tuple, Union, Mapping, Optional, Sequence, cast
 
+import betterproto
+
 from qm.program import Program
 from qm.jobs.qm_job import QmJob
 from qm.octave import QmOctaveConfig
@@ -13,7 +15,13 @@ from qm.jobs.pending_job import QmPendingJob
 from qm.jobs.job_queue_old_api import QmQueue
 from qm.jobs.simulated_job import SimulatedJob
 from qm.api.simulation_api import SimulationApi
-from qm.grpc.frontend import JobExecutionStatus
+from qm.grpc.frontend import (
+    JobExecutionStatus,
+    JobExecutionStatusRunning,
+    JobExecutionStatusCompleted,
+    JobExecutionStatusPending,
+    JobExecutionStatusLoading,
+)
 from qm.jobs.running_qm_job import RunningQmJob
 from qm.utils.config_utils import get_fem_config
 from qm.octave.octave_manager import OctaveManager
@@ -844,7 +852,8 @@ class QuantumMachine:
             The job
         """
         status: JobExecutionStatus = self._job_manager.get_job_execution_status(job_id, self._id)
-        if status.running or status.completed:
+        _, status_inst = betterproto.which_one_of(status, "status")
+        if isinstance(status_inst, (JobExecutionStatusRunning, JobExecutionStatusCompleted)):
             return QmJob(
                 job_id=job_id,
                 machine_id=self._id,
@@ -852,8 +861,7 @@ class QuantumMachine:
                 capabilities=self._capabilities,
                 store=self._store,
             )
-
-        if status.pending or status.loading:
+        if isinstance(status_inst, (JobExecutionStatusPending, JobExecutionStatusLoading)):
             return QmPendingJob(
                 job_id=job_id,
                 machine_id=self._id,

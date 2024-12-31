@@ -1,8 +1,7 @@
 import json
+import logging
 import warnings
 from typing import List, Tuple, Union, Literal, Optional, Sequence, overload
-
-import betterproto
 
 from qm.api.v2.job_api import JobApi
 from qm.octave import QmOctaveConfig
@@ -10,7 +9,6 @@ from qm.persistence import BaseStore
 from qm.program.program import Program
 from qm.utils import deprecation_message
 from qm.exceptions import FunctionInputError
-from qm.utils.config_utils import get_fem_config
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
 from qm.type_hinting.config_types import DictQuaConfig
@@ -21,9 +19,12 @@ from qm.api.v2.job_api.job_api import JobApiWithDeprecations
 from qm.type_hinting import Value, Number, NumpySupportedValue
 from qm.type_hinting.general import PathLike, NumpySupportedFloat
 from qm.jobs.job_queue_with_deprecations import QmQueueWithDeprecations
+from qm.utils.config_utils import get_fem_config, element_has_mix_inputs
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApiWithDeprecations
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
 from qm.grpc.qua_config import QuaConfig, QuaConfigMicrowaveFemDec, QuaConfigAdcPortReference, QuaConfigDacPortReference
+
+logger = logging.getLogger(__name__)
 
 
 class QmApiWithDeprecations(QmApi):
@@ -156,9 +157,11 @@ class QmApiWithDeprecations(QmApi):
             )
             return self.simulate(program, simulate, compiler_options=compiler_options)
 
+        logger.info("Clearing queue")
         self.clear_queue()
         current_running_job = self._get_running_job()
         if current_running_job is not None:
+            logger.info(f"Cancelling currently running job - {current_running_job.id}")
             current_running_job.cancel()
 
         new_job_api = self.add_to_queue(program, compiler_options=compiler_options)
@@ -253,11 +256,13 @@ class QmApiWithDeprecations(QmApi):
         if job is not None:
             pb_config = self._get_pb_config()
             for name, element_config in pb_config.v1_beta.elements.items():
-                if betterproto.serialized_on_wire(element_config.mix_inputs):
-                    if element_config.mix_inputs.mixer == mixer:
-                        if element_config.intermediate_frequency == intermediate_frequency:
-                            if element_config.mix_inputs.lo_frequency == lo_frequency:
-                                job.set_element_correction(name, values)
+                if not element_has_mix_inputs(element_config):
+                    continue
+                mixer_cond = element_config.mix_inputs.mixer == mixer
+                if_cond = element_config.intermediate_frequency == intermediate_frequency
+                lo_cond = element_config.mix_inputs.lo_frequency == lo_frequency
+                if mixer_cond and if_cond and lo_cond:
+                    job.set_element_correction(name, values)
 
     def set_intermediate_frequency(self, element: str, freq: float) -> None:
         """
