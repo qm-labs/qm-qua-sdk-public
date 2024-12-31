@@ -240,14 +240,17 @@ def _convert_controller_types(
 ) -> Dict[str, Union[ControllerConfigType, OPX1000ControllerConfigType]]:
     ret: Dict[str, Union[ControllerConfigType, OPX1000ControllerConfigType]] = {}
     for name, data in controllers.items():
-        if len(data.fems) == 1 and 1 in data.fems and betterproto.serialized_on_wire(data.fems[1].opx):
-            ret[name] = _convert_controller(data.fems[1].opx)
-        else:
-            to_attach: OPX1000ControllerConfigType = {
-                "type": "opx1000",
-                "fems": {fem_idx: _convert_fem(fem) for fem_idx, fem in data.fems.items()},
-            }
-            ret[name] = to_attach
+        if len(data.fems) == 1 and 1 in data.fems:
+            _, opx = betterproto.which_one_of(data.fems[1], "fem_type_one_of")
+            if isinstance(opx, QuaConfigControllerDec):
+                ret[name] = _convert_controller(opx)
+                continue
+
+        to_attach: OPX1000ControllerConfigType = {
+            "type": "opx1000",
+            "fems": {fem_idx: _convert_fem(fem) for fem_idx, fem in data.fems.items()},
+        }
+        ret[name] = to_attach
 
     return ret
 

@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
+## [1.2.1] - 2024-11-20
+Tested against QOP 2.4, 3.2
+
+### Fixed
+- Fixed a bug with qm.get_config() in the OPX1000.
+
+
 ## [1.2.1a3] - 2024-11-06
 
 ### Fixed

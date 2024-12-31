@@ -132,9 +132,12 @@ class OctaveIfOutputsConfigType(TypedDict, total=False):
     IF_out2: OctaveSingleIfOutputConfigType
 
 
+FEM_IDX = Literal[1, 2, 3, 4, 5, 6, 7, 8, "1", "2", "3", "4", "5", "6", "7", "8"]
+
+
 class OPX1000ControllerConfigType(TypedDict, total=False):
     type: Literal["opx1000"]
-    fems: Mapping[int, Union[LfFemConfigType, MwFemConfigType]]
+    fems: Mapping[FEM_IDX, Union[LfFemConfigType, MwFemConfigType]]
 
 
 LoopbackType = Tuple[
@@ -271,7 +274,7 @@ class ElementConfigType(TypedDict, total=False):
 
 
 class DictQuaConfig(TypedDict, total=False):
-    version: int
+    version: Literal[1, "1"]
     oscillators: Mapping[str, OscillatorConfigType]
     elements: Mapping[str, ElementConfigType]
     controllers: Mapping[str, Union[ControllerConfigType, OPX1000ControllerConfigType]]
