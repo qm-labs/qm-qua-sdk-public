@@ -15,13 +15,6 @@ from qm.jobs.pending_job import QmPendingJob
 from qm.jobs.job_queue_old_api import QmQueue
 from qm.jobs.simulated_job import SimulatedJob
 from qm.api.simulation_api import SimulationApi
-from qm.grpc.frontend import (
-    JobExecutionStatus,
-    JobExecutionStatusRunning,
-    JobExecutionStatusCompleted,
-    JobExecutionStatusPending,
-    JobExecutionStatusLoading,
-)
 from qm.jobs.running_qm_job import RunningQmJob
 from qm.utils.config_utils import get_fem_config
 from qm.octave.octave_manager import OctaveManager
@@ -41,6 +34,13 @@ from qm.type_hinting.config_types import StandardPort, DictQuaConfig, PortRefere
 from qm.elements.element_inputs import MixInputs, SingleInput, static_set_mixer_correction
 from qm.type_hinting.general import Value, Number, PathLike, NumpySupportedFloat, NumpySupportedValue
 from qm.octave.octave_mixer_calibration import AutoCalibrationParams, OctaveMixerCalibration, MixerCalibrationResults
+from qm.grpc.frontend import (
+    JobExecutionStatus,
+    JobExecutionStatusLoading,
+    JobExecutionStatusPending,
+    JobExecutionStatusRunning,
+    JobExecutionStatusCompleted,
+)
 from qm.grpc.qua_config import (
     QuaConfig,
     QuaConfigQuaConfigV1,

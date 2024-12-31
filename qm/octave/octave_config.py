@@ -13,6 +13,7 @@ from qm.api.models.capabilities import OPX_FEM_IDX
 from qm.octave.calibration_db import CalibrationDB
 from qm.type_hinting.config_types import StandardPort
 from qm.api.models.server_details import ConnectionDetails
+from qm.octave.abstract_calibration_db import AbstractCalibrationDB
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +62,9 @@ class QmOctaveConfig:
 
     def __init__(self, fan: Any = None):
         self._devices: Dict[str, ConnectionDetails] = {}
-        self._calibration_db_path: Optional[str] = None
         self._loopbacks: Optional[Dict[LoopbackInfo[OctaveLOSource], LoopbackInfo[OctaveOutput]]] = None
         self._opx_octave_port_mapping: Optional[ConnectionMapping] = None
+        self._octave_to_opx_port_mapping: Optional[Dict[Tuple[str, str], StandardPort]] = None
         self._calibration_db: Optional[CalibrationDB] = None
         self._fan = fan
         self._connection_headers: Dict[str, str] = {}
@@ -119,11 +120,13 @@ class QmOctaveConfig:
         )
         self._set_calibration_db(path)
 
-    def _set_calibration_db(self, path: PathLike) -> None:
-        self._calibration_db_path = str(path)
-        self._calibration_db = CalibrationDB(self._calibration_db_path)
+    def _set_calibration_db(self, path: Union[PathLike, AbstractCalibrationDB]) -> None:
+        if isinstance(path, AbstractCalibrationDB):
+            self._calibration_db = path
+        else:
+            self._calibration_db = CalibrationDB(str(path))
 
-    def set_calibration_db_without_warning(self, path: PathLike) -> None:
+    def set_calibration_db_without_warning(self, path: Union[PathLike, AbstractCalibrationDB]) -> None:
         self._set_calibration_db(path)
 
     @staticmethod
@@ -208,6 +211,43 @@ class QmOctaveConfig:
             standardized_connections[standard_key] = octave_connection
         self._opx_octave_port_mapping.update(standardized_connections)
 
+    def add_octave_to_opx_port_mapping(
+        self, connections: Dict[Tuple[str, str], Union[StandardPort, Tuple[str, int]]]
+    ) -> None:
+        """
+        Adds port mapping from octave outputs to OPX inputs:
+        ```
+        {('oct1', 'I'): ('con1', 1),
+        ('oct1', 'Q'): ('con1', 2)}
+        ```
+
+        Will be deprecated soon, should use the "connectivity" key in "controllers" inside the configuration
+
+        Args:
+            connections (ConnectionMapping): mapping of octaves to OPXs connections
+        """
+
+        warnings.warn(
+            "OctaveConfig.add_opx_octave_port_mapping is deprecated as of 1.1.6 and will be removed in 1.3.0. "
+            "The port mapping was moved to the QUA-config. Please set the mapping there.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+        if self._octave_to_opx_port_mapping is None:
+            self._octave_to_opx_port_mapping = {}
+
+        standardized_connections = {}
+
+        for key, opx_connection in connections.items():
+
+            if len(opx_connection) == 2:
+                standard_key = (opx_connection[0], OPX_FEM_IDX, opx_connection[1])
+            else:
+                standard_key = opx_connection
+            standardized_connections[key] = standard_key
+        self._octave_to_opx_port_mapping.update(standardized_connections)
+
     def get_opx_octave_port_mapping(self) -> ConnectionMapping:
         """Get the configured opx-octave connections
 
@@ -224,6 +264,23 @@ class QmOctaveConfig:
             stacklevel=2,
         )
         return self._opx_octave_port_mapping
+
+    def get_octave_to_opx_port_mapping(self) -> Dict[Tuple[str, str], StandardPort]:
+        """Get the configured octave-opx connections
+
+        Returns:
+            Mapping of the configured octaves to OPXs connections
+        """
+        if self._octave_to_opx_port_mapping is None:
+            return {}
+        warnings.warn(
+            "Setting the mapping was move to the QUA-config. "
+            "It is deprecated since 1.2.2 and will be removed in 1.3.0."
+            "Please set the mapping there.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._octave_to_opx_port_mapping
 
     @staticmethod
     def get_default_opx_octave_port_mapping(controller_name: str, octave_name: str) -> ConnectionMapping:

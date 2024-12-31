@@ -62,15 +62,6 @@ class SimulatorControllerSamples:
         def calc_t_axis(_samples: Sequence[float], _sampling_rate: float) -> np.typing.NDArray[np.float64]:
             return np.arange(len(_samples)) / _sampling_rate * 1e9
 
-        def calc_label(port: Union[str, int], port_type: Literal["A", "D"]) -> str:
-            port = str(port)
-            address = port.split("-")
-            if len(address) == 2:
-                return f"FEM{address[0]}-{port_type}O{address[1]}"
-            if len(address) == 3:
-                return f"FEM{address[0]}-{port_type}O{address[1]}-UP{address[2]}"
-            return port
-
         if isinstance(analog_ports, (str, int)):
             analog_ports = [analog_ports]
         if isinstance(digital_ports, (str, int)):
@@ -82,21 +73,14 @@ class SimulatorControllerSamples:
         for analog_port in analog_to_plot:
             analog_samples = self.analog[analog_port]
             t_axis = calc_t_axis(analog_samples, self._analog_sampling_rate[str(analog_port)])
-            label = calc_label(analog_port, "A")
             if isinstance(analog_samples[0], complex):
-                samples_real = np.real(analog_samples)
-                samples_imag = np.imag(analog_samples)
-                if np.any(samples_real) or np.any(samples_imag):
-                    plt.plot(t_axis, samples_real, label=f"{label} I")
-                    plt.plot(t_axis, samples_imag, label=f"{label} Q")
+                plt.plot(t_axis, np.real(analog_samples), label=f"Analog {analog_port} I")
+                plt.plot(t_axis, np.imag(analog_samples), label=f"Analog {analog_port} Q")
             else:
-                if np.any(analog_samples):
-                    plt.plot(t_axis, analog_samples, label=label)
+                plt.plot(t_axis, analog_samples, label=f"Analog {analog_port}")
         for digital_port in digital_to_plot:
             digital_samples = self.digital[digital_port]
-            if np.any(digital_samples):
-                label = calc_label(digital_port, "D")
-                plt.plot(calc_t_axis(digital_samples, 1e9), digital_samples, label=label)
+            plt.plot(calc_t_axis(digital_samples, 1e9), digital_samples, label=f"Digital {digital_port}")
         plt.xlabel("Time [ns]")
         plt.ylabel("Output")
         plt.legend()

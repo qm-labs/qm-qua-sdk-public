@@ -30,7 +30,6 @@ from octave_sdk.grpc.quantummachines.octave.api.v1 import (
 )
 
 from qm.program import Program
-from qm.type_hinting import Number
 from qm.api.v2.job_api import JobApi
 from qm.elements.element import Element
 from qm.jobs.running_qm_job import RunningQmJob
@@ -70,6 +69,9 @@ from qm.qua import (
 
 logger = logging.getLogger(__name__)
 
+GainType = Optional[float]
+FreqType = Union[int, float]
+
 if TYPE_CHECKING:
     from qm.api.v2.qm_api import QmApi
     from qm.quantum_machine import QuantumMachine
@@ -86,6 +88,14 @@ class DConvQuadrature(Enum):
 
 @dataclass
 class LOFrequencyDebugData:
+    """
+    Debug data for the LO frequency calibration.
+    prev_result: The previous result of the calibration.
+    power_amp_attn: The power amplifier attenuation.
+    coarse: The debug data for the coarse scan.
+    fine: The debug data for the fine scan.
+    """
+
     prev_result: Optional[Tuple[float, ...]]
     power_amp_attn: Optional[int]
     coarse: List[LOAnalysisDebugData]
@@ -94,6 +104,13 @@ class LOFrequencyDebugData:
 
 @dataclass
 class ImageResult:
+    """
+    Result of the image data calibration.
+    prev_result: The previous result of the calibration.
+    coarse: The coarse scan result.
+    fine: The fine scan result.
+    """
+
     prev_result: Optional[Tuple[float, float]]
     coarse: ImageDataAnalysisResult
     fine: ImageDataAnalysisResult
@@ -101,17 +118,29 @@ class ImageResult:
 
 @dataclass
 class LOFrequencyCalibrationResult:
+    """
+    Calibration result for a single LO frequency and its corresponding IF frequencies.
+    i0: The I offset.
+    q0: The Q offset.
+    dc_gain: The gain used during the calibration.
+    dc_phase: The phase used during the calibration.
+    temperature: The temperature during the calibration.
+    image: The calibration results for the IF frequencies.
+    debug: The debug data.
+    plugin_data: Any additional data.
+    """
+
     i0: float
     q0: float
     dc_gain: float
     dc_phase: float
     temperature: float
-    image: Dict[Number, ImageResult]
+    image: Dict[FreqType, ImageResult]
     debug: LOFrequencyDebugData
     plugin_data: Any = None
 
 
-MixerCalibrationResults = Dict[Tuple[Number, Optional[float]], LOFrequencyCalibrationResult]
+MixerCalibrationResults = Dict[Tuple[FreqType, GainType], LOFrequencyCalibrationResult]
 
 
 @dataclass
@@ -131,7 +160,7 @@ DeprecatedMixerCalibrationResults = Dict[Tuple[int, int], DeprecatedCalibrationR
 
 class CalibrationCallback(metaclass=abc.ABCMeta):
     @abc.abstractmethod
-    def __call__(self, lo_freq: float, lo_calibration_result: LOFrequencyCalibrationResult) -> Any:
+    def __call__(self, lo_freq: Union[int, float], lo_calibration_result: LOFrequencyCalibrationResult) -> Any:
         pass
 
 
@@ -559,7 +588,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         return restore_params
 
     @staticmethod
-    def _set_input_lo_frequency(element_input: UpconvertedInput, lo_freq: Number) -> None:
+    def _set_input_lo_frequency(element_input: UpconvertedInput, lo_freq: FreqType) -> None:
         """Even if the LO source is external, we will have to update the attenuators."""
         try:
             element_input.set_lo_frequency(lo_freq, set_source=False)
@@ -574,7 +603,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
     def _set_before_coarse_scan(
         self,
         element_input: UpconvertedInput,
-        lo_freq: Number,
+        lo_freq: FreqType,
         offset_frequency: float,
     ) -> None:
 
@@ -780,8 +809,8 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
 
     def _set_if_freq(
         self,
-        if_freq: Number,
-        down_mixer_offset: Number,
+        if_freq: FreqType,
+        down_mixer_offset: FreqType,
     ) -> None:
         element_name_to_if_freq = {
             self.names.iq_mixer: if_freq,
@@ -808,7 +837,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         pass
 
     @abc.abstractmethod
-    def _set_element_if_freq(self, element_name: str, if_freq: Number) -> None:
+    def _set_element_if_freq(self, element_name: str, if_freq: FreqType) -> None:
         pass
 
     @abc.abstractmethod
@@ -849,7 +878,7 @@ class OctaveMixerCalibration(OctaveMixerCalibrationBase):
     def _set_io_values(self, io1: Optional[Union[int, float]] = None, io2: Optional[Union[int, float]] = None) -> None:
         self._qm.set_io_values(value_1=io1, value_2=io2)
 
-    def _set_element_if_freq(self, element_name: str, if_freq: Number) -> None:
+    def _set_element_if_freq(self, element_name: str, if_freq: FreqType) -> None:
         self._qm._octave_calibration_elements[element_name].set_intermediate_frequency(if_freq)
 
     def _compile_program(self, _program: Program) -> str:
@@ -904,7 +933,7 @@ class NewApiOctaveMixerCalibration(OctaveMixerCalibrationBase):
     def _set_io_values(self, io1: Optional[Union[int, float]] = None, io2: Optional[Union[int, float]] = None) -> None:
         self.job.set_io_values(io1=io1, io2=io2)
 
-    def _set_element_if_freq(self, element_name: str, if_freq: Number) -> None:
+    def _set_element_if_freq(self, element_name: str, if_freq: FreqType) -> None:
         self.job.elements[element_name].set_intermediate_frequency(if_freq)
 
     def _compile_program(self, _program: Program) -> str:

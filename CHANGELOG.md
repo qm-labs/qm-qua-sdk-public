@@ -6,13 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
-## [1.2.1.1a1] - 2024-12-17
-### Fixed
-- Fixed a bug in the MW-FEM samples returned from the cloud simulator (using `qm-saas`) which prevented plotting them
+## [1.2.2a1] - 2024-11-28
 
-### Changed
-- Improved labels for the simulators' samples plot and waveform report plot
-- The simulator's samples plot will no longer plot waveforms that are all zeros (not changed in the simulation)
+### Added
+- Added the method `add_octave_to_opx_port_mapping` to the `QmOctaveConfig`. When defined, it allows calibration of an Octave connected to multiple FEMs. This method is deprecated and will be removed in the future.
+- Added `AbstractCalibrationDB` class to allow for custom Octave calibration databases. (`from qm.octave import AbstractCalibrationDB`)
+- `QuantumMachinesManager` can now accept an object of type `AbstractCalibrationDB` in its `octave_calibration_db_path` argument
 
 ## [1.2.1] - 2024-11-20
 Tested against QOP 2.4, 3.2

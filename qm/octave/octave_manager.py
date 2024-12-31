@@ -663,22 +663,27 @@ OctaveConnectionsType = Dict[str, Dict[int, OctaveConnection]]
 def _add_octave_connections_from_octave_config(octave_config: QmOctaveConfig) -> OctaveConnectionsType:
     all_octave_connections: OctaveConnectionsType = defaultdict(dict)
 
-    opx_octave_port_mapping = octave_config.get_opx_octave_port_mapping()
-    octave_opx_port_mapping = {v: k for k, v in opx_octave_port_mapping.items()}
-    octave_names = {v[0] for v in octave_opx_port_mapping}
+    opx_output_octave_port_mapping = octave_config.get_opx_octave_port_mapping()
+    octave_opx_output_port_mapping = {v: k for k, v in opx_output_octave_port_mapping.items()}
+    octave_names = {v[0] for v in octave_opx_output_port_mapping}
+    octave_opx_input_port_mapping = octave_config.get_octave_to_opx_port_mapping()
     for octave_name in octave_names:
         for channel_index in range(1, 6):
             i_key, q_key = (octave_name, f"I{channel_index}"), (octave_name, f"Q{channel_index}")
-            if i_key in octave_opx_port_mapping and q_key in octave_opx_port_mapping:
-                con_i, fem_i, idx_i = octave_opx_port_mapping[i_key]
-                con_q, fem_q, idx_q = octave_opx_port_mapping[q_key]
+            if i_key in octave_opx_output_port_mapping and q_key in octave_opx_output_port_mapping:
+                con_i, fem_i, idx_i = octave_opx_output_port_mapping[i_key]
+                con_q, fem_q, idx_q = octave_opx_output_port_mapping[q_key]
                 dac_ports = _ControllerDACPorts(
                     I=QuaConfigDacPortReference(controller=con_i, fem=fem_i, number=idx_i),
                     Q=QuaConfigDacPortReference(controller=con_q, fem=fem_q, number=idx_q),
                 )
+
+                i_key_in, q_key_in = (octave_name, "I"), (octave_name, "Q")
+                con_i_in, fem_i_in, idx_i_in = octave_opx_input_port_mapping.get(i_key_in, (con_i, fem_i, 1))
+                con_q_in, fem_q_in, idx_q_in = octave_opx_input_port_mapping.get(q_key_in, (con_q, fem_q, 2))
                 adc_ports = _ControllerADCPorts(
-                    I=QuaConfigAdcPortReference(controller=con_i, fem=fem_i, number=1),
-                    Q=QuaConfigAdcPortReference(controller=con_q, fem=fem_q, number=2),
+                    I=QuaConfigAdcPortReference(controller=con_i_in, fem=fem_i_in, number=idx_i_in),
+                    Q=QuaConfigAdcPortReference(controller=con_q_in, fem=fem_q_in, number=idx_q_in),
                 )
                 all_octave_connections[octave_name][channel_index] = OctaveConnection(dacs=dac_ports, adcs=adc_ports)
     return dict(all_octave_connections)

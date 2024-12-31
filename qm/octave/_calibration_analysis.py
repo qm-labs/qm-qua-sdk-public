@@ -6,6 +6,7 @@ import numpy as np
 
 from qm.api.v2.job_api import JobApi
 from qm.jobs.running_qm_job import RunningQmJob
+from qm.octave.calibration_utils import convert_to_correction
 from qm.octave._calibration_names import SavedVariablesNames as Names
 
 Array = np.typing.NDArray[np.cdouble]
@@ -72,6 +73,10 @@ def _polyfit2d(x: Array, y: Array, z: Array, kx: int = 2, ky: int = 2, order: Op
 
 @dataclass
 class FitResult:
+    """
+    Result of a two-dimensional polynomial fitting.
+    """
+
     pol: Array
     x_min: float
     y_min: float
@@ -157,6 +162,10 @@ def _get_reshaped_data(
 
 @dataclass
 class CorrectionsDebugData:
+    """
+    Debug data for the lo calibration correction.
+    """
+
     dc_gain: float
     dc_phase: float
     dc_correction: Tuple[float, float, float, float]
@@ -164,6 +173,10 @@ class CorrectionsDebugData:
 
 @dataclass
 class LOAnalysisDebugData:
+    """
+    Debug data for the LO calibration analysis.
+    """
+
     i_scan: Array
     q_scan: Array
     lo: Array
@@ -232,6 +245,10 @@ def _get_and_analyze_lo_data(
 
 @dataclass
 class ImageDataAnalysisResult:
+    """
+    Debug data for the image calibration analysis.
+    """
+
     phase: float
     gain: float
     correction: Tuple[float, float, float, float]
@@ -271,21 +288,11 @@ def _get_and_analyze_image_data(
 
         fit = _paraboloid2d_fit(sp, sg, s_im)
 
-        s = fit.x_min
-        c = np.polyval([-3.125, 1.5, 1], s**2)
-        g_plus = np.polyval([0.5, 1, 1], fit.y_min)
-        g_minus = np.polyval([0.5, -1, 1], fit.y_min)
-
-        c00 = float(g_plus * c)
-        c01 = float(g_plus * s)
-        c10 = float(g_minus * s)
-        c11 = float(g_minus * c)
-
         results.append(
             ImageDataAnalysisResult(
                 phase=fit.x_min,
                 gain=fit.y_min,
-                correction=(c00, c01, c10, c11),
+                correction=convert_to_correction(fit.y_min, fit.x_min),
                 g_scan=g_scan,
                 p_scan=p_scan,
                 fit=fit,

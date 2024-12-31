@@ -9,15 +9,15 @@ from qm.persistence import BaseStore
 from qm.exceptions import QmQuaException
 from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
+from qm.api.models.capabilities import ServerCapabilities
+from qm.api.job_manager_api import create_job_manager_from_api
 from qm.grpc.frontend import (
     JobExecutionStatus,
+    JobExecutionStatusLoading,
     JobExecutionStatusPending,
     JobExecutionStatusRunning,
     JobExecutionStatusCompleted,
-    JobExecutionStatusLoading,
 )
-from qm.api.models.capabilities import ServerCapabilities
-from qm.api.job_manager_api import create_job_manager_from_api
 
 
 class QmBaseJob:

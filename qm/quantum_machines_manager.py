@@ -9,7 +9,6 @@ import marshmallow
 from octave_sdk.octave import OctaveDetails
 
 from qm.api.v2.qm_api import QmApi
-from qm.octave import QmOctaveConfig
 from qm.user_config import UserConfig
 from qm.grpc.qua_config import QuaConfig
 from qm.utils import deprecation_message
@@ -31,6 +30,7 @@ from qm.persistence import BaseStore, SimpleFileStore
 from qm.api.models.server_details import ServerDetails
 from qm.type_hinting.config_types import DictQuaConfig
 from qm.program._qua_config_to_pb import load_config_pb
+from qm.octave import QmOctaveConfig, AbstractCalibrationDB
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm._octaves_container import load_config_from_calibration_db
 from qm.program._qua_config_schema import validate_config_capabilities
@@ -100,7 +100,7 @@ class QuantumMachinesManager:
         store: Optional[BaseStore] = None,
         file_store_root: str = ".",
         octave: Optional[QmOctaveConfig] = None,
-        octave_calibration_db_path: Optional[PathLike] = None,
+        octave_calibration_db_path: Optional[Union[PathLike, AbstractCalibrationDB]] = None,
     ):
         """
         Args:

@@ -12,7 +12,7 @@ from qm.grpc.qua_config import QuaConfigMixInputs
 from qm.elements.element_outputs import DownconvertedOutput
 from qm.elements.up_converted_input import UpconvertedInput
 from qm.octave.octave_manager import ClockMode, OctaveManager
-from qm.octave.calibration_db import IFCalibrationDBSchema, LOCalibrationDBSchema
+from qm.octave.abstract_calibration_db import AbstractIFCalibration, AbstractLOCalibration
 from qm.type_hinting.config_types import DictQuaConfig, MixerConfigType, OPX1000ControllerConfigType
 from qm.octave.octave_mixer_calibration import DeprecatedCalibrationResult, convert_to_old_calibration_result
 
@@ -291,7 +291,7 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
     @staticmethod
     def _fetch_calibrations_from_db(
         qe: Element[QuaConfigMixInputs],
-    ) -> Tuple[LOCalibrationDBSchema, IFCalibrationDBSchema]:
+    ) -> Tuple[AbstractLOCalibration, AbstractIFCalibration]:
         assert isinstance(qe.input, UpconvertedInput)
         if qe.input._calibration_db is None:
             logger.warning(f"No calibration DB is attached for element {qe.name}, not changing anything.")
@@ -331,7 +331,7 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
 
     @abstractmethod
     def _update_element_parameters(
-        self, qe: Element[QuaConfigMixInputs], lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
+        self, qe: Element[QuaConfigMixInputs], lo_cal: AbstractLOCalibration, if_cal: AbstractIFCalibration
     ) -> None:
         pass
 
@@ -340,48 +340,48 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
         self,
         job: JobInstT,
         element: str,
-        lo_cal: LOCalibrationDBSchema,
-        if_cal: IFCalibrationDBSchema,
+        lo_cal: AbstractLOCalibration,
+        if_cal: AbstractIFCalibration,
     ) -> None:
         pass
 
 
 class QmOctave(QmOctaveBase["QuantumMachine", "RunningQmJob"]):
     def _update_element_parameters(
-        self, qe: Element[QuaConfigMixInputs], lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
+        self, qe: Element[QuaConfigMixInputs], lo_cal: AbstractLOCalibration, if_cal: AbstractIFCalibration
     ) -> None:
         assert isinstance(qe.input, UpconvertedInput)
-        qe.input.set_output_dc_offset(i_offset=lo_cal.i0, q_offset=lo_cal.q0)
+        qe.input.set_output_dc_offset(i_offset=lo_cal.get_i0(), q_offset=lo_cal.get_q0())
         qe.input.set_mixer_correction(
             intermediate_frequency=qe.intermediate_frequency,
             lo_frequency=qe.input.lo_frequency,
-            values=if_cal.correction,
+            values=if_cal.get_correction(),
         )
 
     def _set_running_job_parameters(
-        self, job: "RunningQmJob", element: str, lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
+        self, job: "RunningQmJob", element: str, lo_cal: AbstractLOCalibration, if_cal: AbstractIFCalibration
     ) -> None:
-        job.set_element_correction(element, if_cal.correction)
+        job.set_element_correction(element, if_cal.get_correction())
 
 
 class QmOctaveForNewApi(QmOctaveBase["QmApi", "JobApi"]):
     def _update_element_parameters(
-        self, qe: Element[QuaConfigMixInputs], lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
+        self, qe: Element[QuaConfigMixInputs], lo_cal: AbstractLOCalibration, if_cal: AbstractIFCalibration
     ) -> None:
         assert isinstance(qe.input, UpconvertedInput)
-        update = create_dc_offset_octave_update(qe.input, i_offset=lo_cal.i0, q_offset=lo_cal.q0)
+        update = create_dc_offset_octave_update(qe.input, i_offset=lo_cal.get_i0(), q_offset=lo_cal.get_q0())
         update["mixers"] = {
             qe.input.mixer: [
-                create_mixer_correction(qe.intermediate_frequency, qe.input.lo_frequency, if_cal.correction)
+                create_mixer_correction(qe.intermediate_frequency, qe.input.lo_frequency, if_cal.get_correction())
             ]
         }
         self._qm.update_config(update)
 
     def _set_running_job_parameters(
-        self, job: "JobApi", element: str, lo_cal: LOCalibrationDBSchema, if_cal: IFCalibrationDBSchema
+        self, job: "JobApi", element: str, lo_cal: AbstractLOCalibration, if_cal: AbstractIFCalibration
     ) -> None:
-        job.set_output_dc_offset_by_element(element, ("I", "Q"), (lo_cal.i0, lo_cal.q0))
-        job.set_element_correction(element, if_cal.correction)
+        job.set_output_dc_offset_by_element(element, ("I", "Q"), (lo_cal.get_i0(), lo_cal.get_q0()))
+        job.set_element_correction(element, if_cal.get_correction())
 
 
 def create_dc_offset_octave_update(qe_input: UpconvertedInput, i_offset: float, q_offset: float) -> DictQuaConfig:

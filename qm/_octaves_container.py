@@ -7,7 +7,6 @@ from qm.api.frontend_api import FrontendApi
 from qm.elements.element_inputs import MixInputs
 from qm.octave import CalibrationDB, QmOctaveConfig
 from qm.api.models.capabilities import ServerCapabilities
-from qm.octave.calibration_db import convert_to_correction
 from qm.utils.config_utils import get_fem_config, element_has_mix_inputs
 from qm.octave.octave_manager import logger, get_device, get_loopbacks_from_pb
 from qm.elements.up_converted_input import UpconvertedInput, UpconvertedInputNewApi
@@ -206,14 +205,14 @@ def load_config_from_calibration_db(
 
         i_port, q_port = mix_inputs.i, mix_inputs.q
         i_controller_config = get_fem_config(pb_config, i_port)
-        i_controller_config.analog_outputs[i_port.number].offset = lo_cal.i0
+        i_controller_config.analog_outputs[i_port.number].offset = lo_cal.get_i0()
         q_controller_config = get_fem_config(pb_config, q_port)
-        q_controller_config.analog_outputs[q_port.number].offset = lo_cal.q0
+        q_controller_config.analog_outputs[q_port.number].offset = lo_cal.get_q0()
 
         if i_port.controller in pb_config.v1_beta.controllers:
-            pb_config.v1_beta.controllers[i_port.controller].analog_outputs[i_port.number].offset = lo_cal.i0
+            pb_config.v1_beta.controllers[i_port.controller].analog_outputs[i_port.number].offset = lo_cal.get_i0()
         if q_port.controller in pb_config.v1_beta.controllers:
-            pb_config.v1_beta.controllers[q_port.controller].analog_outputs[q_port.number].offset = lo_cal.q0
+            pb_config.v1_beta.controllers[q_port.controller].analog_outputs[q_port.number].offset = lo_cal.get_q0()
 
         # Now we go over all the IF frequencies we find and set them. Not sure
         # when an IF frequency different from the element's 'intermediate_frequency'
@@ -238,7 +237,7 @@ def load_config_from_calibration_db(
                 frequency_double=[0.0, float(abs(if_freq))][frequency_idx],
                 lo_frequency=int(lo_freq),
                 lo_frequency_double=[0.0, float(lo_freq)][frequency_idx],
-                correction=QuaConfigMatrix(*convert_to_correction(if_cal.gain, if_cal.phase)),
+                correction=QuaConfigMatrix(*if_cal.get_correction()),
                 frequency_negative=if_freq < 0,
             )
             new_if_cals.append(curr_new_calibration)
