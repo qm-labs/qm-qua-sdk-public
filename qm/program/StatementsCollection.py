@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING, List, Tuple, Union, Optional
 
-import betterproto
 from betterproto.lib.google.protobuf import Empty
 
 from qm._loc import _get_loc
@@ -41,7 +40,6 @@ from qm.grpc.qua import (
     QuaProgramResetGlobalPhaseStatement,
     QuaProgramUpdateCorrectionStatement,
     QuaProgramFastFrameRotationStatement,
-    QuaProgramAdvanceInputStreamStatement,
     QuaProgramUpdateFrequencyStatementUnits,
     QuaProgramForEachStatementVariableWithValues,
     QuaProgramWaitForTriggerStatementElementOutput,
@@ -49,8 +47,7 @@ from qm.grpc.qua import (
 
 if TYPE_CHECKING:
     from qm.qua._dsl import _ResultSource
-    from qm.qua._dsl_specific_type_hints import PlayPulseType, MeasurePulseType
-    from qm.qua._type_hinting import MessageVarType, MessageExpressionType, MessageVariableOrExpression
+    from qm.qua import PlayPulseType, MessageVarType, MeasurePulseType, MessageExpressionType
 
 
 class StatementsCollection:
@@ -180,7 +177,7 @@ class StatementsCollection:
 
         """
         try:
-            units_enum = QuaProgramUpdateFrequencyStatementUnits[units]
+            units_enum = QuaProgramUpdateFrequencyStatementUnits[units]  # type: ignore
         except KeyError:
             raise QmQuaException(f'unknown units "{units}"')
 
@@ -246,24 +243,12 @@ class StatementsCollection:
         self._check_serialised_on_wire(statement, "set_dc_offset")
         self._body.statements.append(statement)
 
-    def advance_input_stream(self, input_stream: "MessageVariableOrExpression") -> None:
+    def advance_input_stream(self, statement: QuaProgramAnyStatement) -> None:
         """advance an input stream pointer to be sent to the QUA program
 
         Args:
-            input_stream: The input stream to advance
+            statement: The input stream to advance
         """
-        statement = QuaProgramAnyStatement(advance_input_stream=QuaProgramAdvanceInputStreamStatement(loc=_get_loc()))
-
-        if isinstance(input_stream, QuaProgramArrayVarRefExpression):
-            statement.advance_input_stream.stream_array = input_stream
-        elif (
-            isinstance(input_stream, QuaProgramAnyScalarExpression)
-            and betterproto.which_one_of(input_stream, "expression_oneof")[0] == "variable"
-        ):
-            statement.advance_input_stream.stream_variable = input_stream.variable
-        else:
-            raise QmQuaException("unsupported type for advance input stream")
-
         self._check_serialised_on_wire(statement, "advance_input_stream")
         self._body.statements.append(statement)
 

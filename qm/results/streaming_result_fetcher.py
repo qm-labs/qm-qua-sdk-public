@@ -203,7 +203,7 @@ class StreamingResultFetcher(Mapping[str, Optional[BaseStreamingResultFetcher]])
         if isinstance(self._service, JobResultApi):
             # In the new API there is no separate stub for the result, so we can ask the job status directly
             def on_iteration() -> bool:
-                status = self._service.get_job_execution_status()
+                status = self._service.get_job_execution_status()  # type: ignore[union-attr]
                 return status in {JobExecutionStatus.CANCELED, JobExecutionStatus.COMPLETED, JobExecutionStatus.ERROR}
 
             on_complete = on_iteration

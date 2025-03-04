@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, Literal, Mapping, TypedDict
+from typing import List, Tuple, Union, Literal, Mapping, Optional, TypedDict
 
 from qm.type_hinting.general import Number
 
@@ -15,9 +15,15 @@ class AnalogOutputFilterConfigType(TypedDict, total=False):
     feedback: List[float]
 
 
+class AnalogOutputFilterConfigTypeQop33(TypedDict, total=False):
+    feedforward: List[float]
+    exponential: List[Tuple[float, float]]
+    high_pass: Optional[float]
+
+
 class AnalogOutputPortConfigType(TypedDict, total=False):
     offset: Number
-    filter: AnalogOutputFilterConfigType
+    filter: Union[AnalogOutputFilterConfigType, AnalogOutputFilterConfigTypeQop33]
     delay: int
     crosstalk: Mapping[int, Number]
     shareable: bool
@@ -45,7 +51,7 @@ class DigitalInputPortConfigType(TypedDict, total=False):
 
 class AnalogOutputPortConfigTypeOctoDac(TypedDict, total=False):
     offset: Number
-    filter: AnalogOutputFilterConfigType
+    filter: Union[AnalogOutputFilterConfigType, AnalogOutputFilterConfigTypeQop33]
     delay: int
     crosstalk: Mapping[int, Number]
     shareable: bool
@@ -64,6 +70,7 @@ class LfFemConfigType(TypedDict, total=False):
 
 
 Band = Literal[1, 2, 3]
+Upconverter = Literal[1, 2]
 
 
 class MwFemAnalogInputPortConfigType(TypedDict, total=False):
@@ -84,7 +91,7 @@ class MwFemAnalogOutputPortConfigType(TypedDict, total=False):
     band: Band
     delay: int
     shareable: bool
-    upconverters: Mapping[int, MwUpconverterConfigType]
+    upconverters: Mapping[Upconverter, MwUpconverterConfigType]
     upconverter_frequency: float
 
 
@@ -194,10 +201,19 @@ class MixerConfigType(TypedDict, total=False):
     correction: Tuple[Number, Number, Number, Number]
 
 
+class SingleWaveformConfigType(TypedDict, total=False):
+    single: str
+
+
+class MixWaveformConfigType(TypedDict, total=False):
+    I: str
+    Q: str
+
+
 class PulseConfigType(TypedDict, total=False):
     operation: Literal["measurement", "control"]
     length: int
-    waveforms: Mapping[str, str]
+    waveforms: Union[SingleWaveformConfigType, MixWaveformConfigType]
     digital_marker: str
     integration_weights: Mapping[str, str]
 
@@ -208,7 +224,7 @@ class SingleInputConfigType(TypedDict, total=False):
 
 class MwInputConfigType(TypedDict, total=False):
     port: PortReferenceType
-    upconverter: int
+    upconverter: Upconverter
 
 
 class MwOutputConfigType(TypedDict, total=False):
@@ -242,11 +258,14 @@ class OscillatorConfigType(TypedDict, total=False):
     lo_frequency: float
 
 
-class OutputPulseParameterConfigType(TypedDict):
+class TimeTaggingParametersConfigType(TypedDict, total=False):
     signalThreshold: int
     signalPolarity: Literal["ABOVE", "ASCENDING", "BELOW", "DESCENDING"]
     derivativeThreshold: int
     derivativePolarity: Literal["ABOVE", "ASCENDING", "BELOW", "DESCENDING"]
+
+
+OutputPulseParameterConfigType = TimeTaggingParametersConfigType
 
 
 class ElementConfigType(TypedDict, total=False):
@@ -266,9 +285,11 @@ class ElementConfigType(TypedDict, total=False):
     digitalInputs: Mapping[str, DigitalInputConfigType]
     digitalOutputs: Mapping[str, PortReferenceType]
     outputPulseParameters: OutputPulseParameterConfigType
+    timeTaggingParameters: TimeTaggingParametersConfigType
     hold_offset: HoldOffsetConfigType
     sticky: StickyConfigType
     thread: str
+    core: str
     RF_inputs: Mapping[str, Tuple[str, int]]
     RF_outputs: Mapping[str, Tuple[str, int]]
 

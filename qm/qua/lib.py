@@ -1,38 +1,122 @@
 import random
-from functools import wraps
-from collections.abc import Iterable
+import warnings
+from typing_extensions import ParamSpec
+from typing import List, Type, Tuple, Union, TypeVar, Callable, Optional, Sequence
 
-import qm.qua._expressions as _exp
+from qm._loc import _get_loc
+from qm.type_hinting import NumberT
 from qm.qua._dsl import assign, declare
-from qm.utils import get_iterable_elements_datatype as _get_iterable_elements_datatype
+from qm.utils import deprecation_message, get_iterable_elements_datatype
+from qm.grpc.qua import (
+    QuaProgramAnyScalarExpression,
+    QuaProgramLibFunctionExpression,
+    QuaProgramLibFunctionExpressionArgument,
+)
+from qm.qua._expressions import (
+    Scalar,
+    Vector,
+    PyQuaScalar,
+    QuaVariable,
+    QuaArrayVariable,
+    QuaLibFunctionOutput,
+    create_qua_scalar_expression,
+)
+
+Ret = TypeVar("Ret")
+P = ParamSpec("P")
+S = TypeVar("S", bool, int, float)
 
 
-def _library_function(lib_name, func_name):
-    def library_decorator(function):
-        @wraps(function)
-        def wrapper(*args, **kwargs):
-            new_args = function(*args, **kwargs)
-            return call_library_function(lib_name, func_name, new_args)
-
-        return wrapper
-
-    return library_decorator
+def _get_func_lib_and_name(function: Callable[P, Ret]) -> Tuple[str, str]:
+    lib_name, func_name = function.__qualname__.split(".")
+    return lib_name.lower(), func_name
 
 
-def _sanitize_arg(arg):
-    if isinstance(arg, Iterable):
-        return declare(_get_iterable_elements_datatype(arg), value=arg)
-    return arg
+def _create_qua_vector_expression(value: Vector[NumberT]) -> QuaArrayVariable[NumberT]:
+    if isinstance(value, QuaArrayVariable):
+        return value
+    data_type = get_iterable_elements_datatype(value)
+    return declare(data_type, value=value)
 
 
-def call_library_function(lib_name, func_name, args):
-    return _exp.QuaExpression(_exp.lib_func(lib_name, func_name, *[_exp.to_expression(_sanitize_arg(x)) for x in args]))
+def _standardize_args(*args: Union[PyQuaScalar, Vector[NumberT]]) -> List[QuaProgramLibFunctionExpressionArgument]:
+    standardized_args = []
+
+    for arg in args:
+        # Checking if the argument is a vector, unfortunately python doesn't allow to use isinstance(arg, Vector)
+        if isinstance(arg, (Sequence, QuaArrayVariable)):
+            if isinstance(arg, Sequence):
+                arg = _create_qua_vector_expression(arg)
+            standardized_args.append(QuaProgramLibFunctionExpressionArgument(array=arg.unwrapped))
+        else:
+            arg = create_qua_scalar_expression(arg)
+            standardized_args.append(QuaProgramLibFunctionExpressionArgument(scalar=arg.unwrapped))
+
+    return standardized_args
+
+
+def __create_output_expression(
+    function: Callable[P, Ret],
+    output_type: Type[NumberT],
+    *args: Union[PyQuaScalar, Vector[S]],
+) -> QuaLibFunctionOutput[NumberT]:
+    standardized_args = _standardize_args(*args)
+    lib_name, func_name = _get_func_lib_and_name(function)
+    any_scalar_expression = QuaProgramAnyScalarExpression(
+        lib_function=QuaProgramLibFunctionExpression(
+            function_name=func_name, arguments=standardized_args, library_name=lib_name, loc=_get_loc()
+        )
+    )
+    return QuaLibFunctionOutput(any_scalar_expression, output_type)
+
+
+def _create_output_expression(
+    function: Callable[P, Ret], output_type: Type[NumberT], *args: PyQuaScalar
+) -> QuaLibFunctionOutput[NumberT]:
+    return __create_output_expression(function, output_type, *args)
+
+
+def _create_vectors_output_expression(
+    function: Callable[P, Ret], output_type: Type[S], *args: Vector[NumberT]
+) -> QuaLibFunctionOutput[S]:
+    return __create_output_expression(function, output_type, *args)
+
+
+def call_library_function(
+    function: Callable[P, Ret], output_type: Type[NumberT], *args: PyQuaScalar
+) -> QuaLibFunctionOutput[NumberT]:
+    warnings.warn(
+        deprecation_message(
+            method="call_library_function",
+            deprecated_in="1.2.2",
+            removed_in="1.4.0",
+            details="""
+Please call the required function directly from the available classes.
+For instance, instead of using call_library_function(Random.rand_int, int, x, y), simply use Random(x).rand_int(y).""",
+        )
+    )
+    return _create_output_expression(function, output_type, *args)
+
+
+def call_vectors_library_function(
+    function: Callable[P, Ret], output_type: Type[S], *args: Vector[NumberT]
+) -> QuaLibFunctionOutput[S]:
+    warnings.warn(
+        deprecation_message(
+            method="call_vectors_library_function",
+            deprecated_in="1.2.2",
+            removed_in="1.4.0",
+            details="""
+Please call the required function directly from the available classes.
+For instance, instead of using call_vectors_library_function(Math.sum, x.dtype, x), simply use Math.sum(x).""",
+        )
+    )
+    return _create_vectors_output_expression(function, output_type, *args)
 
 
 class Math:
     @staticmethod
-    @_library_function("math", "log")
-    def log(x, base):
+    def log(x: Scalar[float], base: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{log}_{base}(x)$
 
         Args:
@@ -42,11 +126,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x, base)
+        return _create_output_expression(Math.log, float, x, base)
 
     @staticmethod
-    @_library_function("math", "pow")
-    def pow(base, x):
+    def pow(base: Scalar[float], x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes ${base}^{x}$.
         Does not support base=1, nor the case where both base=0 & x=0.
 
@@ -57,11 +140,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (base, x)
+        return _create_output_expression(Math.pow, float, base, x)
 
     @staticmethod
-    @_library_function("math", "div")
-    def div(x, y):
+    def div(x: Scalar[NumberT], y: Scalar[NumberT]) -> QuaLibFunctionOutput[float]:
         r"""Computes the division between two same-type variables $x/y$
 
         Args:
@@ -71,11 +153,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x, y)
+        return _create_output_expression(Math.div, float, x, y)
 
     @staticmethod
-    @_library_function("math", "exp")
-    def exp(x):
+    def exp(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $e^{x}$
 
         Args:
@@ -84,11 +165,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.exp, float, x)
 
     @staticmethod
-    @_library_function("math", "pow2")
-    def pow2(x):
+    def pow2(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $2^{x}$
 
         Args:
@@ -97,11 +177,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.pow2, float, x)
 
     @staticmethod
-    @_library_function("math", "ln")
-    def ln(x):
+    def ln(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{ln}(x)$
 
         Args:
@@ -110,11 +189,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.ln, float, x)
 
     @staticmethod
-    @_library_function("math", "log2")
-    def log2(x):
+    def log2(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{log}_{2}(x)$
 
         Args:
@@ -123,11 +201,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.log2, float, x)
 
     @staticmethod
-    @_library_function("math", "log10")
-    def log10(x):
+    def log10(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{log}_{10}(x)$
 
         Args:
@@ -136,11 +213,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.log10, float, x)
 
     @staticmethod
-    @_library_function("math", "sqrt")
-    def sqrt(x):
+    def sqrt(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes the square root of x
 
         Args:
@@ -149,11 +225,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.sqrt, float, x)
 
     @staticmethod
-    @_library_function("math", "inv_sqrt")
-    def inv_sqrt(x):
+    def inv_sqrt(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes the inverse square root of x
 
         Args:
@@ -162,11 +237,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.sqrt, float, x)
 
     @staticmethod
-    @_library_function("math", "inv")
-    def inv(x):
+    def inv(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes the inverse of x
 
         Args:
@@ -175,12 +249,12 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.inv, float, x)
 
     @staticmethod
-    @_library_function("math", "MSB")
-    def msb(x):
-        r"""Finds the index of the most significant bit in the parameter x.
+    def MSB(x: Scalar[NumberT]) -> QuaLibFunctionOutput[int]:
+        r"""
+        Finds the index of the most significant bit in the parameter x.
         Notes:
 
         - Result is independent of sign, for example, +3 and -3 will return the same msb
@@ -201,11 +275,14 @@ class Math:
         Returns:
             a QUA int
         """
-        return (x,)
+        return _create_output_expression(Math.MSB, int, x)
 
     @staticmethod
-    @_library_function("math", "elu")
-    def elu(x):
+    def msb(x: Scalar[NumberT]) -> QuaLibFunctionOutput[int]:
+        return Math.MSB(x)
+
+    @staticmethod
+    def elu(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes the Exponential Linear Unit activation function of x
           $\mathrm{ELU(x)} = \mathrm{max}(0, x) + \mathrm{min}(0, \mathrm{exp}(x)-1)$.
 
@@ -215,11 +292,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.elu, float, x)
 
     @staticmethod
-    @_library_function("math", "aelu")
-    def aelu(x):
+    def aelu(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes faster an approximated Exponential Linear Unit activation function of x
           $\mathrm{aELU}(x) \sim \mathrm{ELU}(x)$
 
@@ -229,11 +305,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.aelu, float, x)
 
     @staticmethod
-    @_library_function("math", "selu")
-    def selu(x):
+    def selu(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes the Scaled Exponential Linear Unit activation function of x
         $\mathrm{SELU}(x) = s*(\mathrm{max}(0, x)+a*\mathrm{min}(0, \mathrm{exp}(x)-1))$,
         $a=1.67326324$, $s=1.05070098$
@@ -244,11 +319,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.selu, float, x)
 
     @staticmethod
-    @_library_function("math", "relu")
-    def relu(x):
+    def relu(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes the Rectified Linear Unit activation function of x
           $\mathrm{ReLU}(x) = \mathrm{max}(0, x)$
 
@@ -258,11 +332,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.relu, float, x)
 
     @staticmethod
-    @_library_function("math", "plrelu")
-    def plrelu(x, a):
+    def plrelu(x: Scalar[float], a: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes the Parametric Leaky Rectified Linear Unit activation function of x
           $\mathrm{PLReLU}(x, a) = \mathrm{max}(0, x)+a*\mathrm{min}(0, x)$
 
@@ -273,11 +346,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x, a)
+        return _create_output_expression(Math.plrelu, float, x, a)
 
     @staticmethod
-    @_library_function("math", "lrelu")
-    def lrelu(x):
+    def lrelu(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes the Leaky Rectified Linear Unit activation function of x
           $\mathrm{LReLU}(x)=\mathrm{max}(0, x)+0.01*\mathrm{min}(0, x)$
 
@@ -287,11 +359,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.lrelu, float, x)
 
     @staticmethod
-    @_library_function("math", "sin2pi")
-    def sin2pi(x):
+    def sin2pi(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{sin}(2 \pi x)$.
         This is more efficient than `Math.sin(2*np.pi*x)`.
         In addition, this function is immune to overflows: An overflow means that the argument gets a $\pm 16$, which does not change the result due to the periodicity of the sine function.
@@ -302,14 +373,13 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.sin2pi, float, x)
 
     @staticmethod
-    @_library_function("math", "cos2pi")
-    def cos2pi(x):
+    def cos2pi(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{cos}(2 \pi x)$.
         This is more efficient than Math.cos($2 \pi x$).
-        In addition, this function is immune to overflows: An overflow means that the argument gets a :math:`\pm 16`, which does not change the result due to the periodcity of the cosine function.
+        In addition, this function is immune to overflows: An overflow means that the argument gets a :math:`\pm 16`, which does not change the result due to the periodicity of the cosine function.
 
         Args:
             x (QUA variable of type fixed): the angle in radians
@@ -317,42 +387,39 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.cos2pi, float, x)
 
     @staticmethod
-    @_library_function("math", "atan_2pi")
-    def atan_2pi(x):
+    def atan_2pi(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{1/2 \pi * atan}(x)$
 
         -- Available from QOP 2.4 --
 
         Args:
-            x (a QUA fixed)
+            x (a QUA fixed): The tangent ratio (opposite/adjacent)
 
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.atan_2pi, float, x)
 
     @staticmethod
-    @_library_function("math", "atan2_2pi")
-    def atan2_2pi(y, x):
+    def atan2_2pi(y: Scalar[float], x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{1/2 \pi * atan2}(y,x)$
 
         -- Available from QOP 2.4 --
 
         Args:
-            y (a QUA fixed)
-            x (a QUA fixed)
+            y (a QUA fixed): The coordinate y (opposite)
+            x (a QUA fixed): The coordinate x (adjacent)
 
         Returns:
             a QUA fixed
         """
-        return (y, x)
+        return _create_output_expression(Math.atan2_2pi, float, y, x)
 
     @staticmethod
-    @_library_function("math", "abs")
-    def abs(x):
+    def abs(x: Scalar[NumberT]) -> QuaLibFunctionOutput[float]:
         r"""Computes the absolute value of x
 
         Args:
@@ -361,11 +428,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.abs, float, x)
 
     @staticmethod
-    @_library_function("math", "sin")
-    def sin(x):
+    def sin(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{sin}(x)$
 
         Args:
@@ -374,42 +440,39 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.sin, float, x)
 
     @staticmethod
-    @_library_function("math", "atan")
-    def atan(x):
+    def atan(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{atan}(x)$
 
         -- Available from QOP 2.4 --
 
         Args:
-            x (a QUA fixed which is -1 <= x <= 1))
+            x (a QUA fixed which is -1 <= x <= 1): the tangent ratio (opposite/adjacent)
 
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.atan, float, x)
 
     @staticmethod
-    @_library_function("math", "atan2")
-    def atan2(y, x):
+    def atan2(y: Scalar[float], x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{atan2}(y,x)$
 
         -- Available from QOP 2.4 --
 
         Args:
-            y (a QUA fixed)
-            x (a QUA fixed)
+            y (a QUA fixed): the coordinate y (opposite)
+            x (a QUA fixed): the coordinate x (adjacent)
 
         Returns:
             a QUA fixed
         """
-        return (y, x)
+        return _create_output_expression(Math.atan2, float, y, x)
 
     @staticmethod
-    @_library_function("math", "cos")
-    def cos(x):
+    def cos(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
         r"""Computes $\mathrm{cos}(x)$
 
         Args:
@@ -418,11 +481,10 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Math.cos, float, x)
 
     @staticmethod
-    @_library_function("math", "sum")
-    def sum(x):
+    def sum(x: Vector[NumberT]) -> QuaLibFunctionOutput[NumberT]:
         r"""Computes the sum of an array x
 
         Args:
@@ -431,11 +493,11 @@ class Math:
         Returns:
             the sum of the array, has same type as x
         """
-        return (x,)
+        standard_x = _create_qua_vector_expression(x)
+        return _create_vectors_output_expression(Math.sum, standard_x.dtype, standard_x)
 
     @staticmethod
-    @_library_function("math", "max")
-    def max(x):
+    def max(x: Vector[NumberT]) -> QuaLibFunctionOutput[NumberT]:
         r"""Computes the max of an array x
 
         Args:
@@ -444,11 +506,11 @@ class Math:
         Returns:
             the max value of the array, has same type as x
         """
-        return (x,)
+        standard_x = _create_qua_vector_expression(x)
+        return _create_vectors_output_expression(Math.max, standard_x.dtype, standard_x)
 
     @staticmethod
-    @_library_function("math", "min")
-    def min(x):
+    def min(x: Vector[NumberT]) -> QuaLibFunctionOutput[NumberT]:
         r"""Computes the min of an array x
 
         Args:
@@ -457,11 +519,11 @@ class Math:
         Returns:
             the min value of the array, has same type as x
         """
-        return (x,)
+        standard_x = _create_qua_vector_expression(x)
+        return _create_vectors_output_expression(Math.min, standard_x.dtype, standard_x)
 
     @staticmethod
-    @_library_function("math", "argmax")
-    def argmax(x):
+    def argmax(x: Vector[NumberT]) -> QuaLibFunctionOutput[int]:
         r"""Return the index of the maximum of an array
 
         Args:
@@ -470,11 +532,11 @@ class Math:
         Returns:
             the index of maximum value of array, a QUA Integer
         """
-        return (x,)
+        standard_x = _create_qua_vector_expression(x)
+        return _create_vectors_output_expression(Math.argmax, int, standard_x)
 
     @staticmethod
-    @_library_function("math", "argmin")
-    def argmin(x):
+    def argmin(x: Vector[NumberT]) -> QuaLibFunctionOutput[int]:
         r"""Return the index of the minimum of an array
 
         Args:
@@ -483,11 +545,11 @@ class Math:
         Returns:
             the index of minimum value of array, a QUA Integer
         """
-        return (x,)
+        standard_x = _create_qua_vector_expression(x)
+        return _create_vectors_output_expression(Math.argmin, int, standard_x)
 
     @staticmethod
-    @_library_function("math", "dot")
-    def dot(x, y):
+    def dot(x: Vector[NumberT], y: Vector[NumberT]) -> QuaLibFunctionOutput[NumberT]:
         r"""Calculates a dot product of two QUA arrays of identical size.
 
         Args:
@@ -502,13 +564,16 @@ class Math:
             assign(c, dot(a, b))
             ```
         """
-        return x, y
+        standard_x = _create_qua_vector_expression(x)
+        standard_y = _create_qua_vector_expression(y)
+        if standard_x.dtype != standard_y.dtype:
+            raise ValueError("Arrays data-type should be the same")
+        return _create_vectors_output_expression(Math.dot, standard_x.dtype, standard_x, standard_y)
 
 
 class Cast:
     @staticmethod
-    @_library_function("cast", "mul_int_by_fixed")
-    def mul_int_by_fixed(x, y):
+    def mul_int_by_fixed(x: Scalar[int], y: Scalar[float]) -> QuaLibFunctionOutput[int]:
         r"""Multiplies an int x by a fixed y, returning an int
 
         Args:
@@ -518,11 +583,10 @@ class Cast:
         Returns:
             a QUA int which equals x*y
         """
-        return x, y
+        return _create_output_expression(Cast.mul_int_by_fixed, int, x, y)
 
     @staticmethod
-    @_library_function("cast", "mul_fixed_by_int")
-    def mul_fixed_by_int(x, y):
+    def mul_fixed_by_int(x: Scalar[float], y: Scalar[int]) -> QuaLibFunctionOutput[float]:
         r"""Multiplies a fixed x by an int y, returning a fixed
 
         Args:
@@ -532,11 +596,10 @@ class Cast:
         Returns:
             a QUA fixed which equals x*y
         """
-        return x, y
+        return _create_output_expression(Cast.mul_fixed_by_int, float, x, y)
 
     @staticmethod
-    @_library_function("cast", "to_int")
-    def to_int(x):
+    def to_int(x: Scalar[NumberT]) -> QuaLibFunctionOutput[int]:
         r"""Casts a variable to int. Supports int, fixed or bool
 
         Args:
@@ -545,11 +608,10 @@ class Cast:
         Returns:
             a QUA int
         """
-        return (x,)
+        return _create_output_expression(Cast.to_int, int, x)
 
     @staticmethod
-    @_library_function("cast", "to_fixed")
-    def to_fixed(x):
+    def to_fixed(x: Scalar[NumberT]) -> QuaLibFunctionOutput[float]:
         r"""Casts a variable to fixed. Supports int, fixed or bool
 
         Args:
@@ -558,11 +620,10 @@ class Cast:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Cast.to_fixed, float, x)
 
     @staticmethod
-    @_library_function("cast", "to_bool")
-    def to_bool(x):
+    def to_bool(x: Scalar[NumberT]) -> QuaLibFunctionOutput[bool]:
         r"""Casts a variable to bool. Supports int, fixed or bool
 
         Args:
@@ -571,11 +632,10 @@ class Cast:
         Returns:
             a QUA bool
         """
-        return (x,)
+        return _create_output_expression(Cast.to_bool, bool, x)
 
     @staticmethod
-    @_library_function("cast", "unsafe_cast_int")
-    def unsafe_cast_int(x):
+    def unsafe_cast_int(x: Scalar[NumberT]) -> QuaLibFunctionOutput[int]:
         r"""Treats the given input variable, bitwise, as an integer.
         For a given fixed point number, this is equivalent to multiplying by
         $2^{28}$
@@ -588,11 +648,10 @@ class Cast:
         Returns:
             a QUA int
         """
-        return (x,)
+        return _create_output_expression(Cast.unsafe_cast_int, int, x)
 
     @staticmethod
-    @_library_function("cast", "unsafe_cast_fixed")
-    def unsafe_cast_fixed(x):
+    def unsafe_cast_fixed(x: Scalar[NumberT]) -> QuaLibFunctionOutput[float]:
         r"""Treats the given input variable, bitwise, as a fixed point number.
         For a given integer, this is equivalent to multiplying by $2^{-28}$
 
@@ -604,11 +663,10 @@ class Cast:
         Returns:
             a QUA fixed
         """
-        return (x,)
+        return _create_output_expression(Cast.unsafe_cast_fixed, float, x)
 
     @staticmethod
-    @_library_function("cast", "unsafe_cast_bool")
-    def unsafe_cast_bool(x):
+    def unsafe_cast_bool(x: Scalar[NumberT]) -> QuaLibFunctionOutput[bool]:
         r"""Treats the given input variable, bitwise, as a boolean.
         A boolean is determined by the right-most bit, so for a given integer, this is
         equivalent to a parity check.
@@ -624,13 +682,16 @@ class Cast:
         Returns:
             a QUA bool
         """
-        return (x,)
+        return _create_output_expression(Cast.unsafe_cast_bool, bool, x)
 
 
 class Util:
     @staticmethod
-    @_library_function("util", "cond")
-    def cond(condition, true_result, false_result):
+    def cond(
+        condition: Scalar[bool],
+        true_result: Scalar[NumberT],
+        false_result: Scalar[NumberT],
+    ) -> QuaLibFunctionOutput[NumberT]:
         r"""Quick conditional operation. This is equivalent to a ternary operator available in some languages:
         i.e. `a ? b : c`, meaning `b` if `a` is true, or `c` if `a` is false.
         There is less computation overhead (less latency) when running this operation relative to the if conditional.
@@ -640,20 +701,32 @@ class Util:
             assign(var, cond(a, b, c)) #where a is a boolean expression
             ```
         """
-        return condition, true_result, false_result
+        true_result = create_qua_scalar_expression(true_result)
+        return _create_output_expression(Util.cond, true_result.dtype, condition, true_result, false_result)
 
 
 class Random:
-    def __init__(self, seed=None):
+    def __init__(self, seed: Optional[Scalar[int]] = None) -> None:
         r"""A class for generating pseudo-random numbers in QUA
 
         Args:
-            seed: Optional. An integer seed for the pseudo-random number
+            seed: Optional. An integer / QUA integer seed for the pseudo-random number
                 generator.
         """
-        self._seed = declare(int, value=seed if seed is not None else random.randrange((1 << 28) - 1))
+        if seed is None:
+            seed = random.randrange((1 << 28) - 1)
 
-    def set_seed(self, exp):
+        if isinstance(seed, int):
+            self._seed = declare(int, value=seed)
+        elif isinstance(seed, QuaVariable):
+            self._seed = seed
+        else:
+            # If seed is neither an int nor a QuaVariable, we still need it as a QuaVariable (and therefore use
+            # 'declare') to support assignment (used in set_seed)
+            self._seed = declare(int)
+            self.set_seed(seed)
+
+    def set_seed(self, exp: Scalar[int]) -> None:
         r"""Set the seed for the pseudo-random number generator
 
         Args:
@@ -661,29 +734,23 @@ class Random:
         """
         assign(self._seed, exp)
 
-    @_library_function("random", "rand_int")
-    def rand_int(self, max_int):
+    def rand_int(self, max_int: Scalar[int]) -> QuaLibFunctionOutput[int]:
         r"""Returns a pseudorandom integer in range [0, max_int)
 
         Args:
             max_int: maximum value
 
-        Example:
-            ```python
-            a= Random()
-            assign(b,a.rand_int(max_int))
-            ```
+        :Example:
+            >>> a = Random()
+            >>> assign(b, a.rand_int(max_int))
         """
-        return self._seed, max_int
+        return _create_output_expression(Random.rand_int, int, self._seed, max_int)
 
-    @_library_function("random", "rand_fixed")
-    def rand_fixed(self):
+    def rand_fixed(self) -> QuaLibFunctionOutput[float]:
         r"""Returns a pseudorandom fixed in range [0.0, 1.0)
 
-        Example:
-            ```python
-            a= Random()
-            assign(b,a.rand_fixed())
-            ```
+        :Example:
+            >>> a = Random()
+            >>> assign(b, a.rand_fixed())
         """
-        return (self._seed,)
+        return _create_output_expression(Random.rand_fixed, float, self._seed)

@@ -1,11 +1,10 @@
 import logging
-from typing import List, Type, Tuple, Union, Literal, Mapping, Iterable, Optional, TypedDict, cast, overload
+from typing import List, Type, Union, Literal, Mapping, Iterable, Optional, Sequence, TypedDict, cast, overload
 
 from qm.utils import LOG_LEVEL_MAP
 from qm.octave import QmOctaveConfig
 from qm.persistence import BaseStore
 from qm.grpc.qua_config import QuaConfig
-from qm.utils.async_utils import run_async
 from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.program import Program, load_config
 from qm.grpc.compiler import CompilerMessage
@@ -14,15 +13,15 @@ from qm.grpc.frontend import SimulatedResponsePart
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
 from qm.type_hinting.config_types import DictQuaConfig
-from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
 from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.api.simulation_api import create_simulation_request
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.elements.up_converted_input import UpconvertedInputNewApi
+from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, transfer_statuses_to_enum
-from qm.exceptions import QopResponseError, CompilationException, FailedToExecuteJobException
 from qm.octave.qm_octave import QmOctaveForNewApi, create_mixer_correction, create_dc_offset_octave_update
+from qm.exceptions import QopResponseError, CompilationException, JobNotFoundException, FailedToExecuteJobException
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params, get_request_compiler_options
 from qm.octave.octave_mixer_calibration import (
     AutoCalibrationParams,
@@ -101,7 +100,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
         """
         config_pb = load_config(config)
         request = UpdateConfigRequest(quantum_machine_id=self._id, config=config_pb)
-        run_async(self._stub.update_config(request, timeout=self._timeout))
+        self._run(self._stub.update_config(request, timeout=self._timeout))
 
     def get_jobs(
         self,
@@ -164,6 +163,8 @@ class QmApi(BaseApiV2[QmServiceStub]):
             job.wait_until("running")
             ```
         """
+        self._caps.validate(program.used_capabilities)
+
         if compiler_options is None:
             compiler_options = CompilerOptionArguments()
         program.qua_program.compiler_options = get_request_compiler_options(compiler_options)
@@ -249,12 +250,20 @@ class QmApi(BaseApiV2[QmServiceStub]):
         Returns:
             The job
         """
-        return self._get_job(job_id, self._store)
+        jobs_data = self.get_jobs(job_ids=[job_id])
+        if not jobs_data:
+            raise JobNotFoundException(job_id)
+        else:
+            job_data = jobs_data[0]
+            if self._caps.supports(QopCaps.waveform_report_endpoint) and job_data.is_simulation:
+                return self._get_simulated_job(job_id)
+
+            return self._get_job(job_id, self._store)
 
     def _get_job(self, job_id: str, store: BaseStore) -> JobApi:
         return JobApi(self.connection_details, job_id, store, self._caps)
 
-    def _get_simulated_job(self, job_id: str, simulated: SimulatedResponsePart) -> SimulatedJobApi:
+    def _get_simulated_job(self, job_id: str, simulated: Union[SimulatedResponsePart, None] = None) -> SimulatedJobApi:
         return self.SIMULATED_JOB_CLASS(
             self.connection_details, job_id, store=self._store, simulated_response=simulated, capabilities=self._caps
         )
@@ -282,8 +291,10 @@ class QmApi(BaseApiV2[QmServiceStub]):
             strict: This parameter is deprecated, please use `compiler_options`
             flags: This parameter is deprecated, please use `compiler_options`
         Returns:
-            A ``QmJob`` object (see QM Job API).
+            A ``QmJob`` object (see Job API).
         """
+        self._caps.validate(program.used_capabilities)
+
         standardized_compiler_options = standardize_compiler_params(compiler_options, strict, flags)
         standard_request = create_simulation_request(
             self._get_pb_config(), program, simulate, standardized_compiler_options
@@ -317,7 +328,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
             program: A QUA ``program()`` object to execute
             compiler_options: Optional arguments for compilation.
         Returns:
-            A ``QmJob`` object (see QM Job API).
+            A ``QmJob`` object (see Job API).
         """
         # todo: change to an API call that stops programs, clears queue, executes, and returns job once it's running
         raise NotImplementedError()
@@ -369,7 +380,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
     def calibrate_element(
         self,
         qe: str,
-        lo_if_dict: Optional[Mapping[float, Tuple[float, ...]]] = None,
+        lo_if_dict: Optional[Mapping[float, Sequence[float]]] = None,
         save_to_db: bool = True,
         params: Optional[AutoCalibrationParams] = None,
     ) -> MixerCalibrationResults:

@@ -12,12 +12,12 @@ from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.octave.octave_manager import OctaveManager
 from qm.api.v2.qm_api_old import QmApiWithDeprecations
 from qm.type_hinting.config_types import DictQuaConfig
-from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.qm_api import QmApi, handle_simulation_error
-from qm.exceptions import OpenQmException, QopResponseError
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
-from qm.grpc.frontend import InterOpxConnection, ExecutionRequestSimulate
+from qm.api.models.capabilities import QopCaps, ServerCapabilities
+from qm.exceptions import OpenQmException, QopResponseError, JobNotFoundException
+from qm.grpc.frontend import InterOpxConnection, SimulatedResponsePart, ExecutionRequestSimulate
 from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, JobApiWithDeprecations, transfer_statuses_to_enum
 from qm.grpc.v2 import (
     GetJobsRequest,
@@ -130,7 +130,15 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         )
 
     def get_job(self, job_id: str) -> JobApi:
-        return self.JOB_CLASS(self.connection_details, job_id, store=self._store, capabilities=self._caps)
+        jobs_data = self.get_jobs(job_ids=[job_id])
+        if not jobs_data:
+            raise JobNotFoundException(job_id)
+        else:
+            job_data = jobs_data[0]
+            if self._caps.supports(QopCaps.waveform_report_endpoint) and job_data.is_simulation:
+                return self._get_simulated_job(job_id)
+
+            return self.JOB_CLASS(self.connection_details, job_id, store=self._store, capabilities=self._caps)
 
     def get_jobs(
         self,
@@ -159,7 +167,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
             close_other_machines = True
         request = OpenQuantumMachineRequest(
             config=config,
-            close_mode=OpenQuantumMachineRequestCloseMode.CLOSE_MODE_IF_NEEDED
+            close_mode=OpenQuantumMachineRequestCloseMode.CLOSE_MODE_IF_NEEDED  # type: ignore[arg-type]
             if close_other_machines
             else OpenQuantumMachineRequestCloseMode.CLOSE_MODE_UNSPECIFIED,
         )
@@ -216,7 +224,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
     def get_controllers(self) -> Mapping[str, ControllerBase]:
         response = self._run(self._stub.get_controllers(GetControllersRequest(), timeout=self._timeout))
         to_return = {}
-        correction_offset = 0 if self._caps.opx1000_fems_return_1_based else 1
+        correction_offset = 0 if self._caps.supports(QopCaps.opx1000_fems_return_1_based) else 1
         for name, value in response.control_devices.items():
             if value.controller_type == 1:
                 to_return[name] = ControllerOPX1000(
@@ -238,6 +246,11 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
 
     def validate_qua_config(self, config: DictQuaConfig) -> None:
         pass
+
+    def _get_simulated_job(self, job_id: str, simulated: Union[SimulatedResponsePart, None] = None) -> SimulatedJobApi:
+        return self.QM_CLASS.SIMULATED_JOB_CLASS(
+            self.connection_details, job_id, store=self._store, simulated_response=simulated, capabilities=self._caps
+        )
 
     def simulate(
         self,
@@ -262,13 +275,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
             lvl = LOG_LEVEL_MAP[msg.level]
             logger.log(lvl, msg.message)
 
-        return self.QM_CLASS.SIMULATED_JOB_CLASS(
-            self.connection_details,
-            response.job_id,
-            store=self._store,
-            simulated_response=response.simulated,
-            capabilities=self._caps,
-        )
+        return self._get_simulated_job(response.job_id, response.simulated)
 
     def list_open_qms(self) -> List[str]:
         request = ListOpenQuantumMachinesRequest()

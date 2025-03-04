@@ -4,7 +4,6 @@ import traceback
 from typing import Set, Dict, List, Tuple, Optional
 
 from qm.utils import SERVICE_HEADER_NAME
-from qm.utils.async_utils import run_async
 from qm.api.frontend_api import FrontendApi
 from qm.api.models.info import QuaMachineInfo
 from qm.api.models.debug_data import DebugData
@@ -29,12 +28,16 @@ def detect_server(
     timeout: Optional[float] = None,
     max_message_size: Optional[int] = None,
     extra_headers: Optional[Dict[str, str]] = None,
+    follow_gateway_redirections: bool = True,
+    async_follow_redirects: bool = False,
+    async_trust_env: bool = True,
 ) -> ServerDetails:
     ports_to_try = _get_ports(port_from_user_config, user_provided_port)
     extra_headers = extra_headers or {}
     headers = _create_headers(extra_headers, "gateway", cluster_name, user_token)
     errors: List[Tuple[str, str]] = []
 
+    octaves: Dict[str, Tuple[str, int]] = {}
     for port in ports_to_try:
         dst = f"{host}:{port}"
         logger.debug(f"Probing gateway at: {dst}")
@@ -50,9 +53,11 @@ def detect_server(
             timeout=timeout if timeout else BASE_TIMEOUT,
             debug_data=debug_data if add_debug_data else None,
         )
-
         try:
-            connection_details, octaves = _redirect(connection_details)
+            if follow_gateway_redirections:
+                connection_details, octaves = _redirect(
+                    connection_details, async_follow_redirects=async_follow_redirects, async_trust_env=async_trust_env
+                )
             info, server_version = _connect(connection_details)
         except Exception as e:
             errors.append((dst, f"{e}\n{traceback.format_exc()}"))
@@ -88,11 +93,16 @@ def detect_server(
     raise QmServerDetectionError(message)
 
 
-def _redirect(connection_details: ConnectionDetails) -> Tuple[ConnectionDetails, Dict[str, Tuple[str, int]]]:
-    response_details = run_async(
-        send_redirection_check(
-            connection_details.host, connection_details.port, connection_details.headers, connection_details.timeout
-        )
+def _redirect(
+    connection_details: ConnectionDetails, async_follow_redirects: bool, async_trust_env: bool
+) -> Tuple[ConnectionDetails, Dict[str, Tuple[str, int]]]:
+    response_details = send_redirection_check(
+        connection_details.host,
+        connection_details.port,
+        connection_details.headers,
+        timeout=connection_details.timeout,
+        async_follow_redirects=async_follow_redirects,
+        async_trust_env=async_trust_env,
     )
     octaves = {}
     if response_details.host != connection_details.host or response_details.port != connection_details.port:

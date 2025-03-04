@@ -27,6 +27,11 @@ class OctaveConfigDeprecationException(QmmException):
         )
 
 
+class JobNotFoundException(QmQuaException):
+    def __init__(self, job_id: str) -> None:
+        super().__init__(f"Job {job_id} not found.")
+
+
 class OpenQmException(QmQuaException):
     def __init__(self, message: str, *args: Any, errors: List[Tuple[str, str, str]]):
         super().__init__(message, *args)
@@ -112,8 +117,16 @@ class ConfigSerializationException(QmQuaException):
     pass
 
 
-class UnsupportedCapabilityError(QmQuaException):
+class UnsupportedCapabilitiesError(QmQuaException):
     pass
+
+
+class CapabilitiesNotInitializedError(QmQuaException):
+    def __init__(self) -> None:
+        super().__init__(
+            "Capabilities are required but not initialized. Please use QuantumMachinesManager to connect to a QOP server"
+            " or manually set the capabilities using QuantumMachinesManager.set_capabilities_offline()."
+        )
 
 
 class InvalidConfigError(QmQuaException):
@@ -255,6 +268,10 @@ class ElementInputConnectionAmbiguity(ConfigValidationException):
 
 
 class StreamProcessingDataLossError(QmQuaException):
+    pass
+
+
+class DataFetchingError(QmQuaException):
     pass
 
 

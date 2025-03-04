@@ -65,7 +65,7 @@ class QmOctaveConfig:
         self._loopbacks: Optional[Dict[LoopbackInfo[OctaveLOSource], LoopbackInfo[OctaveOutput]]] = None
         self._opx_octave_port_mapping: Optional[ConnectionMapping] = None
         self._octave_to_opx_port_mapping: Optional[Dict[Tuple[str, str], StandardPort]] = None
-        self._calibration_db: Optional[CalibrationDB] = None
+        self._calibration_db: Optional[AbstractCalibrationDB] = None
         self._fan = fan
         self._connection_headers: Dict[str, str] = {}
 
@@ -300,7 +300,7 @@ class QmOctaveConfig:
         return default_connections
 
     @property
-    def calibration_db(self) -> Optional[CalibrationDB]:
+    def calibration_db(self) -> Optional[AbstractCalibrationDB]:
         return self._calibration_db
 
     def add_lo_loopback(

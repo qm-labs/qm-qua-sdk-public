@@ -9,6 +9,7 @@ from qm.jobs.job_queue_old_api import QmQueue
 from qm.user_config import UserConfig  # noqa
 from qm.jobs.pending_job import QmPendingJob  # noqa
 from qm.quantum_machine import QuantumMachine  # noqa
+from qm.api.models.capabilities import QopCaps  # noqa
 from qm.program import Program, _Program, _ResultAnalysis  # noqa
 from qm.api.models.compiler import CompilerOptionArguments  # noqa
 from qm.quantum_machines_manager import QuantumMachinesManager  # noqa
@@ -44,6 +45,7 @@ __all__ = [
     "InterOpxPairing",
     "LoopbackInterface",
     "DictQuaConfig",
+    "QopCaps",
 ]
 
 warnings.filterwarnings("default", category=DeprecationWarning, module="qm")

@@ -2,6 +2,7 @@ import logging
 from typing import Dict, List, Type, Tuple, AsyncIterator
 
 from qm.utils.async_utils import run_async
+from qm.api.models.jobs import JobNamedResult
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.base_api import BaseApi, connection_error_handle
 from qm.StreamMetadata import StreamMetadata, StreamMetadataError, _get_stream_metadata_dict_from_proto_resp
@@ -12,7 +13,6 @@ from qm.grpc.results_analyser import (
     JobResultsServiceStub,
     GetJobNamedResultRequest,
     GetJobErrorsResponseError,
-    GetJobNamedResultResponse,
     GetJobResultSchemaRequest,
     GetProgramMetadataRequest,
     GetJobResultSchemaResponse,
@@ -42,13 +42,15 @@ class JobResultServiceApi(BaseApi[JobResultsServiceStub]):
         response = run_async(self._stub.get_job_errors(request, timeout=self._timeout))
         return response.errors
 
-    def get_job_named_result(
+    async def get_job_named_result(
         self, output_name: str, long_offset: int, limit: int
-    ) -> AsyncIterator[GetJobNamedResultResponse]:
+    ) -> AsyncIterator[JobNamedResult]:
         request = GetJobNamedResultRequest(
             job_id=self._id, output_name=output_name, long_offset=long_offset, limit=limit
         )
-        return self._stub.get_job_named_result(request, timeout=self._timeout)
+        response = self._stub.get_job_named_result(request, timeout=self._timeout)
+        async for result in response:
+            yield JobNamedResult(data=result.data, count_of_items=result.count_of_items)
 
     def get_job_state(self) -> GetJobStateResponse:
         request = GetJobStateRequest(job_id=self._id)

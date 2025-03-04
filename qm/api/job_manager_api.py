@@ -10,10 +10,10 @@ from qm.utils.async_utils import run_async
 from qm.grpc.general_messages import Matrix
 from qm.api.models.jobs import PendingJobData
 from qm.grpc.qm_manager import GetRunningJobRequest
-from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
 from qm.utils.general_utils import create_input_stream_name
 from qm.api.base_api import BaseApi, connection_error_handle
+from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.containers.capabilities_container import CapabilitiesContainer
 from qm.api.stubs.deprecated_job_manager_stub import DeprecatedJobManagerServiceStub
 from qm.grpc.job_manager import (
@@ -231,6 +231,6 @@ class DeprecatedJobManagerApi(JobManagerBaseApi[DeprecatedJobManagerServiceStub]
 def create_job_manager_from_api(
     api: BaseApi[Any], capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]
 ) -> Union[JobManagerApi, DeprecatedJobManagerApi]:
-    if capabilities.supports_new_grpc_structure:
+    if capabilities.supports(QopCaps.new_grpc_structure):
         return JobManagerApi(api.connection_details)
     return DeprecatedJobManagerApi(api.connection_details)

@@ -3,7 +3,7 @@ import json
 import logging
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Union, Mapping, Iterable, Optional, TypedDict
+from typing import Any, Dict, List, Union, Mapping, Iterable, Optional, TypedDict, Collection
 
 import marshmallow
 from octave_sdk.octave import OctaveDetails
@@ -33,8 +33,10 @@ from qm.program._qua_config_to_pb import load_config_pb
 from qm.octave import QmOctaveConfig, AbstractCalibrationDB
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm._octaves_container import load_config_from_calibration_db
+from qm.api.models.info import QuaMachineInfo, ImplementationInfo
 from qm.program._qua_config_schema import validate_config_capabilities
 from qm.api.simulation_api import SimulationApi, create_simulation_request
+from qm.api.models.capabilities import QopCaps, Capability, ServerCapabilities
 from qm.containers.capabilities_container import create_capabilities_container
 from qm.octave.octave_manager import OctaveManager, prep_config_for_calibration
 from qm.api.v2.qmm_api import Controller, ControllerBase, QmmApiWithDeprecations
@@ -73,11 +75,13 @@ SERVER_TO_QOP_VERSION_MAP = {
     "2.60-0b17cac": "2.2.2",
     "2.70-7abf0e0": "2.4.0",
     "2.70-ed75211": "2.4.2",
+    "2.70-0b3bd6b": "2.4.3",
     "a6f8bc5": "3.1.0",
     "fcdfb69": "3.1.1",
     "3.0-beta-78b5e00": "3.2.0",
     "3.0-beta-b43e229": "3.2.2",
     "3.0-beta-ba2d179": "3.2.3",
+    "3.0-beta-a3d43d5": "3.3.0",
 }
 
 
@@ -103,17 +107,22 @@ class QuantumMachinesManager:
         file_store_root: str = ".",
         octave: Optional[QmOctaveConfig] = None,
         octave_calibration_db_path: Optional[Union[PathLike, AbstractCalibrationDB]] = None,
+        follow_gateway_redirections: bool = True,
+        async_follow_redirects: bool = False,
+        async_trust_env: bool = True,
     ):
         """
         Args:
-            host (string): Host where to find the QM orchestrator. If
-                ``None``, local settings are used
-            port: Port where to find the QM orchestrator. If None, local
-                settings are used
-            cluster_name (string): The name of the cluster, allows redirection between devices
-            timeout (float): The timeout, in seconds, for detecting the qmm. Default is 60
-            log_level(string): The logging level for the connection instance. Defaults to `INFO`. Please check `logging` for available options
-            octave_calibration_db_path (PathLike): The path for storing the Octave's calibration database
+            host (string): Host where to find the QM orchestrator. If ``None``, local settings are used.
+            port: Port where to find the QM orchestrator. If None, local settings are used.
+            cluster_name (string): The name of the cluster, requires redirection between devices.
+            timeout (float): The timeout, in seconds, for detecting the qmm. Default is 60.
+            log_level (string): The logging level for the connection instance. Defaults to `INFO`. Please check `logging` for available options.
+            octave (QmOctaveConfig): The configuration for the Octave devices. Deprecated from QOP 2.4.0.
+            octave_calibration_db_path (PathLike): The path for storing the Octave's calibration database. It can also be a calibration database which is an instance of `AbstractCalibrationDB`.
+            follow_gateway_redirections (bool): If True (default), the client will follow redirections to find a QuantumMachinesManager and Octaves. Otherwise, it will only connect to the given host and port.
+            async_follow_redirects (bool): If False (default), async httpx will not follow redirections, relevant only in case follow_gateway_redirections is True.
+            async_trust_env (bool): If True (default), async httpx will read the environment variables for settings as proxy settings, relevant only in case follow_gateway_redirections is True.
         """
         set_logging_level(log_level)
         self._user_config = UserConfig.create_from_file()
@@ -134,6 +143,9 @@ class QuantumMachinesManager:
             add_debug_data=add_debug_data,
             connection_headers=connection_headers,
             credentials=credentials,
+            follow_gateway_redirections=follow_gateway_redirections,
+            async_follow_redirects=async_follow_redirects,
+            async_trust_env=async_trust_env,
         )
         if self._server_details.octaves:
             if octave is None:
@@ -159,7 +171,7 @@ class QuantumMachinesManager:
         self._octave_config = octave
         self._octave_manager = OctaveManager(self._octave_config, self, self._caps)
         self._api = None
-        if self._caps.supports_api_v2:
+        if self._caps.supports(QopCaps.qop3):
             self._api = QmmApiWithDeprecations(
                 self._server_details.connection_details,
                 store=self._store,
@@ -186,6 +198,9 @@ class QuantumMachinesManager:
         add_debug_data: bool,
         credentials: Optional[ssl.SSLContext],
         connection_headers: Optional[Dict[str, str]],
+        follow_gateway_redirections: bool,
+        async_follow_redirects: bool,
+        async_trust_env: bool,
     ) -> ServerDetails:
         server_details = detect_server(
             cluster_name=self._cluster_name,
@@ -197,6 +212,9 @@ class QuantumMachinesManager:
             add_debug_data=add_debug_data,
             timeout=timeout,
             extra_headers=connection_headers,
+            follow_gateway_redirections=follow_gateway_redirections,
+            async_follow_redirects=async_follow_redirects,
+            async_trust_env=async_trust_env,
         )
         create_capabilities_container(server_details.qua_implementation)
         return server_details
@@ -204,6 +222,10 @@ class QuantumMachinesManager:
     @property
     def store(self) -> BaseStore:
         return self._store
+
+    @property
+    def capabilities(self) -> ServerCapabilities:
+        return self._caps
 
     @property
     def octave_manager(self) -> OctaveManager:
@@ -264,14 +286,14 @@ class QuantumMachinesManager:
 
         if self._api is None:
             gateway = self._server_details.server_version
-            controllers = self._get_controllers_as_dict()
+            controllers = set(self._get_controllers_as_dict())
         else:
             response = self._api.get_version()
             gateway = response.gateway
-            controllers = response.controllers
+            controllers = set(response.controllers)
         return DevicesVersion(
             gateway=gateway,
-            controllers={k: None for k in controllers},
+            controllers={k: None for k in controllers},  # type: ignore[misc]
             qm_qua=__version__,
             octaves=octaves,
         )
@@ -335,7 +357,7 @@ class QuantumMachinesManager:
                 raise NotImplementedError("keep_dc_offsets_when_closing is not supported in the current QOP version")
             return self._api.open_qm(loaded_config, close_other_machines)
 
-        if not self._caps.supports_keeping_dc_offsets:
+        if not self._caps.supports(QopCaps.keeping_dc_offsets):
             if keep_dc_offsets_when_closing:
                 raise QmmException(
                     "The server does not support keeping DC offsets when closing. "
@@ -444,8 +466,10 @@ class QuantumMachinesManager:
             flags: deprecated way to provide flags to the compiler
 
         Returns:
-            a ``QmJob`` object (see QM Job API).
+            a ``QmJob`` object (see Job API).
         """
+        self._caps.validate(program.used_capabilities)
+
         standardized_options = standardize_compiler_params(compiler_options, strict, flags)
         pb_config = load_config(config)
 
@@ -654,3 +678,27 @@ class QuantumMachinesManager:
     @property
     def _debug_data(self) -> Optional[DebugData]:
         return self._server_details.connection_details.debug_data
+
+    @staticmethod
+    def set_capabilities_offline(
+        capabilities: Optional[Union[Collection[Capability], ServerCapabilities]] = None
+    ) -> None:
+        """
+        Some modules of the sdk cannot be run without the capabilities of the QOP server, which is automatically set
+        when connecting to the server via QuantumMachinesManager (in "_initialize_connection"). This function provides
+        an alternative to connecting to a QOP server via QuantumMachinesManager, by setting the capabilities
+        manually and globally.
+
+        Warning: Setting the capabilities when there is an open QuantumMachinesManager will override them and can cause unexpected behavior.
+
+        Args:
+            capabilities: A set of capabilities (or a ServerCapabilities object) to create the container with. If None,
+            all capabilities are set. Use QopCaps class (from qm import QopCaps) to get all capabilities.
+        """
+        if capabilities is None:
+            capabilities = QopCaps.get_all()
+        elif isinstance(capabilities, ServerCapabilities):
+            capabilities = capabilities.supported_capabilities
+
+        capabilities_qop_names = [cap.qop_name for cap in capabilities]
+        create_capabilities_container(QuaMachineInfo(capabilities_qop_names, ImplementationInfo("", "", "")))

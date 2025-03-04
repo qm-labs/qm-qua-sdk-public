@@ -1,27 +1,19 @@
-import dataclasses
 from pathlib import Path
-from typing import List, Union, Optional
+from typing import Set, Union, Optional, FrozenSet
 
 from qm import DictQuaConfig
 from qm.grpc.qua_config import QuaConfig
+from qm.api.models.capabilities import Capability
 from qm.program._qua_config_schema import load_config
 from qm.program._ResultAnalysis import _ResultAnalysis
 from qm.program.StatementsCollection import StatementsCollection
 from qm.grpc.qua import (
     QuaProgram,
-    QuaProgramType,
     QuaProgramScript,
     QuaResultAnalysis,
     QuaProgramVarDeclaration,
-    QuaProgramLiteralExpression,
     QuaProgramStatementsCollection,
 )
-
-
-@dataclasses.dataclass
-class ProgramMetadata:
-    uses_command_timestamps: bool
-    uses_fast_frame_rotation: bool
 
 
 class Program:
@@ -40,61 +32,10 @@ class Program:
         self._qua_config = config
         self._result_analysis = _ResultAnalysis(self._program.result_analysis)
         self._is_in_scope = False
-        self._metadata = ProgramMetadata(uses_command_timestamps=False, uses_fast_frame_rotation=False)
-
-    def _declare_var(
-        self,
-        name: str,
-        var_type: QuaProgramType,
-        size: int,
-        value: Union[QuaProgramLiteralExpression, List[QuaProgramLiteralExpression]],
-        dim: int,
-        is_input_stream: bool,
-    ) -> None:
-        if not isinstance(value, list):
-            value = [value]
-        declaration = QuaProgramVarDeclaration(
-            name=name,
-            type=var_type,
-            size=size,
-            dim=dim,
-            is_input_stream=is_input_stream,
-            value=list(value),
-        )
-        self._program.script.variables.append(declaration)
+        self._used_capabilities: Set[Capability] = set()
 
     def add_declaration(self, declaration: QuaProgramVarDeclaration) -> None:
         self._program.script.variables.append(declaration)
-
-    def declare_int(
-        self,
-        name: str,
-        size: int,
-        value: Union[QuaProgramLiteralExpression, List[QuaProgramLiteralExpression]],
-        dim: int,
-        is_input_stream: bool,
-    ) -> None:
-        self._declare_var(name, QuaProgramType.INT, size, value, dim, is_input_stream)
-
-    def declare_real(
-        self,
-        name: str,
-        size: int,
-        value: Union[QuaProgramLiteralExpression, List[QuaProgramLiteralExpression]],
-        dim: int,
-        is_input_stream: bool,
-    ) -> None:
-        self._declare_var(name, QuaProgramType.REAL, size, value, dim, is_input_stream)
-
-    def declare_bool(
-        self,
-        name: str,
-        size: int,
-        value: Union[QuaProgramLiteralExpression, List[QuaProgramLiteralExpression]],
-        dim: int,
-        is_input_stream: bool,
-    ) -> None:
-        self._declare_var(name, QuaProgramType.BOOL, size, value, dim, is_input_stream)
 
     @property
     def body(self) -> StatementsCollection:
@@ -152,15 +93,8 @@ class Program:
         return self._is_in_scope
 
     @property
-    def metadata(self) -> ProgramMetadata:
-        return self._metadata
+    def used_capabilities(self) -> FrozenSet[Capability]:
+        return frozenset(self._used_capabilities)
 
-    def set_metadata(
-        self,
-        uses_command_timestamps: Optional[bool] = None,
-        uses_fast_frame_rotation: Optional[bool] = None,
-    ) -> None:
-        if uses_command_timestamps is not None:
-            self._metadata.uses_command_timestamps = uses_command_timestamps
-        if uses_fast_frame_rotation is not None:
-            self.metadata.uses_fast_frame_rotation = uses_fast_frame_rotation
+    def add_used_capability(self, capability: Capability) -> None:
+        self._used_capabilities.add(capability)

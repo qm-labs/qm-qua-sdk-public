@@ -1,21 +1,48 @@
-from typing import TYPE_CHECKING, List, Union, Sequence
+import abc
+from typing import TYPE_CHECKING, List, Tuple
 
 from betterproto.lib.google.protobuf import Value, ListValue
 
 from qm.grpc.qua import QuaResultAnalysis
 
 if TYPE_CHECKING:
-    from qm.qua._dsl import _ResultSource
+    from qm.qua._dsl import _ResultStream
 
 
-class _OutputStream:
-    def __init__(self, input_stream: "_ResultSource", operator_array: Sequence[str], tag: str):
+class _OutputStream(metaclass=abc.ABCMeta):
+    """Even though it looks like a stream, it does not support operations (like __add__) and hence, a different object"""
+
+    def __init__(self, input_stream: "_ResultStream", tag: str):
         self._input_stream = input_stream
-        self._operator_array: Sequence[Union[List[str], str]] = operator_array
         self.tag = tag
 
-    def to_proto(self) -> List[Union[List[str], str]]:
-        return list(self._operator_array) + [self._input_stream._to_proto()]
+    def to_proto(self) -> "ListValue":
+        values = [Value(string_value=s) for s in self._operator_array]
+        values.append(self._input_stream.to_proto())
+        return ListValue(values=values)
+
+    @property
+    @abc.abstractmethod
+    def _operator_array(self) -> Tuple[str, ...]:
+        pass
+
+
+class _SaveOutputStream(_OutputStream):
+    @property
+    def _operator_array(self) -> Tuple[str, ...]:
+        return "save", self.tag
+
+
+class _SaveAllOutputStream(_OutputStream):
+    @property
+    def _operator_array(self) -> Tuple[str, ...]:
+        return "saveAll", self.tag
+
+
+class _AutoSaveAllOutputStream(_OutputStream):
+    @property
+    def _operator_array(self) -> Tuple[str, ...]:
+        return "saveAll", self.tag, "auto"
 
 
 class _ResultAnalysis:
@@ -23,36 +50,25 @@ class _ResultAnalysis:
         self._result_analysis = result_analysis
         self._saves: List[_OutputStream] = []
 
-    def _add_output_stream(self, tag: str, expression: "_ResultSource", operator_array: List[str]) -> None:
+    def _add_output_stream(self, output_stream: _OutputStream) -> None:
         for save in self._saves:
-            if save.tag == tag:
+            if save.tag == output_stream.tag:
                 raise Exception("can not save two streams with the same tag")
-        self._saves.append(_OutputStream(expression, operator_array, tag))
+        self._saves.append(output_stream)
 
-    def save(self, tag: str, expression: "_ResultSource") -> None:
-        self._add_output_stream(tag, expression, operator_array=["save", tag])
+    def save(self, tag: str, expression: "_ResultStream") -> None:
+        self._add_output_stream(_SaveOutputStream(expression, tag))
 
-    def save_all(self, tag: str, expression: "_ResultSource") -> None:
-        self._add_output_stream(tag, expression, operator_array=["saveAll", tag])
+    def save_all(self, tag: str, expression: "_ResultStream") -> None:
+        self._add_output_stream(_SaveAllOutputStream(expression, tag))
 
-    def auto_save_all(self, tag: str, expression: "_ResultSource") -> None:
-        self._add_output_stream(tag, expression, operator_array=["saveAll", tag, "auto"])
+    def auto_save_all(self, tag: str, expression: "_ResultStream") -> None:
+        self._add_output_stream(_AutoSaveAllOutputStream(expression, tag))
 
     def _add_pipeline(self, output: _OutputStream) -> None:
         proto_output = output.to_proto()
-        value = _to_list_value(proto_output)
-        self._result_analysis.model.append(value)
+        self._result_analysis.model.append(proto_output)
 
     def generate_proto(self) -> None:
         for save in self._saves:
             self._add_pipeline(save)
-
-
-def _to_list_value(from_list: Sequence[Union[str, List[str]]]) -> ListValue:
-    res = ListValue()
-    for item in from_list:
-        if isinstance(item, str):
-            res.values.append(Value(string_value=item))
-        elif isinstance(item, list):
-            res.values.append(Value(list_value=_to_list_value(item)))
-    return res

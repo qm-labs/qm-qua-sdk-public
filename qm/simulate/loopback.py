@@ -36,12 +36,13 @@ class LoopbackInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInt
         latency: The latency between the OPX outputs and its input.
         noisePower: How much noise to add to the input.
 
-    Example::
-
-    >>> job = qmm.simulate(config, prog, SimulationConfig(
-    >>>                   duration=20000,
-    >>>                   # loopback from output 1 to input 2 of controller 1:
-    >>>                   simulation_interface=LoopbackInterface([("con1", 1, "con1", 2)])
+    Example:
+        ```python
+        job = qmm.simulate(config, prog, SimulationConfig(
+        duration=20000,
+        # loopback from output 1 to input 2 of controller 1:
+        simulation_interface=LoopbackInterface([("con1", 1, "con1", 2)])
+        ```
     """
 
     def __init__(self, connections: List[SupportedConnectionTypes], latency: int = 24, noisePower: float = 0.0):

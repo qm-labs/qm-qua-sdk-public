@@ -32,7 +32,7 @@ from qm.jobs.job_queue_with_deprecations import QmQueueWithDeprecations
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
 from qm.type_hinting.config_types import StandardPort, DictQuaConfig, PortReferenceType
 from qm.elements.element_inputs import MixInputs, SingleInput, static_set_mixer_correction
-from qm.type_hinting.general import Value, Number, PathLike, NumpySupportedFloat, NumpySupportedValue
+from qm.type_hinting.general import Value, PathLike, NumpySupportedFloat, NumpySupportedValue, NumpySupportedNumber
 from qm.octave.octave_mixer_calibration import AutoCalibrationParams, OctaveMixerCalibration, MixerCalibrationResults
 from qm.grpc.frontend import (
     JobExecutionStatus,
@@ -40,14 +40,6 @@ from qm.grpc.frontend import (
     JobExecutionStatusPending,
     JobExecutionStatusRunning,
     JobExecutionStatusCompleted,
-)
-from qm.grpc.qua_config import (
-    QuaConfig,
-    QuaConfigQuaConfigV1,
-    QuaConfigPortReference,
-    QuaConfigMicrowaveFemDec,
-    QuaConfigDigitalInputPortDec,
-    QuaConfigDigitalInputPortDecPolarity,
 )
 from qm.exceptions import (
     QmValueError,
@@ -57,7 +49,14 @@ from qm.exceptions import (
     InvalidConfigError,
     AnotherJobIsRunning,
     CantCalibrateElementError,
-    UnsupportedCapabilityError,
+)
+from qm.grpc.qua_config import (
+    QuaConfig,
+    QuaConfigQuaConfigV1,
+    QuaConfigPortReference,
+    QuaConfigMicrowaveFemDec,
+    QuaConfigDigitalInputPortDec,
+    QuaConfigDigitalInputPortDecPolarity,
 )
 
 logger = logging.getLogger(__name__)
@@ -145,7 +144,7 @@ class QuantumMachine:
             strict: This parameter is deprecated, please use `compiler_options`
             flags: This parameter is deprecated, please use `compiler_options`
         Returns:
-            A ``QmJob`` object (see QM Job API).
+            A ``QmJob`` object (see Job API).
         """
         standardized_compiler_options = standardize_compiler_params(compiler_options, strict, flags)
         job = cast(
@@ -184,14 +183,12 @@ class QuantumMachine:
             strict: This parameter is deprecated, please use `compiler_options`
             flags: This parameter is deprecated, please use `compiler_options`
         Returns:
-            A ``QmJob`` object (see QM Job API).
+            A ``QmJob`` object (see Job API).
         """
         if not isinstance(program, Program):
             raise Exception("program argument must be of type qm.program.Program")
-        if program.metadata.uses_command_timestamps and not self._capabilities.supports_command_timestamps:
-            raise UnsupportedCapabilityError("timestamping commands is supported from QOP 2.2 or above")
-        if program.metadata.uses_fast_frame_rotation and not self._capabilities.supports_fast_frame_rotation:
-            raise UnsupportedCapabilityError("fast frame rotation is supported from QOP 2.2 or above")
+
+        self._capabilities.validate(program.used_capabilities)
 
         standardized_compiler_options = standardize_compiler_params(compiler_options, strict, flags)
 
@@ -238,11 +235,7 @@ class QuantumMachine:
             job = pending_job.wait_for_execution()
             ```
         """
-        if program.metadata.uses_command_timestamps and not self._capabilities.supports_command_timestamps:
-            raise UnsupportedCapabilityError("timestamping commands is supported from QOP 2.2 or above")
-
-        if program.metadata.uses_fast_frame_rotation and not self._capabilities.supports_fast_frame_rotation:
-            raise UnsupportedCapabilityError("fast frame rotation is supported from QOP 2.2 or above")
+        self._capabilities.validate(program.used_capabilities)
 
         logger.info("Compiling program")
 
@@ -262,9 +255,9 @@ class QuantumMachine:
     def set_mixer_correction(
         self,
         mixer: str,
-        intermediate_frequency: Number,
-        lo_frequency: Number,
-        values: Tuple[float, float, float, float],
+        intermediate_frequency: NumpySupportedNumber,
+        lo_frequency: NumpySupportedNumber,
+        values: Tuple[NumpySupportedFloat, NumpySupportedFloat, NumpySupportedFloat, NumpySupportedFloat],
     ) -> None:
         """Sets the correction matrix for correcting gain and phase imbalances
         of an IQ mixer for the supplied intermediate frequency and LO frequency.
@@ -306,7 +299,7 @@ class QuantumMachine:
     def calibrate_element(
         self,
         qe: str,
-        lo_if_dict: Optional[Mapping[float, Tuple[float, ...]]] = None,
+        lo_if_dict: Optional[Mapping[float, Sequence[float]]] = None,
         save_to_db: bool = True,
         params: Optional[AutoCalibrationParams] = None,
     ) -> MixerCalibrationResults:
@@ -952,7 +945,7 @@ class QuantumMachine:
         Returns:
             The polarity
         """
-        return QuaConfigDigitalInputPortDecPolarity(self._get_digital_input_port(port).polarity).name
+        return QuaConfigDigitalInputPortDecPolarity(self._get_digital_input_port(port).polarity).name  # type: ignore[return-value]
 
 
 def _standardize_port(port: PortReferenceType) -> StandardPort:

@@ -9,8 +9,8 @@ from qm.persistence import BaseStore
 from qm.exceptions import QmQuaException
 from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
-from qm.api.models.capabilities import ServerCapabilities
 from qm.api.job_manager_api import create_job_manager_from_api
+from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.grpc.frontend import (
     JobExecutionStatus,
     JobExecutionStatusLoading,
@@ -121,7 +121,7 @@ class QmBaseJob:
             data: The data to be inserted. The data's size must match
                 the size of the input stream.
         """
-        if not self._capabilities.supports_input_stream:
+        if not self._capabilities.supports(QopCaps.input_stream):
             raise QmQuaException("`push_to_input_stream()` is not supported by the QOP version.")
 
         if not isinstance(data, list):

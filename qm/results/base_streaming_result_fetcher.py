@@ -14,9 +14,9 @@ from qm.utils.async_utils import run_async
 from qm.type_hinting.general import PathLike
 from qm.api.v2.job_result_api import JobResultApi
 from qm.api.job_result_api import JobResultServiceApi
-from qm.api.models.capabilities import ServerCapabilities
 from qm.utils.general_utils import run_until_with_timeout
 from qm.StreamMetadata import StreamMetadata, StreamMetadataError
+from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.grpc.results_analyser import GetJobNamedResultHeaderResponse
 from qm.exceptions import InvalidStreamMetadataError, StreamProcessingDataLossError
 
@@ -90,8 +90,7 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         self._store = store
         self._stream_metadata_errors = stream_metadata_errors
         self._stream_metadata = stream_metadata
-        self._count_data_written = 0
-        self._capabilities = capabilities
+        self._has_job_streaming_state = capabilities.supports(QopCaps.job_streaming_state)
 
         self._validate_schema()
 
@@ -205,33 +204,17 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         state = self.get_job_state()
         return state.has_dataloss
 
-    def _write_header(
-        self,
-        writer: BinaryIO,
-        shape: Tuple[int, ...],
-        d_type: object,
-    ) -> None:
-        _format.write_array_header_2_0(
-            writer, {"descr": d_type, "fortran_order": False, "shape": shape}
-        )  # type: ignore[no-untyped-call]
-
-    async def _add_results_to_writer(self, data_writer: BinaryIO, start: int, stop: int) -> None:
+    async def _add_results_to_writer(self, data_writer: BinaryIO, start: int, stop: int) -> int:
+        _count_data_written = 0
         async for result in self._service.get_job_named_result(self._schema.name, start, stop - start):
-            self._count_data_written += result.count_of_items
             data_writer.write(result.data)
+            _count_data_written += result.count_of_items
 
-    def _save_to_file(self, header: NamedJobResultHeader, writer: BinaryIO) -> int:
-        self._count_data_written = 0
-
-        final_shape = self._get_final_shape(header.count_so_far, header.shape)
-        self._write_header(writer, final_shape, header.d_type)
-
-        run_async(self._add_results_to_writer(writer, 0, header.count_so_far))
-        return self._count_data_written
+        return _count_data_written
 
     def get_job_state(self) -> JobStreamingState:
         response: JobStreamingStateProtocol
-        if self._capabilities.has_job_streaming_state:
+        if self._has_job_streaming_state:
             response = self._service.get_job_state()
         else:
             # This is just for backward compatibility
@@ -332,6 +315,10 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         Returns:
             a single result if item is integer or multiple results if item is Python slice object.
 
+        Raises:
+            Exception: If item is not an integer or a slice object.
+            StreamProcessingDataLossError: If data loss is detected in the data for the job.
+
         Example:
             ```python
             res.fetch(0)         #return the item in the top position
@@ -356,6 +343,9 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
 
         header = self._get_named_header(check_for_errors=check_for_errors, flat_struct=flat_struct)
 
+        if header.has_dataloss:
+            raise StreamProcessingDataLossError(f"Data loss detected in data for job: {self._job_id}")
+
         if stop is None:
             stop = header.count_so_far
         if start is None:
@@ -363,21 +353,17 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
 
         writer = self._fetch_all_job_results(header, start, stop)
 
-        if header.has_dataloss:
-            raise StreamProcessingDataLossError(f"Data loss detected in data for job: {self._job_id}")
-
         return cast(numpy.typing.NDArray[numpy.generic], numpy.load(writer))
 
     def _fetch_all_job_results(self, header: NamedJobResultHeader, start: int, stop: int) -> BinaryIO:
-        self._count_data_written = 0
         writer = BytesIO()
         data_writer = BytesIO()
 
-        run_async(self._add_results_to_writer(data_writer, start, stop))
+        count_data_written = run_async(self._add_results_to_writer(data_writer, start, stop))
 
-        final_shape = self._get_final_shape(self._count_data_written, header.shape)
+        final_shape = _get_final_shape(count_data_written, header.shape)
 
-        self._write_header(writer, final_shape, header.d_type)
+        _write_header(writer, final_shape, header.d_type)
 
         data_writer.seek(0)
         for d in data_writer:
@@ -386,13 +372,17 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         writer.seek(0)
         return writer
 
-    @staticmethod
-    def _get_final_shape(count: int, shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        if count == 1:
-            final_shape = shape
+
+def _write_header(writer: BinaryIO, shape: Tuple[int, ...], d_type: object) -> None:
+    _format.write_array_header_2_0(writer, {"descr": d_type, "fortran_order": False, "shape": shape})  # type: ignore[no-untyped-call]
+
+
+def _get_final_shape(count: int, shape: Tuple[int, ...]) -> Tuple[int, ...]:
+    if count == 1:
+        final_shape = shape
+    else:
+        if len(shape) == 1 and shape[0] == 1:
+            final_shape = (count,)
         else:
-            if len(shape) == 1 and shape[0] == 1:
-                final_shape = (count,)
-            else:
-                final_shape = (count,) + shape
-        return final_shape
+            final_shape = (count,) + shape
+    return final_shape

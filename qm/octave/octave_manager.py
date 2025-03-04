@@ -37,8 +37,8 @@ from qm.octave.octave_config import QmOctaveConfig
 from qm.type_hinting.config_types import StandardPort
 from qm.octave._calibration_config import _prep_config
 from qm.program._qua_config_to_pb import build_iw_sample
-from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
+from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.exceptions import OpenQmException, OctaveLoopbackError, NoOutputPortDeclared
 from qm.octave._calibration_names import COMMON_OCTAVE_PREFIX, CalibrationElementsNames
 from qm.octave.octave_mixer_calibration import (
@@ -60,6 +60,7 @@ from qm.grpc.qua_config import (
     QuaConfigOctoDacFemDec,
     QuaConfigOctaveLoopback,
     QuaConfigCorrectionEntry,
+    QuaConfigMicrowaveFemDec,
     QuaConfigAdcPortReference,
     QuaConfigDacPortReference,
     QuaConfigPulseDecOperation,
@@ -113,6 +114,8 @@ class ControllerPorts(Generic[_PortType]):
         try:
             controller_config = get_fem_config(pb_config, self.I)
         except KeyError:
+            return False
+        if isinstance(controller_config, QuaConfigMicrowaveFemDec):
             return False
         relevant_ports = self._get_relevant_ports(controller_config)
         return self.I.number in relevant_ports and self.Q.number in relevant_ports
@@ -403,7 +406,7 @@ class OctaveManager:
         Returns:
             True on success, False otherwise
         """
-        if self._capabilities.supports_octave_reset:
+        if self._capabilities.supports(QopCaps.octave_reset):
             return cast(bool, self.get_client(octave_name).reset())
         else:
             logger.error("QOP version do not support Octave reset function")
@@ -651,7 +654,7 @@ def get_loopbacks_from_pb(
             raise OctaveLoopbackError
         lo_source_input = OctaveLOSource[loopback.lo_source_input.name]
         output_name = loopback.lo_source_generator.port_name.name
-        standardized_name = output_name[0].upper() + output_name[1:]
+        standardized_name = output_name[0].upper() + output_name[1:]  # type: ignore[index]
         # we use snake case but octave_sdk is camel case
         loopbacks[lo_source_input] = OctaveOutput[standardized_name]
     return loopbacks

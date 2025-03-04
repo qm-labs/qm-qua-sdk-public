@@ -1,15 +1,18 @@
 import json
+import math
+import time
 import asyncio
 import logging
 import functools
 from abc import ABCMeta, abstractmethod
 from typing_extensions import ParamSpec
-from typing import Type, Generic, TypeVar, Callable, Optional
+from typing import Type, Generic, TypeVar, Callable, Optional, cast
 
 import grpclib.exceptions
 from grpclib import Status
 from grpclib.client import Channel
 from grpclib.config import Configuration
+from grpclib.exceptions import StreamTerminatedError
 from betterproto.grpc.grpclib_client import ServiceStub
 from grpclib.events import SendMessage, SendRequest, RecvInitialMetadata, listen
 
@@ -28,9 +31,24 @@ class GatewayNotImplementedError(NotImplementedError):
     pass
 
 
+def _check_stream_terminated_is_timeout(func_start_time: float, func_timeout: float) -> bool:
+    """
+    When the function's timeout is reached, grpclib cancels the internally created future (distinct from the one created
+    in the SDK). This cancellation prompts the server to reset the stream, triggering a "Stream reset by remote party"
+    event and resulting in a StreamTerminatedError.
+    This function verifies that the StreamTerminatedError is due to a timeout by ensuring that the function's
+    runtime is approximately equal to the specified timeout.
+    """
+    func_end_time = time.time()
+    func_runtime = func_end_time - func_start_time
+    # Check if the function's runtime is within 5% of the specified timeout
+    return math.isclose(func_runtime, func_timeout, rel_tol=0.05)
+
+
 def connection_error_handle_decorator(func: Callable[P, Ret]) -> Callable[P, Ret]:
     @functools.wraps(func)
     def wrapped(*args: P.args, **kwargs: P.kwargs) -> Ret:
+        func_start_time = time.time()
         try:
             return func(*args, **kwargs)
         except grpclib.exceptions.GRPCError as e:
@@ -47,6 +65,15 @@ def connection_error_handle_decorator(func: Callable[P, Ret]) -> Callable[P, Ret
             if is_debug():
                 logger.exception(f"Timeout reached while running '{func.__name__}'")
             raise QMTimeoutError(f"Timeout reached while running '{func.__name__}'") from e
+        except StreamTerminatedError as e:
+            if is_debug():
+                logger.exception(f"Stream terminated while running '{func.__name__}'")
+            if "timeout" in kwargs:
+                if _check_stream_terminated_is_timeout(func_start_time, cast(float, kwargs["timeout"])):
+                    raise QMTimeoutError(
+                        f"Stream terminated, most likely due to a timeout while running '{func.__name__}'"
+                    ) from e
+            raise e
 
     return wrapped
 

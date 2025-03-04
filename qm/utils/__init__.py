@@ -2,7 +2,6 @@ from qm.utils.deprecation_utils import deprecation_message
 from qm.utils.protobuf_utils import LOG_LEVEL_MAP, list_fields
 from qm.utils.general_utils import SERVICE_HEADER_NAME, run_until_with_timeout
 from qm.utils.types_utils import (
-    is_iter,
     collection_has_type,
     collection_has_type_int,
     collection_has_type_bool,
@@ -18,7 +17,6 @@ __all__ = [
     "collection_has_type_bool",
     "collection_has_type_int",
     "collection_has_type_float",
-    "is_iter",
     "get_iterable_elements_datatype",
     "deprecation_message",
     "list_fields",

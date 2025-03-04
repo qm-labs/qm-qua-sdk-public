@@ -1,70 +1,119 @@
+import warnings
 import dataclasses
-from typing import Optional
+from typing import Set, Optional, FrozenSet, Collection
 
 from qm.api.models.info import QuaMachineInfo
+from qm.exceptions import UnsupportedCapabilitiesError
+
+
+@dataclasses.dataclass(frozen=True)
+class Capability:
+    qop_name: str
+    from_qop_version: Optional[str] = None
+    name_in_exception: Optional[str] = None
+
+    @property
+    def unsupported_exception_message(self) -> str:
+        if self.name_in_exception:
+            capability_name = self.name_in_exception
+        else:
+            capability_name = self.qop_name.replace("qm.", "")
+            capability_name = capability_name.replace("_", " ")
+
+        if self.from_qop_version is None:
+            return f"{capability_name} is not supported in the installed QOP version."
+        else:
+            return f"{capability_name} is supported from QOP {self.from_qop_version} and above."
+
+
+class QopCaps:
+    job_streaming_state = Capability("qm.job_streaming_state")
+    multiple_inputs_for_element = Capability("qm.multiple_inputs_for_element")
+    analog_delay = Capability("qm.analog_delay")
+    shared_oscillators = Capability("qm.shared_oscillators")
+    crosstalk = Capability("qm.crosstalk")
+    shared_ports = Capability("qm.shared_ports")
+    input_stream = Capability("qm.input_stream")
+    new_grpc_structure = Capability("qm.new_grpc_structure")
+    double_frequency = Capability("qm.double_frequency")
+    command_timestamps = Capability("qm.play_tag", "2.2", "timestamping commands")
+    inverted_digital_output = Capability("qm.inverted_digital_output")
+    sticky_elements = Capability("qm.sticky_elements")
+    octave_reset = Capability("qm.octave_reset")
+    fast_frame_rotation = Capability("qm.fast_frame_rotation", "2.2")
+    keeping_dc_offsets = Capability("qm.keep_dc_offsets_when_closing")
+
+    # QOP3
+    qop3 = Capability("__qop3", "3.0")
+    opx1000_fems_return_1_based = Capability("1_based_fem", "3.0")
+    waveform_report_endpoint = Capability("qm.waveform_report_endpoint", "3.3")
+    exponential_iir_filter = Capability("qm.exponential_iir_filter", "3.3")
+    broadcast = Capability("qm.broadcast", "3.3")
+    chunk_streaming = Capability("qm.chunk_streaming", "3.3")
+    fast_frame_rotation_deprecated = Capability("qm.fast_frame_rotation_deprecated", "3.3")
+
+    @staticmethod
+    def get_all() -> Set[Capability]:
+        # Some built in methods are also in the class dictionary, so the 'if isinstance' filters them out
+        return set(cap for cap in QopCaps.__dict__.values() if isinstance(cap, Capability))
+
+    @staticmethod
+    def qop2_caps() -> Set[Capability]:
+        return set(cap for cap in QopCaps.get_all() if not cap.from_qop_version or float(cap.from_qop_version) < 3)
+
 
 OPX_FEM_IDX = 1
 
 
-@dataclasses.dataclass(frozen=True)
 class ServerCapabilities:
-    has_job_streaming_state: bool
-    supports_multiple_inputs_for_element: bool
-    supports_analog_delay: bool
-    supports_shared_oscillators: bool
-    supports_crosstalk: bool
-    supports_shared_ports: bool
-    supports_input_stream: bool
-    supports_new_grpc_structure: bool
-    supports_double_frequency: bool
-    supports_command_timestamps: bool
-    supports_inverted_digital_output: bool
-    supports_octave_reset: bool
-    supports_sticky_elements: bool
-    supports_fast_frame_rotation: bool
-    fem_number_in_simulator: int
-    supports_api_v2: bool = False
-    supports_keeping_dc_offsets: bool = False
-    opx1000_fems_return_1_based: bool = True
+    def __init__(self, supported_capabilities: Collection[Capability]) -> None:
+        self._supported_capabilities = frozenset(supported_capabilities)
 
-    @staticmethod
-    def build(qua_implementation: Optional[QuaMachineInfo] = None) -> "ServerCapabilities":
-        caps = qua_implementation.capabilities if qua_implementation is not None else list()
-        if "__qop3" in caps:
-            return ServerCapabilities(
-                has_job_streaming_state=True,
-                supports_multiple_inputs_for_element=True,
-                supports_analog_delay=True,
-                supports_shared_oscillators=True,
-                supports_crosstalk=True,
-                supports_shared_ports=True,
-                supports_input_stream=True,
-                supports_new_grpc_structure=True,
-                supports_double_frequency=True,
-                supports_command_timestamps=True,
-                supports_inverted_digital_output=True,
-                supports_sticky_elements=True,
-                supports_octave_reset=True,
-                supports_fast_frame_rotation=True,
-                fem_number_in_simulator=OPX_FEM_IDX,
-                supports_api_v2=True,
-                opx1000_fems_return_1_based="1_based_fem" in caps,
+    # These properties exist because the previous implementation of ServerCapabilities (used until this refactor in Jan 2025)
+    # included a separate property for each capability. While most usages have been updated to call the 'supports'
+    # function, these specific properties are still widely used in multiple places. To avoid extensive changes, their
+    # usage was retained.
+    supports_double_frequency = property(lambda self: self.supports(QopCaps.double_frequency))
+    supports_sticky_elements = property(lambda self: self.supports(QopCaps.sticky_elements))
+
+    @property
+    def supported_capabilities(self) -> FrozenSet[Capability]:
+        return self._supported_capabilities
+
+    # This property is defined as a function to explicitly specify a return type, ensuring compatibility with mypy.
+    @property
+    def fem_number_in_simulator(self) -> int:
+        return OPX_FEM_IDX if self.supports(QopCaps.qop3) else 0
+
+    def supports(self, capability: Capability) -> bool:
+        return capability in self._supported_capabilities
+
+    def validate(self, capabilities: Collection[Capability]) -> None:
+        """
+        Validates if the capabilities passed are supported by the server.
+        Raises an UnsupportedCapabilityError for the capabilities which are not supported.
+        """
+        if self.supports(QopCaps.fast_frame_rotation_deprecated) and QopCaps.fast_frame_rotation in capabilities:
+            warnings.warn(
+                "The fast_frame_rotation is deprecated as it is no longer faster than frame_rotation_2pi "
+                "(and in fact, it is less efficient). It will be removed in future versions.",
+                DeprecationWarning,
             )
-        return ServerCapabilities(
-            has_job_streaming_state="qm.job_streaming_state" in caps,
-            supports_multiple_inputs_for_element="qm.multiple_inputs_for_element" in caps,
-            supports_analog_delay="qm.analog_delay" in caps,
-            supports_shared_oscillators="qm.shared_oscillators" in caps,
-            supports_crosstalk="qm.crosstalk" in caps,
-            supports_shared_ports="qm.shared_ports" in caps,
-            supports_input_stream="qm.input_stream" in caps,
-            supports_new_grpc_structure="qm.new_grpc_structure" in caps,
-            supports_double_frequency="qm.double_frequency" in caps,
-            supports_command_timestamps="qm.play_tag" in caps,
-            supports_inverted_digital_output="qm.inverted_digital_output" in caps,
-            supports_sticky_elements="qm.sticky_elements" in caps,
-            supports_octave_reset="qm.octave_reset" in caps,
-            supports_fast_frame_rotation="qm.fast_frame_rotation" in caps,
-            fem_number_in_simulator=0,
-            supports_keeping_dc_offsets="qm.keep_dc_offsets_when_closing" in caps,
-        )
+
+        unsupported_capabilities = set(capabilities) - self._supported_capabilities
+        if unsupported_capabilities:
+            exception_message = "\nAlso: ".join(
+                [capability.unsupported_exception_message for capability in unsupported_capabilities]
+            )
+            raise UnsupportedCapabilitiesError(exception_message)
+
+    @classmethod
+    def build(cls, qua_implementation: Optional[QuaMachineInfo] = None) -> "ServerCapabilities":
+        qop_caps = qua_implementation.capabilities if qua_implementation is not None else list()
+        supported_capabilities = set(cap for cap in QopCaps.get_all() if cap.qop_name in qop_caps)
+
+        if QopCaps.qop3.qop_name in qop_caps:
+            # Doing this in case all the QOP2 caps are not added by default when it is a QOP3 machine
+            supported_capabilities.update(QopCaps.qop2_caps())
+
+        return cls(supported_capabilities)

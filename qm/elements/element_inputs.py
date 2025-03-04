@@ -1,5 +1,5 @@
 import logging
-from typing import Tuple, Union, Generic, TypeVar, Optional, Sequence
+from typing import Tuple, Generic, TypeVar, Optional, Sequence
 
 import numpy
 from dependency_injector.wiring import Provide, inject
@@ -9,7 +9,7 @@ from qm.grpc.general_messages import Matrix
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.devices import MixerInfo, AnalogOutputPortFilter
 from qm.containers.capabilities_container import CapabilitiesContainer
-from qm.type_hinting.general import Number, NumpySupportedFloat, NumpySupportedNumber
+from qm.type_hinting.general import NumpySupportedFloat, NumpySupportedNumber
 from qm.grpc.qua_config import (
     QuaConfigMixInputs,
     QuaConfigSingleInput,
@@ -48,9 +48,9 @@ def static_set_mixer_correction(
     frontend_api: FrontendApi,
     machine_id: str,
     mixer: str,
-    intermediate_frequency: Union[int, float],
-    lo_frequency: Union[int, float],
-    values: Tuple[float, float, float, float],
+    intermediate_frequency: NumpySupportedNumber,
+    lo_frequency: NumpySupportedNumber,
+    values: Tuple[NumpySupportedFloat, NumpySupportedFloat, NumpySupportedFloat, NumpySupportedFloat],
     capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
 ) -> None:
     # TODO - this function is here (and not under MixedInputsElement) to support backwards the direct calling to mixer
@@ -77,7 +77,7 @@ def static_set_mixer_correction(
 
     mixer_info = MixerInfo(
         mixer=mixer,
-        frequency_negative=intermediate_frequency < 0,
+        frequency_negative=bool(intermediate_frequency < 0),
         lo_frequency=int(lo_frequency),
         intermediate_frequency=abs(int(intermediate_frequency)),
         lo_frequency_double=mixer_lo_frequency_double,
@@ -194,9 +194,9 @@ class MixInputs(ElementInput[QuaConfigMixInputs]):
 
     def set_mixer_correction(
         self,
-        intermediate_frequency: Number,
-        lo_frequency: Number,
-        values: Tuple[float, float, float, float],
+        intermediate_frequency: NumpySupportedNumber,
+        lo_frequency: NumpySupportedNumber,
+        values: Tuple[NumpySupportedFloat, NumpySupportedFloat, NumpySupportedFloat, NumpySupportedFloat],
     ) -> None:
         static_set_mixer_correction(
             self._frontend,

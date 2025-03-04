@@ -412,7 +412,7 @@ class FrontendApi(BaseApi[FrontendStub]):
             digital_port=DigitalInputPort(
                 controller_name=controller_name, fem_number=fem_number, port_number=port_number
             ),
-            polarity=polarity.value,
+            polarity=polarity.value,  # type: ignore[arg-type]
         )
         request = HighQmApiRequest(
             quantum_machine_id=machine_id,

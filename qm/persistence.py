@@ -14,7 +14,7 @@ class BinaryAsset(metaclass=abc.ABCMeta):
 
 
 class BaseStore(metaclass=abc.ABCMeta):
-    """The interface to saving data from a running QM job"""
+    """The interface to saving data from a running job"""
 
     def __init__(self) -> None:
         super().__init__()

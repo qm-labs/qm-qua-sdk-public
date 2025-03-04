@@ -35,7 +35,7 @@ class MwOutputApi(ElementGenericApi):
             job_id=self._id,
             qe=self._element_id,
             new_frequency_hz=frequency,
-            update_component=SetOscillatorFrequencyRequestUpdateComponentSelection.downconverter,
+            update_component=SetOscillatorFrequencyRequestUpdateComponentSelection.downconverter,  # type: ignore[arg-type]
         )
         self._run(self._stub.set_oscillator_frequency(request, timeout=self._timeout))
 

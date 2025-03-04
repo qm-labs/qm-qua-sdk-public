@@ -4,9 +4,9 @@ import betterproto
 
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.job_api.element_api import ElementApi, JobElement
-from qm.grpc.qua_config import QuaConfigElementDec, QuaConfigMicrowaveOutputPortReference, QuaConfigMultipleOutputs
 from qm.api.v2.job_api.element_input_api import InputConfigType, create_element_input_class
 from qm.api.v2.job_api.element_port_api import MwOutputApi, AnalogOutputApi, DigitalInputApi
+from qm.grpc.qua_config import QuaConfigElementDec, QuaConfigMultipleOutputs, QuaConfigMicrowaveOutputPortReference
 
 
 class JobElementNotFound(KeyError):

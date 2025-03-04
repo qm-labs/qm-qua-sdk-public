@@ -43,7 +43,7 @@ grpclib = { version = "^0.4.5", python = ">=3.10", allow-prereleases = true }
 plotly = "^5.13.0"
 httpx = { version = ">=0.23.3,<1", extras = ["http2"] }
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 grpcio-tools = [
     {version = "^1.39.0", python = ">=3.8,<3.11"},
     {version = "^1.57", python = ">=3.11"}

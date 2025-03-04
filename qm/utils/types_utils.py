@@ -66,18 +66,9 @@ def collection_has_type_float(collection: Collection[NumberType]) -> bool:
     return collection_has_type(collection, float, False) or collection_has_type(collection, np.floating, True)
 
 
-def is_iter(x: Any) -> bool:
-    try:
-        iter(x)
-    except TypeError:
-        return False
-    else:
-        return True
-
-
 def get_iterable_elements_datatype(
-    it: Union[numpy.typing.NDArray["NumberT"], Sequence["NumberT"], "NumberT"]
-) -> Type["NumberT"]:  # type: ignore[type-var]
+    it: Union[numpy.typing.NDArray["NumberT"], Sequence["NumberT"], "NumberT"]  # type: ignore[type-var]
+) -> Type["NumberT"]:
     if isinstance(it, np.ndarray):
         item = cast("NumberT", it[0].item())
         return type(item)

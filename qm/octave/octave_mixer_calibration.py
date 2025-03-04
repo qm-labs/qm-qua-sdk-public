@@ -3,7 +3,7 @@ import time
 import logging
 from enum import Enum, auto
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Mapping, Optional, Sequence, cast
 
 import numpy as np
 from octave_sdk import Octave, RFInputLOSource
@@ -29,7 +29,9 @@ from octave_sdk.grpc.quantummachines.octave.api.v1 import (
     RfUpConvUpdateFastSwitchMode,
 )
 
+from qm import QmPendingJob
 from qm.program import Program
+from qm.jobs.qm_job import QmJob
 from qm.api.v2.job_api import JobApi
 from qm.elements.element import Element
 from qm.jobs.running_qm_job import RunningQmJob
@@ -251,14 +253,12 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 measure(
                     "Analyze",
                     elements_names.lo_analyzer,
-                    None,
                     dual_demod.full("integW_cos", "out1", "integW_zero", "out2", I2),
                     dual_demod.full("integW_minus_sin", "out1", "integW_zero", "out2", Q2),
                 )
                 measure(
                     "Analyze",
                     elements_names.image_analyzer,
-                    None,
                     dual_demod.full("integW_cos", "out1", "integW_zero", "out2", I3),
                     dual_demod.full("integW_minus_sin", "out1", "integW_zero", "out2", Q3),
                 )
@@ -266,14 +266,12 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 measure(
                     "Analyze",
                     elements_names.lo_analyzer,
-                    None,
                     dual_demod.full("integW_zero", "out1", "integW_sin", "out2", I2),
                     dual_demod.full("integW_zero", "out1", "integW_cos", "out2", Q2),
                 )
                 measure(
                     "Analyze",
                     elements_names.image_analyzer,
-                    None,
                     dual_demod.full("integW_zero", "out1", "integW_sin", "out2", I3),
                     dual_demod.full("integW_zero", "out1", "integW_cos", "out2", Q3),
                 )
@@ -281,14 +279,12 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 measure(
                     "Analyze",
                     elements_names.lo_analyzer,
-                    None,
                     dual_demod.full("integW_cos", "out1", "integW_sin", "out2", I2),
                     dual_demod.full("integW_minus_sin", "out1", "integW_cos", "out2", Q2),
                 )
                 measure(
                     "Analyze",
                     elements_names.image_analyzer,
-                    None,
                     dual_demod.full("integW_cos", "out1", "integW_sin", "out2", I3),
                     dual_demod.full("integW_minus_sin", "out1", "integW_cos", "out2", Q3),
                 )
@@ -395,7 +391,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                     assign(q0_center, Util.cond(task == 1, q0_best, 0.0))
 
                     with if_(task == 0):
-                        measure("Analyze", elements_names.lo_analyzer, "lo_adc_data")
+                        measure("Analyze", elements_names.lo_analyzer, adc_stream="lo_adc_data")
 
                 with else_():
 
@@ -662,7 +658,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
     def calibrate(
         self,
         element: Element[QuaConfigMixInputs],
-        lo_if_dict: Mapping[float, Tuple[float, ...]],
+        lo_if_dict: Mapping[float, Sequence[float]],
         params: AutoCalibrationParams,
     ) -> MixerCalibrationResults:
         element_input = element.input
@@ -870,8 +866,8 @@ class OctaveMixerCalibration(OctaveMixerCalibrationBase):
         assert isinstance(iq_mixer_elem.input, UpconvertedInput)
         iq_mixer_elem.input.set_output_dc_offset(i_offset=i_offset, q_offset=q_offset)
 
-    def _execute_job(self, compiled: str) -> RunningQmJob:
-        pending_job = self._qm.queue.add_compiled(compiled)
+    def _execute_job(self, compiled: str) -> Union[JobApi, QmJob]:
+        pending_job = cast(QmPendingJob, self._qm.queue.add_compiled(compiled))
         job = pending_job.wait_for_execution()
         return job
 

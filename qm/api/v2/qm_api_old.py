@@ -1,7 +1,7 @@
 import json
 import logging
 import warnings
-from typing import List, Tuple, Union, Literal, Optional, Sequence, overload
+from typing import List, Tuple, Union, Literal, Optional, Sequence, cast, overload
 
 from qm.api.v2.job_api import JobApi
 from qm.octave import QmOctaveConfig
@@ -11,12 +11,12 @@ from qm.utils import deprecation_message
 from qm.exceptions import FunctionInputError
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
-from qm.type_hinting.config_types import DictQuaConfig
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.qm_api import QmApi, IoValue, NoRunningQmJob
 from qm.api.v2.job_api.job_api import JobApiWithDeprecations
 from qm.type_hinting import Value, Number, NumpySupportedValue
+from qm.type_hinting.config_types import FEM_IDX, DictQuaConfig
 from qm.type_hinting.general import PathLike, NumpySupportedFloat
 from qm.jobs.job_queue_with_deprecations import QmQueueWithDeprecations
 from qm.utils.config_utils import get_fem_config, element_has_mix_inputs
@@ -66,7 +66,11 @@ class QmApiWithDeprecations(QmApi):
             DeprecationWarning,
             stacklevel=1,
         )
-        return self._get_job(job_id, self._store)
+        # The cast is needed to tell mypy (and pycharm) that the return type is JobApiWithDeprecations. Mypy thinks
+        # the return type is JobApi because "get_job()" returns JobApi, even though the method "_get_job()" is
+        # overridden in this class to return JobApiWithDeprecations.
+        job = cast(JobApiWithDeprecations, self.get_job(job_id))
+        return job
 
     @property
     def queue(self) -> QmQueueWithDeprecations:
@@ -124,10 +128,12 @@ class QmApiWithDeprecations(QmApi):
             strict: This parameter is deprecated, please use `compiler_options`
             flags: This parameter is deprecated, please use `compiler_options`
         Returns:
-            A ``QmJob`` object (see QM Job API).
+            A ``QmJob`` object (see Job API).
         """
         if not isinstance(program, Program):
             raise Exception("program argument must be of type qm.program.Program")
+
+        self._caps.validate(program.used_capabilities)
 
         for x, name in [
             (duration_limit, "`duration_limit'"),
@@ -988,7 +994,9 @@ class QmApiWithDeprecations(QmApi):
         return {
             "version": 1,
             "controllers": {
-                port.controller: {"fems": {port.fem: {"type": "LF", "analog_inputs": {port.number: {"offset": value}}}}}
+                port.controller: {
+                    "fems": {cast(FEM_IDX, port.fem): {"type": "LF", "analog_inputs": {port.number: {"offset": value}}}}
+                }
             },
         }
 
@@ -998,7 +1006,9 @@ class QmApiWithDeprecations(QmApi):
             "version": 1,
             "controllers": {
                 port.controller: {
-                    "fems": {port.fem: {"type": "LF", "analog_outputs": {port.number: {"offset": value}}}}
+                    "fems": {
+                        cast(FEM_IDX, port.fem): {"type": "LF", "analog_outputs": {port.number: {"offset": value}}}
+                    }
                 }
             },
         }

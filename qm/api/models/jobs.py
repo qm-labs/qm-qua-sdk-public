@@ -14,3 +14,9 @@ class PendingJobData:
     position_in_queue: int
     time_added: datetime.datetime
     added_by: str
+
+
+@dataclass
+class JobNamedResult:
+    data: bytes
+    count_of_items: int

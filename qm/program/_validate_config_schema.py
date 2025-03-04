@@ -3,40 +3,9 @@ from typing import Collection
 
 from marshmallow import ValidationError
 
-from qm.exceptions import ConfigValidationException
 from qm.type_hinting.config_types import ElementConfigType
 
 logger = logging.getLogger(__name__)
-
-
-def validate_timetagging_parameters(data: ElementConfigType) -> None:
-    if "outputPulseParameters" in data:
-        pulse_parameters = data["outputPulseParameters"]
-        needed_parameters = [
-            "signalThreshold",
-            "signalPolarity",
-            "derivativeThreshold",
-            "derivativePolarity",
-        ]
-        missing_parameters = []
-        for parameter in needed_parameters:
-            if parameter not in pulse_parameters:
-                missing_parameters.append(parameter)
-        if len(missing_parameters) > 0:
-            raise ConfigValidationException(
-                "An element defining the output pulse parameters must either "
-                f"define all of the parameters: {needed_parameters}. "
-                f"Parameters defined: {pulse_parameters}"
-            )
-        valid_polarity = {"ASCENDING", "DESCENDING", "ABOVE", "BELOW"}
-        if data["outputPulseParameters"]["signalPolarity"].upper() not in valid_polarity:
-            raise ConfigValidationException(
-                f"'signalPolarity' is {data['outputPulseParameters']['signalPolarity'].upper()} but it must be one of {valid_polarity}"
-            )
-        if data["outputPulseParameters"]["derivativePolarity"].upper() not in valid_polarity:
-            raise ConfigValidationException(
-                f"'derivativePolarity' is {data['outputPulseParameters']['derivativePolarity'].upper()} but it must be one of {valid_polarity}"
-            )
 
 
 def _element_has_outputs(data: ElementConfigType) -> bool:

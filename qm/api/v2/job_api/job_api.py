@@ -32,12 +32,13 @@ from qm.api.v2.job_result_api import JobResultApi
 from qm._report import ExecutionError, ExecutionReport
 from qm.type_hinting import Value, NumpySupportedValue
 from qm.api.v2.job_api.generic_apis import JobGenericApi
-from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
-from qm.exceptions import QmValueError, FunctionInputError
 from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.api.v2.job_api.job_elements_db import JobElementsDB
 from qm.utils.general_utils import create_input_stream_name
+from qm.api.base_api import connection_error_handle_decorator
+from qm.api.models.capabilities import QopCaps, ServerCapabilities
+from qm.exceptions import QmValueError, QMTimeoutError, FunctionInputError
 from qm.grpc.job_manager import IntStreamData, BoolStreamData, FixedStreamData
 from qm.api.v2.job_api.element_input_api import MwInputApi, MixInputsApi, SingleInputApi
 from qm.grpc.v2 import (
@@ -64,14 +65,14 @@ NumberTypeVar = TypeVar("NumberTypeVar", bool, int, float)
 JobStatus = Literal["In queue", "Running", "Processing", "Done", "Canceled", "Error"]
 
 JOB_STATUS_MAPPING: Dict[JobExecutionStatus, JobStatus] = {
-    JobExecutionStatus.UNKNOWN: "Error",
-    JobExecutionStatus.PENDING: "In queue",
-    JobExecutionStatus.RUNNING: "Running",
-    JobExecutionStatus.COMPLETED: "Done",
-    JobExecutionStatus.CANCELED: "Canceled",
-    JobExecutionStatus.LOADING: "In queue",
-    JobExecutionStatus.ERROR: "Error",
-    JobExecutionStatus.PROCESSING: "Processing",
+    JobExecutionStatus.UNKNOWN: "Error",  # type: ignore[dict-item]
+    JobExecutionStatus.PENDING: "In queue",  # type: ignore[dict-item]
+    JobExecutionStatus.RUNNING: "Running",  # type: ignore[dict-item]
+    JobExecutionStatus.COMPLETED: "Done",  # type: ignore[dict-item]
+    JobExecutionStatus.CANCELED: "Canceled",  # type: ignore[dict-item]
+    JobExecutionStatus.LOADING: "In queue",  # type: ignore[dict-item]
+    JobExecutionStatus.ERROR: "Error",  # type: ignore[dict-item]
+    JobExecutionStatus.PROCESSING: "Processing",  # type: ignore[dict-item]
 }
 _inverse_job_status_mapping_tmp = defaultdict(list)
 for k, v in JOB_STATUS_MAPPING.items():
@@ -142,6 +143,7 @@ class JobData:
     status: JobStatus
     description: str
     metadata: JobMetadata  # This is a GRPC class, consider replacing with a dataclass
+    is_simulation: bool
 
     @classmethod
     def from_grpc(cls, grpc_job: JobResponseData) -> "JobData":
@@ -150,6 +152,7 @@ class JobData:
             status=JOB_STATUS_MAPPING[grpc_job.status],
             description=grpc_job.description,
             metadata=grpc_job.metadata,
+            is_simulation=grpc_job.is_simulation,
         )
 
 
@@ -203,17 +206,23 @@ class JobApi(JobGenericApi):
 
     def push_to_input_stream(self, stream_name: str, data: List[Union[bool, int, float]]) -> None:
         """Push data to the input stream declared in the QUA program.
-        The data is then ready to be read by the program using the advance
-        input stream QUA statement.
+        The data is then ready to be read by the program using the advance input stream QUA statement.
+        The type of QUA variable is inferred from the python type passed to ``data`` according to the following rule:
 
-        Multiple data entries can be inserted before the data is read by the program.
+        int -> int
+        float -> fixed
+        bool -> bool
+
+        When sending a list (into a QUA array), all data must be of the same type.
+
+        Multiple data entries can be pushed before the data is read by the program.
 
         See [Input streams](../Guides/features.md#input-streams) for more information.
 
         Args:
-            stream_name: The input stream name the data is to be inserted to.
-            data: The data to be inserted. The data's size must match
-                the size of the input stream.
+            stream_name: The input stream name the data is to be pushed to.
+            data: The data to be pushed. The data's size & type must match
+                the size & type of the input stream.
         """
         if all(type(element) == bool for element in data):
             self._typed_push_to_input_stream(stream_name, bool, data)
@@ -275,6 +284,7 @@ class JobApi(JobGenericApi):
         """
         return self.get_status() == "Running"
 
+    @connection_error_handle_decorator
     def wait_until(self, state: Union[JobStatus, Collection[JobStatus]], timeout: float) -> None:
         """
         Waits until a specific state is reached. If the job is already passed the given state, the function will
@@ -293,15 +303,11 @@ class JobApi(JobGenericApi):
         try:
             run_async(self._wait_until(state, timeout))
         except asyncio.exceptions.TimeoutError:
-            raise TimeoutError(f"Job {self.id} did not reach any state of {state} within {timeout} seconds")
+            raise QMTimeoutError(f"Job {self.id} did not reach any state of {state} within {timeout} seconds")
 
     async def _wait_until(self, states: Collection[JobStatus], timeout: float) -> None:
-        general_timout = self._timeout if self._timeout is not None else float("inf")
-        start_time = asyncio.get_event_loop().time()
         request = JobServiceGetJobStatusRequest(job_id=self._id)
-        _timeout = min(timeout, general_timout)
-        async for status in self._stub.get_job_status_updates(request, timeout=_timeout):
-            # The timout above is a bit an abuse, it is the timeout of the request and not of the status polling
+        async for status in self._stub.get_job_status_updates(request, timeout=timeout):
             status_str = JOB_STATUS_MAPPING[status.success.status]
             if status_str in states:
                 logger.debug(f"Job {self.id} reached state {status_str}")
@@ -311,14 +317,6 @@ class JobApi(JobGenericApi):
                 return
             if status_str in {"Error", "Canceled"}:
                 raise JobFailedError(f"Job {self.id} reached state {status_str}")
-
-            elapsed_time = asyncio.get_event_loop().time() - start_time
-            time_remained = timeout - elapsed_time
-            if time_remained < 0:
-                raise TimeoutError(f"Job {self.id} did not reach any state of {states} within {timeout} seconds")
-
-            _timeout = min(time_remained, general_timout)
-            await asyncio.sleep(0.1)  # I (YR) just put a number here that sounds reasonable
 
     def is_finished(self) -> bool:
         """
@@ -608,7 +606,7 @@ class JobApi(JobGenericApi):
     def result_handles(self) -> StreamingResultFetcher:
         return StreamingResultFetcher(
             self._id,
-            JobResultApi(self.connection_details, self._id),
+            JobResultApi(self.connection_details, self._id, self._caps.supports(QopCaps.chunk_streaming)),
             self._store,
             self._caps,
         )
@@ -989,17 +987,23 @@ class JobApiWithDeprecations(JobApi):
 
     def push_to_input_stream(self, name: str, data: List[Value]) -> None:
         """Push data to the input stream declared in the QUA program.
-        The data is then ready to be read by the program using the advance
-        input stream QUA statement.
+        The data is then ready to be read by the program using the advance input stream QUA statement.
+        The type of QUA variable is inferred from the python type passed to ``data`` according to the following rule:
 
-        Multiple data entries can be inserted before the data is read by the program.
+        int -> int
+        float -> fixed
+        bool -> bool
+
+        When sending a list (into a QUA array), all data must be of the same type.
+
+        Multiple data entries can be pushed before the data is read by the program.
 
         See [Input streams](../Guides/features.md#input-streams) for more information.
 
         Args:
-            name: The input stream name the data is to be inserted to.
-            data: The data to be inserted. The data's size must match
-                the size of the input stream.
+            name: The input stream name the data is to be pushed to.
+            data: The data to be pushed. The data's size & type must match
+                the size & type of the input stream.
         """
         if not isinstance(data, list):
             data = [data]
@@ -1020,7 +1024,7 @@ class JobApiWithDeprecations(JobApi):
         self.cancel()
         return True
 
-    def wait_for_execution(self, timeout: float = float("infinity")) -> "JobApi":
+    def wait_for_execution(self, timeout: Optional[float] = None) -> "JobApi":
         """Deprecated - This method is going to be removed, please use `job.wait_until("Running")`.
 
         Waits until the job has passed the "Running" state.
@@ -1040,5 +1044,9 @@ class JobApiWithDeprecations(JobApi):
             DeprecationWarning,
             stacklevel=2,
         )
+
+        if timeout is None:
+            timeout = 60 * 60 * 24 * 365  # 1 year
+
         self.wait_until({"Running"}, timeout)
         return self

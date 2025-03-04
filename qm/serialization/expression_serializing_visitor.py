@@ -2,7 +2,6 @@ from typing import Union
 
 import betterproto
 
-from qm.exceptions import QmQuaException
 from qm.utils.protobuf_utils import Node
 from qm.serialization.qua_node_visitor import QuaNodeVisitor
 from qm.grpc.qua import (
@@ -11,7 +10,9 @@ from qm.grpc.qua import (
     QuaProgramBinaryExpression,
     QuaProgramVarRefExpression,
     QuaProgramLiteralExpression,
+    QuaProgramFunctionExpression,
     QuaProgramAnyScalarExpression,
+    QuaProgramBroadcastExpression,
     QuaProgramSaveStatementSource,
     QuaProgramAnalogMeasureProcess,
     QuaProgramArrayLengthExpression,
@@ -36,6 +37,7 @@ from qm.grpc.qua import (
     QuaProgramAnalogProcessTargetVectorProcessTarget,
     QuaProgramAnalogMeasureProcessDualBareIntegration,
     QuaProgramAnalogMeasureProcessDualDemodIntegration,
+    QuaProgramFunctionExpressionScalarOrVectorArgument,
 )
 
 
@@ -52,7 +54,8 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
     def visit_qm_grpc_qua_QuaProgramLibFunctionExpression(self, node: QuaProgramLibFunctionExpression) -> None:
         args = [ExpressionSerializingVisitor.serialize(arg) for arg in node.arguments]
         if node.library_name == "random":
-            self._out = f"call_library_function('{node.library_name}', '{node.function_name}', [{','.join(args)}])"
+            seed = args.pop(0)
+            self._out = f"Random({seed}).{node.function_name}({', '.join(args)})"
         else:
             library_name = {
                 "util": "Util",
@@ -113,11 +116,9 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
     def visit_qm_grpc_qua_QuaProgramLibFunctionExpressionArgument(
         self, node: QuaProgramLibFunctionExpressionArgument
     ) -> None:
-        name, value = betterproto.which_one_of(node, "argument_oneof")
-        if value is not None and name in ("scalar", "array"):
+        _, value = betterproto.which_one_of(node, "argument_oneof")
+        if value is not None:
             self._out = ExpressionSerializingVisitor.serialize(value)
-        else:
-            raise QmQuaException(f"Unknown library function argument {name}")
 
     def visit_qm_grpc_qua_QuaProgramVarRefExpression(self, node: QuaProgramVarRefExpression) -> None:
         var_ref = betterproto.which_one_of(node, "var_oneof")[1]
@@ -136,6 +137,32 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
 
     def visit_qm_grpc_qua_QuaProgramLiteralExpression(self, node: QuaProgramLiteralExpression) -> None:
         self._out = node.value
+
+    def visit_qm_grpc_qua_QuaProgramBroadcastExpression(self, node: QuaProgramBroadcastExpression) -> None:
+        value = node.value
+        serialized_value = ExpressionSerializingVisitor.serialize(value)
+        self._out = f"broadcast.{serialized_value}"
+
+    def visit_qm_grpc_qua_QuaProgramFunctionExpression(self, node: QuaProgramFunctionExpression) -> None:
+        function_name, function_expression = betterproto.which_one_of(node, "function_oneof")
+        # During proto class generation, function names that are reserved keywords are suffixed with an underscore.
+        # Conversely, functions already suffixed with an underscore (but are not reserved keywords) are saved without
+        # the underscore. For example, 'xor_' (not a reserved keyword) will be saved as 'xor'.
+        if not function_name.endswith("_"):
+            function_name += "_"
+
+        # For mypy
+        assert function_expression is not None
+        function_arguments = [ExpressionSerializingVisitor.serialize(arg) for arg in function_expression.values]
+
+        self._out = f"{function_name}({', '.join(function_arguments)})"
+
+    def visit_qm_grpc_qua_QuaProgramFunctionExpressionScalarOrVectorArgument(
+        self, node: QuaProgramFunctionExpressionScalarOrVectorArgument
+    ) -> None:
+        _, value = betterproto.which_one_of(node, "argument_oneof")
+        if value is not None:
+            self._out = ExpressionSerializingVisitor.serialize(value)
 
     def visit_qm_grpc_qua_QuaProgramAssignmentStatementTarget(self, node: QuaProgramAssignmentStatementTarget) -> None:
         super()._default_visit(node)

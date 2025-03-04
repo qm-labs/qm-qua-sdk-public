@@ -5,8 +5,8 @@ from octave_sdk import Octave, OctaveOutput, OctaveLOSource
 
 from qm.api.frontend_api import FrontendApi
 from qm.elements.element_inputs import MixInputs
-from qm.octave import CalibrationDB, QmOctaveConfig
 from qm.api.models.capabilities import ServerCapabilities
+from qm.octave import QmOctaveConfig, AbstractCalibrationDB
 from qm.utils.config_utils import get_fem_config, element_has_mix_inputs
 from qm.octave.octave_manager import logger, get_device, get_loopbacks_from_pb
 from qm.elements.up_converted_input import UpconvertedInput, UpconvertedInputNewApi
@@ -166,7 +166,10 @@ class OctavesContainer:
 
 
 def load_config_from_calibration_db(
-    pb_config: QuaConfig, calibration_db: CalibrationDB, octave_config: QmOctaveConfig, capabilities: ServerCapabilities
+    pb_config: QuaConfig,
+    calibration_db: AbstractCalibrationDB,
+    octave_config: QmOctaveConfig,
+    capabilities: ServerCapabilities,
 ) -> QuaConfig:
     octaves_container = OctavesContainer(pb_config, octave_config)
 

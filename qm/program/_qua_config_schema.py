@@ -1,4 +1,5 @@
 import logging
+import warnings
 from typing import (
     Any,
     Dict,
@@ -21,14 +22,16 @@ from dependency_injector.wiring import Provide, inject
 from marshmallow_polyfield import PolyField  # type: ignore[import-untyped]
 from marshmallow import Schema, ValidationError, fields, validate, post_load, validates_schema
 
+from qm.utils import deprecation_message
 from qm.utils.config_utils import FemTypes, get_fem_config_instance
-from qm.api.models.capabilities import OPX_FEM_IDX, ServerCapabilities
 from qm.containers.capabilities_container import CapabilitiesContainer
+from qm.api.models.capabilities import OPX_FEM_IDX, QopCaps, ServerCapabilities
 from qm.exceptions import (
     ConfigSchemaError,
     InvalidOctaveParameter,
     ConfigValidationException,
     OctaveConnectionAmbiguity,
+    CapabilitiesNotInitializedError,
 )
 from qm.program._validate_config_schema import (
     validate_oscillator,
@@ -37,7 +40,6 @@ from qm.program._validate_config_schema import (
     validate_output_smearing,
     validate_sticky_duration,
     validate_arbitrary_waveform,
-    validate_timetagging_parameters,
 )
 from qm.program._qua_config_to_pb import (
     DEFAULT_DUC_IDX,
@@ -47,6 +49,7 @@ from qm.program._qua_config_to_pb import (
     build_iw_sample,
     rf_module_to_pb,
     dac_port_ref_to_pb,
+    element_thread_to_pb,
     get_octave_loopbacks,
     single_if_output_to_pb,
     _all_controllers_are_opx,
@@ -55,8 +58,10 @@ from qm.program._qua_config_to_pb import (
     mw_fem_analog_output_to_pb,
     _get_port_reference_with_fem,
     upconverter_config_dec_to_pb,
+    create_time_tagging_parameters,
     mw_fem_analog_input_port_to_pb,
     validate_inputs_or_outputs_exist,
+    _analog_output_port_filters_to_pb,
     set_non_existing_mixers_in_mix_input_elements,
     set_octave_upconverter_connection_to_elements,
     set_octave_downconverter_connection_to_elements,
@@ -92,8 +97,8 @@ from qm.type_hinting.config_types import (
     IntegrationWeightConfigType,
     MwFemAnalogInputPortConfigType,
     OctaveSingleIfOutputConfigType,
-    OutputPulseParameterConfigType,
     MwFemAnalogOutputPortConfigType,
+    TimeTaggingParametersConfigType,
     AnalogOutputPortConfigTypeOctoDac,
 )
 from qm.grpc.qua_config import (
@@ -137,8 +142,8 @@ from qm.grpc.qua_config import (
     QuaConfigUpConverterConfigDec,
     QuaConfigDigitalWaveformSample,
     QuaConfigOctaveIfOutputsConfig,
+    QuaConfigOutputPulseParameters,
     QuaConfigSingleInputCollection,
-    QuaConfigAnalogOutputPortFilter,
     QuaConfigDigitalInputPortReference,
     QuaConfigDigitalOutputPortReference,
     QuaConfigOctaveSingleIfOutputConfig,
@@ -149,7 +154,6 @@ from qm.grpc.qua_config import (
     QuaConfigOctaveDownconverterRfSource,
     QuaConfigMicrowaveAnalogOutputPortDec,
     QuaConfigMicrowaveOutputPortReference,
-    QuaConfigOutputPulseParametersPolarity,
     QuaConfigOctoDacAnalogOutputPortDecOutputMode,
     QuaConfigOctoDacAnalogOutputPortDecSamplingRate,
     QuaConfigOctoDacAnalogOutputPortDecSamplingRateMode,
@@ -203,14 +207,14 @@ def validate_no_crosstalk(
 
 
 def validate_config_capabilities(pb_config: QuaConfig, server_capabilities: ServerCapabilities) -> None:
-    if not server_capabilities.supports_inverted_digital_output:
+    if not server_capabilities.supports(QopCaps.inverted_digital_output):
         for con_name, con in pb_config.v1_beta.control_devices.items():
             for fem_name, fem in con.fems.items():
                 fem_config = get_fem_config_instance(fem)
                 if isinstance(fem_config, (QuaConfigControllerDec, QuaConfigOctoDacFemDec)):
                     _validate_no_inverted_port(fem_config, controller_name=con_name, fem_idx=fem_name)
 
-    if not server_capabilities.supports_multiple_inputs_for_element:
+    if not server_capabilities.supports(QopCaps.multiple_inputs_for_element):
         for el_name, el in pb_config.v1_beta.elements.items():
             if el is not None and isinstance(
                 betterproto.which_one_of(el, "element_inputs_one_of")[1], QuaConfigMultipleInputs
@@ -219,27 +223,27 @@ def validate_config_capabilities(pb_config: QuaConfig, server_capabilities: Serv
                     f"Server does not support multiple inputs for elements used in '{el_name}'"
                 )
 
-    if not server_capabilities.supports_analog_delay:
+    if not server_capabilities.supports(QopCaps.analog_delay):
         for con_name, con in pb_config.v1_beta.control_devices.items():
             for fem_idx, fem in con.fems.items():
                 fem_config = get_fem_config_instance(fem)
 
                 _validate_no_analog_delay(fem_config, controller_name=con_name, fem_idx=fem_idx)
 
-    if not server_capabilities.supports_shared_oscillators:
+    if not server_capabilities.supports(QopCaps.shared_oscillators):
         for el_name, el in pb_config.v1_beta.elements.items():
             if el is not None and betterproto.which_one_of(el, "oscillator_one_of")[0] == "named_oscillator":
                 raise ConfigValidationException(
                     f"Server does not support shared oscillators for elements used in " f"'{el_name}'"
                 )
 
-    if not server_capabilities.supports_crosstalk:
+    if not server_capabilities.supports(QopCaps.crosstalk):
         for con_name, con in pb_config.v1_beta.control_devices.items():
             for fem_idx, fem in con.fems.items():
                 fem_config = get_fem_config_instance(fem)
                 validate_no_crosstalk(fem_config, controller_name=con_name, fem_idx=fem_idx)
 
-    if not server_capabilities.supports_shared_ports:
+    if not server_capabilities.supports(QopCaps.shared_ports):
         shared_ports_by_controller = {}
         for con_name, con in pb_config.v1_beta.control_devices.items():
             for _, fem in con.fems.items():
@@ -299,7 +303,13 @@ def validate_config_capabilities(pb_config: QuaConfig, server_capabilities: Serv
                 )
 
 
-def load_config(config: DictQuaConfig) -> QuaConfig:
+@inject
+def load_config(
+    config: DictQuaConfig, capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]
+) -> QuaConfig:
+    # When the capabilities aren't initialized, the capabilities argument is of type 'Provide' instead of 'ServerCapabilities'
+    if not isinstance(capabilities, ServerCapabilities):
+        raise CapabilitiesNotInitializedError()
     try:
         return cast(QuaConfig, QuaConfigSchema().load(config))
     except ValidationError as validation_error:
@@ -417,7 +427,26 @@ class AnalogOutputFilterDefSchema(Schema):
     )
     feedback = fields.List(
         fields.Float(),
-        metadata={"description": "Feedback taps for the analog output filter. List of double"},
+        metadata={
+            "description": "Feedback taps for the analog output filter. List of double. IIR filtering approach "
+            "prior to QOP 3.3"
+        },
+    )
+    exponential = fields.List(
+        _create_tuple_field(
+            [
+                fields.Float(metadata={"description": "Amplitude of the exponential filter."}),
+                fields.Float(metadata={"description": "Time constant of the exponential filter."}),
+            ]
+        ),
+        metadata={"description": "Exponential filter parameters. IIR filtering approach since QOP 3.3."},
+    )
+    high_pass = fields.Float(
+        allow_none=True,
+        metadata={
+            "description": "High-pass compensation filter, used to compensate for the low-frequency cutoff of "
+            "the signal. IIR filtering approach since QOP 3.3"
+        },
     )
 
 
@@ -455,11 +484,7 @@ class AnalogOutputPortDefSchema(Schema):
             item.delay = delay
 
         if "filter" in data:
-            filters = data["filter"]
-            item.filter = QuaConfigAnalogOutputPortFilter(
-                feedforward=filters.get("feedforward", []),
-                feedback=filters.get("feedback", []),
-            )
+            item.filter = _analog_output_port_filters_to_pb(data["filter"])
 
         if "crosstalk" in data:
             for k, v in data["crosstalk"].items():
@@ -655,9 +680,9 @@ class DigitalInputPortDefSchema(Schema):
         item = QuaConfigDigitalInputPortDec()
         item.deadtime = data["deadtime"]
         if data["polarity"].upper() == "RISING":
-            item.polarity = QuaConfigDigitalInputPortDecPolarity.RISING
+            item.polarity = QuaConfigDigitalInputPortDecPolarity.RISING  # type: ignore[assignment]
         elif data["polarity"].upper() == "FALLING":
-            item.polarity = QuaConfigDigitalInputPortDecPolarity.FALLING
+            item.polarity = QuaConfigDigitalInputPortDecPolarity.FALLING  # type: ignore[assignment]
 
         item.threshold = data["threshold"]
         if "shareable" in data:
@@ -770,7 +795,7 @@ class OctaveSchema(Schema):
         for input_idx, input_config in to_return.rf_inputs.items():
             if input_config.lo_source == QuaConfigOctaveLoSourceInput.not_set:
                 input_config.lo_source = (
-                    QuaConfigOctaveLoSourceInput.internal if input_idx == 1 else QuaConfigOctaveLoSourceInput.external
+                    QuaConfigOctaveLoSourceInput.internal if input_idx == 1 else QuaConfigOctaveLoSourceInput.external  # type: ignore[assignment]
                 )
             if input_idx == 1 and input_config.rf_source != QuaConfigOctaveDownconverterRfSource.rf_in:
                 raise InvalidOctaveParameter("Downconverter 1 must be connected to RF-in")
@@ -1348,8 +1373,8 @@ class PulseSchema(Schema):
             for k, v in data["integration_weights"].items():
                 item.integration_weights[k] = v
         if "waveforms" in data:
-            for k, v in data["waveforms"].items():
-                item.waveforms[k] = v
+            for waveform_key, waveform_name in data["waveforms"].items():
+                item.waveforms[waveform_key] = str(waveform_name)
         if "digital_marker" in data:
             item.digital_marker = data["digital_marker"]
         return item
@@ -1560,6 +1585,33 @@ class OscillatorSchema(Schema):
         return osc
 
 
+polarity_options = ["ABOVE", "ASCENDING", "BELOW", "DESCENDING"]
+
+
+def _validate_polarity(polarity: str) -> None:
+    if polarity.upper() not in polarity_options:
+        raise ValidationError(f"Invalid polarity: {polarity}. Must be one of {polarity_options}")
+
+
+class TimeTaggingParametersSchema(Schema):
+    signalThreshold = fields.Int(required=True)
+    signalPolarity = fields.String(
+        metadata={"description": "The polarity of the signal threshold"},
+        validate=_validate_polarity,
+        required=True,
+    )
+    derivativeThreshold = fields.Int(required=True)
+    derivativePolarity = fields.String(
+        metadata={"description": "The polarity of the derivative threshold"},
+        validate=_validate_polarity,
+        required=True,
+    )
+
+    @post_load(pass_many=False)
+    def build(self, data: TimeTaggingParametersConfigType, **kwargs: Any) -> QuaConfigOutputPulseParameters:
+        return create_time_tagging_parameters(data)
+
+
 class _SemiBuiltElement(TypedDict, total=False):
     intermediate_frequency: float
     oscillator: str
@@ -1576,10 +1628,12 @@ class _SemiBuiltElement(TypedDict, total=False):
     outputs: Dict[str, PortReferenceType]
     digitalInputs: Dict[str, QuaConfigDigitalInputPortReference]
     digitalOutputs: Dict[str, PortReferenceType]
-    outputPulseParameters: OutputPulseParameterConfigType
+    outputPulseParameters: QuaConfigOutputPulseParameters
+    timeTaggingParameters: QuaConfigOutputPulseParameters
     hold_offset: QuaConfigHoldOffset
     sticky: QuaConfigSticky
     thread: str
+    core: str
     RF_inputs: Dict[str, Tuple[str, int]]
     RF_outputs: Dict[str, Tuple[str, int]]
 
@@ -1632,13 +1686,20 @@ class ElementSchema(Schema):
     MWOutput = fields.Nested(MWOutputSchema)
     digitalInputs = fields.Dict(keys=fields.String(), values=fields.Nested(DigitalInputSchema))
     digitalOutputs = fields.Dict(keys=fields.String(), values=PortReferenceSchema)
-    outputPulseParameters = fields.Dict(metadata={"description": "Pulse parameters for Time-Tagging"})
+    outputPulseParameters = fields.Nested(
+        TimeTaggingParametersSchema,
+        metadata={"description": "Pulse parameters for Time-Tagging (deprecated, use 'timeTaggingParameters' instead)"},
+    )
+    timeTaggingParameters = fields.Nested(
+        TimeTaggingParametersSchema, metadata={"description": "Pulse parameters for Time-Tagging"}
+    )
 
     hold_offset = fields.Nested(HoldOffsetSchema)
 
     sticky = fields.Nested(StickySchema)
 
-    thread = fields.String(metadata={"description": "QE thread"})
+    thread = fields.String(metadata={"description": "QE thread (deprecated, use 'core' instead)"})
+    core = fields.String(metadata={"description": "QE thread"})
     RF_inputs = fields.Dict(keys=fields.String(), values=_create_tuple_field([fields.String(), fields.Int()]))
     RF_outputs = fields.Dict(keys=fields.String(), values=_create_tuple_field([fields.String(), fields.Int()]))
 
@@ -1706,23 +1767,13 @@ class ElementSchema(Schema):
                 )
 
         if "outputPulseParameters" in data:
-            pulse_parameters = data["outputPulseParameters"]
-            el.output_pulse_parameters.signal_threshold = pulse_parameters["signalThreshold"]
-
-            signal_polarity = pulse_parameters["signalPolarity"].upper()
-            if signal_polarity == "ABOVE" or signal_polarity == "ASCENDING":
-                el.output_pulse_parameters.signal_polarity = QuaConfigOutputPulseParametersPolarity.ASCENDING
-            elif signal_polarity == "BELOW" or signal_polarity == "DESCENDING":
-                el.output_pulse_parameters.signal_polarity = QuaConfigOutputPulseParametersPolarity.DESCENDING
-
-            if "derivativeThreshold" in pulse_parameters:
-                el.output_pulse_parameters.derivative_threshold = pulse_parameters["derivativeThreshold"]
-
-                polarity = pulse_parameters["derivativePolarity"].upper()
-                if polarity == "ABOVE" or polarity == "ASCENDING":
-                    el.output_pulse_parameters.derivative_polarity = QuaConfigOutputPulseParametersPolarity.ASCENDING
-                elif polarity == "BELOW" or polarity == "DESCENDING":
-                    el.output_pulse_parameters.derivative_polarity = QuaConfigOutputPulseParametersPolarity.DESCENDING
+            warnings.warn(
+                deprecation_message("outputPulseParameters", "1.2.2", "1.3.0", "Use timeTaggingParameters instead."),
+                DeprecationWarning,
+            )
+            el.output_pulse_parameters = data["outputPulseParameters"]
+        if "timeTaggingParameters" in data:
+            el.output_pulse_parameters = data["timeTaggingParameters"]
         if "sticky" in data:
             validate_sticky_duration(data["sticky"].duration)
             if capabilities.supports_sticky_elements:
@@ -1742,7 +1793,10 @@ class ElementSchema(Schema):
                 el.hold_offset = data["hold_offset"]
 
         if "thread" in data:
-            el.thread.thread_name = data["thread"]
+            warnings.warn(deprecation_message("thread", "1.2.2", "1.3.0", "Use 'core' instead."), DeprecationWarning)
+            el.thread = element_thread_to_pb(data["thread"])
+        if "core" in data:
+            el.thread = element_thread_to_pb(data["core"])
 
         rf_inputs = data.get("RF_inputs", {})
         for k, (device, port) in rf_inputs.items():
@@ -1752,10 +1806,6 @@ class ElementSchema(Schema):
         for k, (device, port) in rf_outputs.items():
             el.rf_outputs[k] = QuaConfigGeneralPortReference(device_name=device, port=port)
         return el
-
-    @validates_schema
-    def validate_timetagging_parameters(self, data: ElementConfigType, **kwargs: Any) -> None:
-        validate_timetagging_parameters(data)
 
     @validates_schema
     def validate_output_tof(self, data: ElementConfigType, **kwargs: Any) -> None:

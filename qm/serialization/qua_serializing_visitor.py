@@ -99,11 +99,11 @@ class QuaSerializingVisitor(QuaNodeVisitor):
             for i in range(len(self._lines)):
                 if self._lines[i].find(f"{trace_name} = declare_stream") > 0:
                     line_to_remove_index = i
-                self._lines[i] = self._lines[i].replace(trace_name, f'"{save_name}"')
+                self._lines[i] = re.sub(r"(?<=\W|\^)" + trace_name + r"(?=\W|\$)", f'"{save_name}"', self._lines[i])
             if line_to_remove_index:
                 self._lines.pop(line_to_remove_index)
 
-    def enter_qm_grpc_qua_QuaProgramCompilerOptions(self, node: qua.QuaProgramCompilerOptions):
+    def enter_qm_grpc_qua_QuaProgramCompilerOptions(self, node: qua.QuaProgramCompilerOptions) -> bool:
         options_list = []
         if node.strict:
             options_list.append(f"strict={node.strict}")
@@ -359,16 +359,14 @@ def _measure_statement(node: qua.QuaProgramMeasureStatement) -> str:
 
     args.append(f'"{node.pulse.name}"{amp}')
     args.append(f'"{node.qe.name}"')
-    if node.stream_as:
-        args.append(f"{node.stream_as}")
-    else:
-        args.append("None")
 
     if len(node.measure_processes) > 0:
         for process in node.measure_processes:
             args.append(ExpressionSerializingVisitor.serialize(process))
     if node.timestamp_label:
         args.append(f"timestamp_stream={node.timestamp_label}")
+    if node.stream_as:
+        args.append(f"adc_stream={node.stream_as}")
     return f'measure({", ".join(args)})'
 
 

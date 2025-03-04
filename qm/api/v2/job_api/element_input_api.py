@@ -95,7 +95,7 @@ class MwInputApi(ElementInputApi):
             job_id=self._id,
             qe=self._element_id,
             new_frequency_hz=frequency_hz,
-            update_component=SetOscillatorFrequencyRequestUpdateComponentSelection.both
+            update_component=SetOscillatorFrequencyRequestUpdateComponentSelection.both  # type: ignore[arg-type]
             if set_also_output
             else SetOscillatorFrequencyRequestUpdateComponentSelection.upconverter,
         )

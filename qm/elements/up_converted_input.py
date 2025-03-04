@@ -4,14 +4,13 @@ from typing import TYPE_CHECKING, Tuple, Union, Optional, Sequence
 from octave_sdk.octave import RFOutput
 from octave_sdk import RFOutputMode, OctaveLOSource
 
-from qm.type_hinting import Number
 from qm.api.frontend_api import FrontendApi
 from qm.elements.element_inputs import MixInputs
 from qm.grpc.qua_config import QuaConfigMixInputs
-from qm.type_hinting.general import NumpySupportedFloat
+from qm.type_hinting.general import NumpySupportedFloat, NumpySupportedNumber
 
 if TYPE_CHECKING:
-    from qm.octave import CalibrationDB
+    from qm.octave import AbstractCalibrationDB
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ class UpconvertedInput(MixInputs):
         client: RFOutput,
         port: Tuple[str, int],
         gain: Optional[float],
-        calibration_db: Optional["CalibrationDB"] = None,
+        calibration_db: Optional["AbstractCalibrationDB"] = None,
         use_input_attenuators: bool = False,
     ):
         super().__init__(name, config, frontend_api, machine_id)
@@ -134,7 +133,7 @@ class UpconvertedInputNewApi(UpconvertedInput):
         client: RFOutput,
         port: Tuple[str, int],
         gain: Optional[float],
-        calibration_db: Optional["CalibrationDB"] = None,
+        calibration_db: Optional["AbstractCalibrationDB"] = None,
         use_input_attenuators: bool = False,
     ):
         super().__init__(
@@ -162,8 +161,8 @@ class UpconvertedInputNewApi(UpconvertedInput):
 
     def set_mixer_correction(
         self,
-        intermediate_frequency: Number,
-        lo_frequency: Number,
-        values: Tuple[float, float, float, float],
+        intermediate_frequency: NumpySupportedNumber,
+        lo_frequency: NumpySupportedNumber,
+        values: Tuple[NumpySupportedFloat, NumpySupportedFloat, NumpySupportedFloat, NumpySupportedFloat],
     ) -> None:
         raise NotImplementedError

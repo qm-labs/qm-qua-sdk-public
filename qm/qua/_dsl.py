@@ -1,74 +1,109 @@
+import abc
 import logging
 import warnings
 import dataclasses
-import math as _math
 from enum import Enum
-from enum import Enum as _Enum
+from types import TracebackType
 from dataclasses import dataclass
-from collections.abc import Iterable
-from typing import Set, Dict, List, Type, Tuple, Union, Optional, Sequence, overload
+from typing_extensions import Literal
+from collections.abc import Collection
+from collections.abc import Iterable as IterableClass
+from typing import Any, Set, Dict, List, Type, Tuple, Union, Generic, Optional, Sequence, cast, overload
 
 import betterproto
 import numpy as np
+from betterproto.lib.google.protobuf import Value, ListValue
 
-import qm.grpc.qua as _qua
 from qm._loc import _get_loc
 from qm.program import Program
 from qm.exceptions import QmQuaException
-from qm.utils import is_iter as _is_iter
+from qm.utils import deprecation_message
+from qm.type_hinting import Number, NumberT
+from qm.api.models.capabilities import QopCaps
 from qm.program._ResultAnalysis import _ResultAnalysis
-from qm.utils.general_utils import create_input_stream_name
-from qm.qua.DigitalMeasureProcess import DigitalMeasureProcess
+from qm.qua._stream_processing_map_functions import MapFunctions
+from qm.qua._stream_processing_utils import _ARRAY_SYMBOL, create_array
 from qm.qua.AnalogMeasureProcess import RawTimeTagging as AnalogRawTimeTagging
 from qm.program.StatementsCollection import PortConditionedStatementsCollection
 from qm.qua.DigitalMeasureProcess import RawTimeTagging as DigitalRawTimeTagging
 from qm.qua.DigitalMeasureProcess import Counting as DigitalMeasureProcessCounting
 from qm.program.StatementsCollection import StatementsCollection as _StatementsCollection
-from qm.utils import deprecation_message, collection_has_type_int, collection_has_type_bool, collection_has_type_float
+from qm.utils.types_utils import collection_has_type_int, collection_has_type_bool, collection_has_type_float
 from qm.qua._dsl_specific_type_hints import (
     ChirpType,
+    OneOrMore,
     AmpValuesType,
     PlayPulseType,
-    QuaNumberType,
+    ConvolutionMode,
     MeasurePulseType,
-    TypeOrExpression,
-)
-from qm.qua._type_hinting import (
-    OneOrMore,
-    AllPyTypes,
-    MessageVarType,
-    ForEachValuesType,
-    PyNumberArrayType,
     MessageExpressionType,
-    VariableDeclarationType,
-    MessageVariableOrExpression,
     fixed,
 )
-from qm.qua._expressions import (
-    AllQuaTypes,
-    PyFloatType,
-    QuaVariable,
-    PyNumberType,
-    QuaExpression,
-    QuaVariableType,
-    QuaExpressionType,
-    literal_int,
-    literal_bool,
-    literal_real,
-    to_expression,
+from qm.qua._stream_processing_function_classes import (
+    FFT,
+    DotProduct,
+    Convolution,
+    BooleanToInt,
+    FunctionBase,
+    TupleMultiply,
+    TupleDotProduct,
+    MultiplyByScalar,
+    MultiplyByVector,
+    TupleConvolution,
 )
 from qm.qua.AnalogMeasureProcess import (
     BareIntegration,
+    BasicIntegration,
     DemodIntegration,
+    DualMeasureProcess,
     HighResTimeTagging,
     DualBareIntegration,
     ScalarProcessTarget,
     VectorProcessTarget,
-    AnalogMeasureProcess,
     DualDemodIntegration,
+    MeasureProcessAbstract,
     SlicedAnalogTimeDivision,
     AccumulatedAnalogTimeDivision,
     MovingWindowAnalogTimeDivision,
+)
+from qm.qua._expressions import (
+    QuaIO,
+    Scalar,
+    Vector,
+    QuaScalar,
+    PyQuaScalar,
+    QuaVariable,
+    QuaArrayCell,
+    QuaBroadcast,
+    QuaExpression,
+    QuaArrayVariable,
+    QuaFunctionOutput,
+    QuaArrayInputStream,
+    QuaVariableInputStream,
+    literal_int,
+    literal_bool,
+    literal_real,
+    to_scalar_pb_expression,
+    create_qua_scalar_expression,
+)
+from qm.grpc.qua import (
+    QuaProgramChirp,
+    QuaProgramElseIf,
+    QuaProgramRampPulse,
+    QuaProgramChirpUnits,
+    QuaProgramIfStatement,
+    QuaProgramAnyStatement,
+    QuaProgramForStatement,
+    QuaProgramVarRefExpression,
+    QuaProgramFunctionExpression,
+    QuaProgramAnyScalarExpression,
+    QuaProgramAssignmentStatement,
+    QuaProgramStatementsCollection,
+    QuaProgramArrayVarRefExpression,
+    QuaProgramFunctionExpressionOrFunction,
+    QuaProgramFunctionExpressionAndFunction,
+    QuaProgramFunctionExpressionXorFunction,
+    QuaProgramFunctionExpressionScalarOrVectorArgument,
 )
 
 _Variable = QuaVariable  # This alias is for supporting an import that appears in QUA-lang tools
@@ -80,29 +115,15 @@ _block_stack: List["_BaseScope"] = []
 logger = logging.getLogger(__name__)
 
 StreamType = Union[str, "_ResultSource"]
-MeasureProcessType = Union[
-    AnalogMeasureProcess,
-    DigitalMeasureProcess,
-]
-TimeDivisionType = Union[
-    SlicedAnalogTimeDivision,
-    AccumulatedAnalogTimeDivision,
-    MovingWindowAnalogTimeDivision,
-]
-AnalogProcessTargetType = Union[
-    ScalarProcessTarget,
-    VectorProcessTarget,
-]
 
 
 _RESULT_SYMBOL = "@re"
-
 
 DEFAULT_OUT1 = "out1"
 DEFAULT_OUT2 = "out2"
 
 
-def program():
+def program() -> "_ProgramScope":
     """Create a QUA program.
 
     Used within a context manager, the program is defined in the code block
@@ -133,10 +154,10 @@ def program():
 def play(
     pulse: PlayPulseType,
     element: str,
-    duration: Optional[QuaNumberType] = None,
-    condition: Optional[QuaExpressionType] = None,
+    duration: Optional[Scalar[int]] = None,
+    condition: Optional[Scalar[bool]] = None,
     chirp: Optional[ChirpType] = None,
-    truncate: Optional[QuaNumberType] = None,
+    truncate: Optional[Scalar[int]] = None,
     timestamp_stream: Optional[StreamType] = None,
     continue_chirp: bool = False,
     target: str = "",
@@ -182,6 +203,8 @@ def play(
             handle can be retrieved with
             [`JobResults.get`][qm.results.streaming_result_fetcher.StreamingResultFetcher.get] with the same
             ``label``.
+        continue_chirp (bool): When performing a chirp, passing `True` will make the chirp continue until a new chirp command is given. Defaults to `False`. Not available in OPX1.0.
+        target (str): Allows to select a specific input of the element to play the pulse on. Only allowed (and required) when the element is defined with `singleInputCollection`.
 
     Note:
         Arbitrary waveforms cannot be compressed and can only be expanded up to
@@ -214,78 +237,80 @@ def play(
         ```
     """
     body = _get_scope_as_blocks_body()
-    if duration is not None:
-        duration = _unwrap_exp(exp(duration))
-    if condition is not None:
-        condition = _unwrap_exp(exp(condition))
-    if truncate is not None:
-        truncate = _unwrap_exp(exp(truncate))
 
-    if chirp is not None:
-        if len(chirp) == 2:
-            chirp_var, chirp_units = chirp
-            chirp_times = None
-        elif len(chirp) == 3:
-            chirp_var, chirp_times, chirp_units = chirp
-        else:
-            raise QmQuaException("chirp must be tuple of 2 or 3 values")
-        chirp_times_list: Optional[List[QuaNumberType]] = (
-            chirp_times.tolist() if isinstance(chirp_times, np.ndarray) else chirp_times
-        )
-        if isinstance(chirp_var, (list, np.ndarray)):
-            chirp_var = declare(int, value=chirp_var)
-
-        chirp_var = _unwrap_exp(exp(chirp_var))
-        chirp = _qua.QuaProgramChirp()
-        chirp.continue_chirp = continue_chirp
-        if chirp_times_list is not None:
-            chirp.times.extend(chirp_times_list)
-        if isinstance(chirp_var, _qua.QuaProgramArrayVarRefExpression):
-            chirp.array_rate = chirp_var
-        else:
-            chirp.scalar_rate = chirp_var
-
-        if chirp_units == "Hz/nsec" or chirp_units == "GHz/sec":
-            chirp.units = _qua.QuaProgramChirpUnits.HzPerNanoSec
-
-        units_mapping = {
-            "Hz/nsec": _qua.QuaProgramChirpUnits.HzPerNanoSec,
-            "GHz/sec": _qua.QuaProgramChirpUnits.HzPerNanoSec,
-            "mHz/nsec": _qua.QuaProgramChirpUnits.mHzPerNanoSec,
-            "MHz/sec": _qua.QuaProgramChirpUnits.mHzPerNanoSec,
-            "uHz/nsec": _qua.QuaProgramChirpUnits.uHzPerNanoSec,
-            "KHz/sec": _qua.QuaProgramChirpUnits.uHzPerNanoSec,
-            "nHz/nsec": _qua.QuaProgramChirpUnits.nHzPerNanoSec,
-            "Hz/sec": _qua.QuaProgramChirpUnits.nHzPerNanoSec,
-            "pHz/nsec": _qua.QuaProgramChirpUnits.pHzPerNanoSec,
-            "mHz/sec": _qua.QuaProgramChirpUnits.pHzPerNanoSec,
-        }
-
-        if chirp_units in units_mapping:
-            chirp.units = units_mapping[chirp_units]
-        else:
-            raise QmQuaException(f'unknown units "{chirp_units}"')
-    timestamp_label = None
-    if isinstance(timestamp_stream, str):
-        scope = _get_root_program_scope()
-        scope.program.set_metadata(uses_command_timestamps=True)
-        timestamp_label = scope.declare_save(timestamp_stream).get_var_name()
-    elif isinstance(timestamp_stream, _ResultSource):
-        _get_root_program_scope().program.set_metadata(uses_command_timestamps=True)
-        timestamp_label = timestamp_stream.get_var_name()
     body.play(
         pulse,
         element,
-        duration=duration,
-        condition=condition,
+        duration=to_scalar_pb_expression(duration) if duration is not None else None,
+        condition=to_scalar_pb_expression(condition) if condition is not None else None,
         target=target,
-        chirp=chirp,
-        truncate=truncate,
-        timestamp_label=timestamp_label,
+        chirp=_standardize_chirp(chirp, continue_chirp),
+        truncate=to_scalar_pb_expression(truncate) if truncate is not None else None,
+        timestamp_label=_standardize_timestamp_label(timestamp_stream),
     )
 
 
-def pause():
+def _standardize_chirp(chirp: Optional[ChirpType], continue_chirp: bool) -> Optional[QuaProgramChirp]:
+    if chirp is None:
+        return None
+
+    if len(chirp) == 2:
+        chirp_var, chirp_units = chirp
+        chirp_times = None
+    elif len(chirp) == 3:
+        chirp_var, chirp_times, chirp_units = chirp
+    else:
+        raise QmQuaException("chirp must be tuple of 2 or 3 values")
+    chirp_times_list = [int(x) for x in chirp_times] if chirp_times is not None else None
+    if isinstance(chirp_var, IterableClass):
+        chirp_var = [int(x) for x in chirp_var]
+        chirp_var = declare(int, value=chirp_var)
+
+    # chirp_exp = to_expression(chirp_var)
+    chirp_obj = QuaProgramChirp()
+    chirp_obj.continue_chirp = continue_chirp
+    if chirp_times_list is not None:
+        chirp_obj.times.extend(chirp_times_list)
+    if isinstance(chirp_var, QuaArrayVariable):
+        chirp_obj.array_rate = chirp_var.unwrapped
+    else:
+        chirp_obj.scalar_rate = to_scalar_pb_expression(chirp_var)
+    # else:
+    #     raise TypeError(f"Unknown chirp type - {type(chirp_obj)}")
+
+    units_mapping = {
+        "Hz/nsec": QuaProgramChirpUnits.HzPerNanoSec,
+        "GHz/sec": QuaProgramChirpUnits.HzPerNanoSec,
+        "mHz/nsec": QuaProgramChirpUnits.mHzPerNanoSec,
+        "MHz/sec": QuaProgramChirpUnits.mHzPerNanoSec,
+        "uHz/nsec": QuaProgramChirpUnits.uHzPerNanoSec,
+        "KHz/sec": QuaProgramChirpUnits.uHzPerNanoSec,
+        "nHz/nsec": QuaProgramChirpUnits.nHzPerNanoSec,
+        "Hz/sec": QuaProgramChirpUnits.nHzPerNanoSec,
+        "pHz/nsec": QuaProgramChirpUnits.pHzPerNanoSec,
+        "mHz/sec": QuaProgramChirpUnits.pHzPerNanoSec,
+    }
+
+    if chirp_units in units_mapping:
+        chirp_obj.units = units_mapping[chirp_units]  # type: ignore[assignment]
+    else:
+        raise QmQuaException(f'unknown units "{chirp_units}"')
+    return chirp_obj
+
+
+def _standardize_timestamp_label(timestamp_stream: Optional[StreamType]) -> Optional[str]:
+    timestamp_label = None
+    if isinstance(timestamp_stream, str):
+        scope = _get_root_program_scope()
+        scope.program.add_used_capability(QopCaps.command_timestamps)
+        timestamp_label = scope.declare_save(timestamp_stream).get_var_name()
+    elif isinstance(timestamp_stream, _ResultSource):
+        _get_root_program_scope().program.add_used_capability(QopCaps.command_timestamps)
+        timestamp_label = timestamp_stream.get_var_name()
+    return timestamp_label
+
+
+def pause() -> None:
     """Pause the execution of the job until [qm.jobs.running_qm_job.RunningQmJob.resume][] is called.
 
     The quantum machines freezes on its current output state.
@@ -296,10 +321,10 @@ def pause():
 
 def update_frequency(
     element: str,
-    new_frequency: QuaNumberType,
+    new_frequency: Scalar[int],
     units: str = "Hz",
     keep_phase: bool = False,
-):
+) -> None:
     """Dynamically update the frequency of the oscillator associated with a given `element`.
 
     This changes the frequency from the value defined in the quantum machine configuration.
@@ -330,15 +355,15 @@ def update_frequency(
         ```
     """
     body = _get_scope_as_blocks_body()
-    body.update_frequency(element, _unwrap_exp(exp(new_frequency)), units, keep_phase)
+    body.update_frequency(element, to_scalar_pb_expression(new_frequency), units, keep_phase)
 
 
 def update_correction(
     element: str,
-    c00: QuaNumberType,
-    c01: QuaNumberType,
-    c10: QuaNumberType,
-    c11: QuaNumberType,
+    c00: Scalar[float],
+    c01: Scalar[float],
+    c10: Scalar[float],
+    c11: Scalar[float],
 ) -> None:
     """Updates the correction matrix used to overcome IQ imbalances of the IQ mixer for the next pulses
     played on the element
@@ -349,7 +374,7 @@ def update_correction(
 
     Note:
 
-        Calling ``update_correction`` will also reset the frame of the oscillator associated with the element.
+        Up to QOP 3.3, calling ``update_correction`` will also reset the frame of the oscillator associated with the element.
 
     Args:
         element (str): The element associated with the oscillator whose
@@ -372,14 +397,14 @@ def update_correction(
     body = _get_scope_as_blocks_body()
     body.update_correction(
         element,
-        _unwrap_exp(exp(c00)),
-        _unwrap_exp(exp(c01)),
-        _unwrap_exp(exp(c10)),
-        _unwrap_exp(exp(c11)),
+        to_scalar_pb_expression(c00),
+        to_scalar_pb_expression(c01),
+        to_scalar_pb_expression(c10),
+        to_scalar_pb_expression(c11),
     )
 
 
-def set_dc_offset(element: str, element_input: str, offset: QuaNumberType):
+def set_dc_offset(element: str, element_input: str, offset: Scalar[float]) -> None:
     """Set the DC offset of an element's input to the given value. This value will remain the DC offset until changed or
     until the Quantum Machine is closed.
     The offset value remains until it is changed or the Quantum Machine is closed.
@@ -395,16 +420,45 @@ def set_dc_offset(element: str, element_input: str, offset: QuaNumberType):
     """
 
     body = _get_scope_as_blocks_body()
-    body.set_dc_offset(element, element_input, _unwrap_exp(exp(offset)))
+    body.set_dc_offset(element, element_input, to_scalar_pb_expression(offset))
 
 
+@overload
 def measure(
     pulse: MeasurePulseType,
     element: str,
-    stream: Optional[StreamType] = None,
-    *outputs,
+    *outputs: Union[Tuple[str, QuaVariable[float]], Tuple[str, str, QuaVariable[float]], MeasureProcessAbstract],
     timestamp_stream: Optional[StreamType] = None,
-):
+    adc_stream: Optional[StreamType] = None,
+) -> None:
+    pass
+
+
+@overload
+def measure(
+    pulse: MeasurePulseType,
+    element: str,
+    stream: Optional[StreamType],
+    *outputs: Union[Tuple[str, QuaVariable[float]], Tuple[str, str, QuaVariable[float]], MeasureProcessAbstract],
+    timestamp_stream: Optional[StreamType] = None,
+    adc_stream: Optional[StreamType] = None,
+) -> None:
+    pass
+
+
+def measure(  # type: ignore[misc]
+    pulse: MeasurePulseType,
+    element: str,
+    *outputs: Union[
+        Tuple[str, QuaVariable[float]],
+        Tuple[str, str, QuaVariable[float]],
+        MeasureProcessAbstract,
+        Optional[StreamType],
+    ],
+    stream: Optional[StreamType] = None,
+    timestamp_stream: Optional[StreamType] = None,
+    adc_stream: Optional[StreamType] = None,
+) -> None:
     """Perform a measurement of `element` using `pulse` based on 'operation' as defined in the 'element'.
 
     An element for which a measurement is applied must have outputs defined in the configuration.
@@ -425,38 +479,24 @@ def measure(
     [Measure Statement Features](../../Guides/features.md#measure-statement-features)
 
     Args:
-        pulse (str): The name of an `operation` to be performed, as
-            defined in the element in the quantum machine configuration.
-            Pulse must have a ``measurement`` operation. Can also be
-            multiplied by an [amp][qm.qua._dsl.amp].
-        element (str): name of the element, as defined in the quantum
-            machine configuration. The element must have outputs.
-        stream (Union[str, _ResultSource]): The stream variable which
-            the raw ADC data will be saved and will appear in result
-            analysis scope. You can receive the results with
-            [qm.QmJob.result_handles.get("name")][qm.jobs.running_qm_job.RunningQmJob.result_handles]. A string name
-            can also be used. In this case, the name of the result
-            handle should be suffixed by ``_input1`` for data from
-            analog input 1 and ``_input2`` for data from analog input 2.
+        pulse (str): The name of an `operation` to be performed, as defined in the element in the quantum machine configuration.
+            Pulse must have a ``measurement`` operation. Can also be multiplied by an [amp][qm.qua._dsl.amp].
+        element (str): name of the element, as defined in the quantum machine configuration. The element must have outputs.
+        *outputs (tuple): A parameter specifying the processing to be done on the ADC data, there are multiple options available, including demod(), integration() & time_tagging().
+        stream (Union[str, _ResultSource]): Deprecated and replaced by `adc_stream`.
+        timestamp_stream (Union[str, _ResultSource]): (Supported from QOP 2.2) Adding a `timestamp_stream` argument will save the time at which the operation occurred to a stream.
+            If the `timestamp_stream` is a string ``label``, then the timestamp handle can be retrieved with [qm.results.streaming_result_fetcher.StreamingResultFetcher][] with the same ``label``.
+        adc_stream (Union[str, _ResultSource]): The stream variable into which the raw ADC data will be saved.
+            You can receive the results with [qm.QmJob.result_handles.get("name")][qm.jobs.running_qm_job.RunningQmJob.result_handles].
+            A string name can also be used. In this case, the name of the result
+            handle should be suffixed by ``_input1`` for data from analog input 1 and ``_input2`` for data from analog input 2.
 
-            If ``stream`` is set to ``None``, raw results will not be saved
-            (note: must be explicitly set to ``None``).
+            If ``adc_stream`` is set to ``None``, nothing will not be saved.
             The raw results will be saved as long as the digital pulse that is played with pulse is high.
 
             !!! Warning:
 
                 Streaming adc data without declaring the stream with `declare_stream(adc_trace=true)` might cause performance issues
-
-        *outputs (tuple): A parameter specifying the processing to be
-            done on the ADC data, there are multiple options available,
-            including demod(), integration() & time_tagging().
-        timestamp_stream (Union[str, _ResultSource]): (Supported from
-            QOP 2.2) Adding a `timestamp_stream` argument will save the
-            time at which the operation occurred to a stream. If the
-            `timestamp_stream` is a string ``label``, then the timestamp
-            handle can be retrieved with
-            [qm.results.streaming_result_fetcher.StreamingResultFetcher][] with the same
-            ``label``.
 
     Example:
         ```python
@@ -468,7 +508,7 @@ def measure(
             # measure by playing 'meas_pulse' to element 'resonator', do not save raw results.
             # demodulate data from "out1" port of 'resonator' using 'cos_weights' and store result in I, and also
             # demodulate data from "out1" port of 'resonator' using 'sin_weights' and store result in Q
-            measure('meas_pulse', 'resonator', None, demod.full("cos_weights", I, "out1"), demod.full("sin_weights", Q, "out1"))
+            measure('meas_pulse', 'resonator', demod.full("cos_weights", I, "out1"), demod.full("sin_weights", Q, "out1"))
 
             # measure by playing 'meas_pulse' to element 'resonator', save raw results to `adc_st`
             # demodulate data from 'out1' port of 'resonator' using 'optimized_weights' and store result in I
@@ -486,32 +526,69 @@ def measure(
         ```
 
     """
+    if stream is None:
+        if len(outputs) > 0:
+            if isinstance(outputs[0], (_ResultSource, str)):
+                adc_stream = outputs[0]
+                if isinstance(adc_stream, _ResultSource):
+                    warnings.warn(
+                        "Saving an adc stream now requires defining it at the end of the measure command with the `adc_stream` argument, e.g. `adc_stream=adc_st`. The current syntax is deprecated and will be removed in a 1.3.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    warnings.warn(
+                        f"Saving an adc stream now requires defining it at the end of the measure command with the `adc_stream` argument, e.g. `adc_stream='{adc_stream}'`. The current syntax is deprecated and will be removed in a 1.3.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                outputs = outputs[1:]
+            elif outputs[0] is None:
+                warnings.warn(
+                    "Putting `None` to indicate no adc streaming is no longer required, please remove it from the measure call.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                outputs = outputs[1:]
+    else:
+        warnings.warn(
+            "The `stream` argument is deprecated and will be removed in a 1.3. Use the `adc_stream` argument instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        adc_stream = stream
+
     body = _get_scope_as_blocks_body()
 
-    measure_process = []
+    measure_process: List[MeasureProcessAbstract] = []
     for i, output in enumerate(outputs):
-        if type(output) == tuple:
+        if isinstance(output, tuple):
             if len(output) == 2:
-                measure_process.append(demod.full(output[0], output[1], ""))
+                iw, target = output
+                measure_process.append(demod.full(iw, target, ""))
             elif len(output) == 3:
-                measure_process.append(demod.full(output[0], output[2], output[1]))
+                iw, element_output, target = output
+                measure_process.append(demod.full(iw, target, element_output))
             else:
                 raise QmQuaException(
                     "Each output must be a tuple of (integration weight, output name, variable name), but output "
                     + str(i + 1)
                     + " is invalid"
                 )
-        else:
+        elif isinstance(output, MeasureProcessAbstract):
             measure_process.append(output)
+        else:
+            raise TypeError(f"Invalid output type: {type(output)}")
 
-    if stream is not None and isinstance(stream, str):
-        adc_stream = _get_root_program_scope().declare_legacy_adc(stream)
+    _adc_stream: Optional[_ResultSource] = None
+    if isinstance(adc_stream, str):
+        _adc_stream = _get_root_program_scope().declare_legacy_adc(adc_stream)
     else:
-        if stream is not None and (not isinstance(stream, _ResultSource)):
+        if adc_stream is not None and (not isinstance(adc_stream, _ResultSource)):
             raise QmQuaException("stream object is not of the right type")
-        adc_stream = stream
+        _adc_stream = adc_stream
 
-    if adc_stream and not adc_stream._configuration.is_adc_trace:
+    if _adc_stream and not _adc_stream.is_adc_trace:
         logger.warning(
             "Streaming adc data without declaring the stream with "
             "`declare_stream(adc_trace=true)` might cause performance issues"
@@ -519,21 +596,21 @@ def measure(
     timestamp_label = None
     if isinstance(timestamp_stream, str):
         scope = _get_root_program_scope()
-        scope.program.set_metadata(uses_command_timestamps=True)
+        scope.program.add_used_capability(QopCaps.command_timestamps)
         timestamp_label = scope.declare_save(timestamp_stream).get_var_name()
     elif isinstance(timestamp_stream, _ResultSource):
-        _get_root_program_scope().program.set_metadata(uses_command_timestamps=True)
+        _get_root_program_scope().program.add_used_capability(QopCaps.command_timestamps)
         timestamp_label = timestamp_stream.get_var_name()
     body.measure(
         pulse,
         element,
-        adc_stream,
+        _adc_stream,
         timestamp_label=timestamp_label,
-        *[_unwrap_measure_process(x) for x in measure_process],
+        *[x.unwrapped for x in measure_process],
     )
 
 
-def align(*elements: str):
+def align(*elements: str) -> None:
     """Align several elements together.
 
     All the elements referenced in `elements` will wait for all the others to
@@ -548,7 +625,7 @@ def align(*elements: str):
     body.align(*elements)
 
 
-def reset_phase(element: str):
+def reset_phase(element: str) -> None:
     warnings.warn(
         deprecation_message(
             method="reset_phase",
@@ -590,7 +667,7 @@ def reset_global_phase() -> None:
     body.reset_global_phase()
 
 
-def ramp_to_zero(element: str, duration: Optional[QuaNumberType] = None):
+def ramp_to_zero(element: str, duration: Optional[int] = None) -> None:
     r"""Starting from the last DC value, gradually lowers the DC to zero for `duration` *4nsec
 
     If `duration` is None, the duration is taken from the element's config
@@ -606,11 +683,11 @@ def ramp_to_zero(element: str, duration: Optional[QuaNumberType] = None):
             value from config
     """
     body = _get_scope_as_blocks_body()
-    duration = duration if not (isinstance(duration, np.integer)) else duration.item()
+    duration = duration if duration is None else int(duration)
     body.ramp_to_zero(element, duration)
 
 
-def wait(duration: QuaNumberType, *elements: str):
+def wait(duration: Scalar[int], *elements: str) -> None:
     r"""Wait for the given duration on all provided elements without outputting anything.
     Duration is in units of the clock cycle (4ns)
 
@@ -633,15 +710,15 @@ def wait(duration: QuaNumberType, *elements: str):
         experiments, the actual wait time should always be verified with a simulator.
     """
     body = _get_scope_as_blocks_body()
-    body.wait(_unwrap_exp(exp(duration)), *elements)
+    body.wait(to_scalar_pb_expression(duration), *elements)
 
 
 def wait_for_trigger(
     element: str,
     pulse_to_play: Optional[str] = None,
-    trigger_element: Optional[OneOrMore[str]] = None,
-    time_tag_target: Optional[QuaNumberType] = None,
-):
+    trigger_element: Optional[Union[Tuple[str, str], str]] = None,
+    time_tag_target: Optional[QuaVariable[int]] = None,
+) -> None:
     """Wait for an external trigger on the provided element.
 
     During the command the OPX will play the pulse supplied by the ``pulse_to_play`` parameter
@@ -667,12 +744,11 @@ def wait_for_trigger(
         Read more about triggering with the OPD [here](../../Hardware/dib.md#wait-for-trigger)
     """
     body = _get_scope_as_blocks_body()
-    if time_tag_target is not None:
-        time_tag_target = _unwrap_exp(exp(time_tag_target)).variable
-    body.wait_for_trigger(pulse_to_play, trigger_element, time_tag_target, element)
+    time_tag_target_pb = None if time_tag_target is None else time_tag_target.unwrapped.variable
+    body.wait_for_trigger(pulse_to_play, trigger_element, time_tag_target_pb, element)
 
 
-def save(var: AllQuaTypes, stream_or_tag: Union[str, "_ResultStream"]):
+def save(var: PyQuaScalar, stream_or_tag: Union[str, "_ResultSource"]) -> None:
     """Stream a QUA variable, a QUA array cell, or a constant scalar.
     the variable is streamed and not immediately saved (see [Stream processing](../../Guides/stream_proc.md#stream-processing)).
     In case ``result_or_tag`` is a string, the data will be immediately saved to a result handle under the same name.
@@ -719,19 +795,19 @@ def save(var: AllQuaTypes, stream_or_tag: Union[str, "_ResultStream"]):
         stream_or_tag (Union[str, stream variable]): A stream variable
             or string tag name to save the value under
     """
-    if stream_or_tag is not None and isinstance(stream_or_tag, str):
+    if isinstance(stream_or_tag, str):
         result_obj = _get_root_program_scope().declare_legacy_save(stream_or_tag)
     else:
-        result_obj: _ResultStream = stream_or_tag
+        result_obj = stream_or_tag
 
-    if result_obj._configuration.is_adc_trace:
+    if result_obj.is_adc_trace:
         raise QmQuaException("adc_trace can't be used in save")
 
     body = _get_scope_as_blocks_body()
-    body.save(_unwrap_save_source(exp(var)), result_obj)
+    body.save(create_qua_scalar_expression(var).save_statement, result_obj)
 
 
-def frame_rotation(angle: QuaNumberType, *elements: str):
+def frame_rotation(angle: Union[Scalar[float]], *elements: str) -> None:
     r"""Shift the phase of the oscillator associated with an element by the given angle.
 
     This is typically used for virtual z-rotations.
@@ -754,10 +830,12 @@ def frame_rotation(angle: QuaNumberType, *elements: str):
             all of their oscillators' phases will be shifted
 
     """
+    if isinstance(angle, (QuaProgramArrayVarRefExpression, QuaProgramVarRefExpression)):
+        raise TypeError(f"angle cannot be of type {type(angle)}")
     frame_rotation_2pi(angle * 0.15915494309189535, *elements)
 
 
-def frame_rotation_2pi(angle: QuaNumberType, *elements: str):
+def frame_rotation_2pi(angle: Scalar[float], *elements: str) -> None:
     r"""Shift the phase of the oscillator associated with an element by the given angle in units of 2pi radians.
 
     This is typically used for virtual z-rotations.
@@ -779,10 +857,10 @@ def frame_rotation_2pi(angle: QuaNumberType, *elements: str):
 
     """
     body = _get_scope_as_blocks_body()
-    body.z_rotation(_unwrap_exp(exp(angle)), *elements)
+    body.z_rotation(to_scalar_pb_expression(angle), *elements)
 
 
-def reset_frame(*elements: str):
+def reset_frame(*elements: str) -> None:
     """Resets the frame of the oscillator associated with an element to 0.
 
     Used to reset all the frame updated made up to this statement.
@@ -797,7 +875,7 @@ def reset_frame(*elements: str):
     body.reset_frame(*elements)
 
 
-def fast_frame_rotation(cosine, sine, *elements: str):
+def fast_frame_rotation(cosine: Scalar[float], sine: Scalar[float], *elements: str) -> None:
     r"""Shift the phase of the oscillator associated with an element by applying the
     rotation matrix [[cosine, -sine],[sin, cosine]].
 
@@ -820,21 +898,19 @@ def fast_frame_rotation(cosine, sine, *elements: str):
             be shifted. multiple elements can be given, in which case
             all of their oscillators' phases will be shifted
     """
-    _get_root_program_scope().program.set_metadata(uses_fast_frame_rotation=True)
+    _get_root_program_scope().program.add_used_capability(QopCaps.fast_frame_rotation)
     body = _get_scope_as_blocks_body()
-    body.fast_frame_rotation(_unwrap_exp(exp(cosine)), _unwrap_exp(exp(sine)), *elements)
+    body.fast_frame_rotation(to_scalar_pb_expression(cosine), to_scalar_pb_expression(sine), *elements)
 
 
-def assign(var, _exp):
-    """Set the value of a given QUA variable, or of a QUA array cell
+def assign(var: Union[QuaArrayCell[NumberT], QuaVariable[NumberT], QuaIO], _exp: Union[Scalar[NumberT], QuaIO]) -> None:
+    """Set the value of a given QUA variable, a QUA array cell or an IO to the value of a given expression.
 
     Args:
-        var (QUA variable): A QUA variable or a QUA array cell for which
-            to assign
-        _exp (QUA expression): An expression for which to set the
-            variable
+        var (QUA variable): A QUA variable, a QUA array cell or an IO for which to assign.
+        _exp (QUA expression): An expression for which to set the variable
 
-    Example::
+    Example:
         ```python
         with program() as prog:
             v1 = declare(fixed)
@@ -843,12 +919,10 @@ def assign(var, _exp):
         ```
     """
     body = _get_scope_as_blocks_body()
-    _exp = exp(_exp)
-    _var = exp(var)
-    body.assign(_unwrap_assign_target(_var), _unwrap_exp(_exp))
+    body.assign(var.assignment_statement, to_scalar_pb_expression(_exp))
 
 
-def switch_(expression: QuaExpressionType, unsafe: bool = False) -> "_SwitchScope":
+def switch_(expression: QuaScalar[NumberT], unsafe: bool = False) -> "_SwitchScope[NumberT]":
     """Part of the switch-case flow control statement in QUA.
 
     To be used with a context manager.
@@ -888,7 +962,7 @@ def switch_(expression: QuaExpressionType, unsafe: bool = False) -> "_SwitchScop
     return _SwitchScope(expression, body, unsafe)
 
 
-def case_(case_exp: TypeOrExpression[AllPyTypes]) -> "_BodyScope":
+def case_(case_exp: Scalar[NumberT]) -> "_BodyScope":
     """Part of the switch-case flow control statement in QUA.
 
     To be used with a context manager.
@@ -920,16 +994,16 @@ def case_(case_exp: TypeOrExpression[AllPyTypes]) -> "_BodyScope":
         ```
     """
     switch = _get_scope_as_switch_scope()
-    condition = _unwrap_exp(switch.expression == case_exp)
+    condition = (cast(QuaScalar[NumberT], switch.expression).__eq__(case_exp)).unwrapped  # type: ignore[redundant-cast]
     if switch.if_statement is None:
         body = switch.container.if_block(condition, switch.unsafe)
         switch.if_statement = switch.container.get_last_statement()
         return _BodyScope(body)
     else:
-        else_if_statement = _qua.QuaProgramElseIf(
+        else_if_statement = QuaProgramElseIf(
             loc=switch.if_statement.if_.loc,
             condition=condition,
-            body=_qua.QuaProgramStatementsCollection(statements=[]),
+            body=QuaProgramStatementsCollection(statements=[]),
         )
         switch.if_statement.if_.elseifs.append(else_if_statement)
         return _BodyScope(_StatementsCollection(else_if_statement.body))
@@ -970,12 +1044,12 @@ def default_() -> "_BaseScope":
     if betterproto.serialized_on_wire(switch.if_statement.if_.else_):
         raise QmQuaException("only a single 'default' statement can follow a 'switch' statement")
 
-    else_statement = _qua.QuaProgramStatementsCollection(statements=[])
+    else_statement = QuaProgramStatementsCollection(statements=[])
     switch.if_statement.if_.else_ = else_statement
     return _BodyScope(_StatementsCollection(else_statement))
 
 
-def if_(expression: QuaExpressionType, **kwargs) -> "_BodyScope":
+def if_(expression: Scalar[bool], unsafe: bool = False) -> "_BodyScope":
     """If flow control statement in QUA.
 
     To be used with a context manager.
@@ -993,21 +1067,12 @@ def if_(expression: QuaExpressionType, **kwargs) -> "_BodyScope":
             play('pulse', 'element')
         ```
     """
-    if type(expression) == bool:
-        expression = exp(expression)
     body = _get_scope_as_blocks_body()
-
-    # support unsafe for serializer
-    if_kwargs = {}
-    unsafe_name = "unsafe"
-    if kwargs.get(unsafe_name):
-        if_kwargs[unsafe_name] = kwargs.get(unsafe_name)
-
-    if_body = body.if_block(_unwrap_exp(expression), **if_kwargs)
+    if_body = body.if_block(to_scalar_pb_expression(expression), unsafe)
     return _BodyScope(if_body)
 
 
-def elif_(expression: QuaExpressionType) -> "_BodyScope":
+def elif_(expression: Scalar[bool]) -> "_BodyScope":
     """Else-If flow control statement in QUA.
 
     To be used with a context manager.
@@ -1039,7 +1104,7 @@ def elif_(expression: QuaExpressionType) -> "_BodyScope":
             "'elif' statement must directly follow 'if' statement - Please make sure it is aligned with the corresponding if statement."
         )
     _, statement_if_inst = betterproto.which_one_of(last_statement, "statement_oneof")
-    if not isinstance(statement_if_inst, _qua.QuaProgramIfStatement):
+    if not isinstance(statement_if_inst, QuaProgramIfStatement):
         raise QmQuaException(
             "'elif' statement must directly follow 'if' statement - Please make sure it is aligned with the corresponding if statement."
         )
@@ -1047,10 +1112,10 @@ def elif_(expression: QuaExpressionType) -> "_BodyScope":
     if betterproto.serialized_on_wire(statement_if_inst.else_):
         raise QmQuaException("'elif' must come before 'else' statement")
 
-    elseif = _qua.QuaProgramElseIf(
+    elseif = QuaProgramElseIf(
         loc=last_statement.if_.loc,
-        condition=_unwrap_exp(expression),
-        body=_qua.QuaProgramStatementsCollection(statements=[]),
+        condition=to_scalar_pb_expression(expression),
+        body=QuaProgramStatementsCollection(statements=[]),
     )
     last_statement.if_.elseifs.append(elseif)
     return _BodyScope(_StatementsCollection(elseif.body))
@@ -1083,7 +1148,7 @@ def else_() -> "_BodyScope":
             "Please make sure it is aligned with the corresponding if statement."
         )
     _, statement_if = betterproto.which_one_of(last_statement, "statement_oneof")
-    if not isinstance(statement_if, _qua.QuaProgramIfStatement):
+    if not isinstance(statement_if, QuaProgramIfStatement):
         raise QmQuaException(
             "'else' statement must directly follow 'if' statement - "
             "Please make sure it is aligned with the corresponding if statement."
@@ -1092,12 +1157,12 @@ def else_() -> "_BodyScope":
     if betterproto.serialized_on_wire(last_statement.if_.else_):
         raise QmQuaException("only a single 'else' statement can follow an 'if' statement")
 
-    else_statement = _qua.QuaProgramStatementsCollection(statements=[])
+    else_statement = QuaProgramStatementsCollection(statements=[])
     last_statement.if_.else_ = else_statement
     return _BodyScope(_StatementsCollection(else_statement))
 
 
-def for_each_(var: OneOrMore[QuaVariableType], values: ForEachValuesType) -> "_BodyScope":
+def for_each_(var: OneOrMore[QuaVariable[NumberT]], values: OneOrMore[Vector[NumberT]]) -> "_BodyScope":
     """Flow control: Iterate over array elements in QUA.
 
     It is possible to either loop over one variable, or over a tuple of variables,
@@ -1130,26 +1195,31 @@ def for_each_(var: OneOrMore[QuaVariableType], values: ForEachValuesType) -> "_B
         The first list containing the values for the first variable, and so on.
     """
     body = _get_scope_as_blocks_body()
-    # normalize the var argument
-    if not _is_iter(var) or isinstance(var, QuaExpression):
+    if not isinstance(var, IterableClass):
         var = (var,)
 
     for i, v in enumerate(var):
-        if not isinstance(v, QuaExpression):
+        if not isinstance(v, QuaVariable):
             raise QmQuaException(f"for_each_ var {i} must be a variable")
 
-    # normalize the values argument
-    if isinstance(values, QuaExpression) or not _is_iter(values) or not _is_iter(values[0]):
-        values = (values,)
+    qua_expression_cond = isinstance(values, QuaExpression)
+    not_iterable_cond = not isinstance(values, (IterableClass, QuaArrayVariable))
+    tuple_of_non_iterables_cond = not isinstance(values[0], (IterableClass, QuaArrayVariable))
+    if qua_expression_cond or not_iterable_cond or tuple_of_non_iterables_cond:
+        values = (cast(QuaArrayVariable[NumberT], values),)
+    values = cast(Tuple[QuaArrayVariable[NumberT], ...], values)
 
-    if _is_iter(values) and len(values) < 1:
+    if isinstance(values, Collection) and len(values) < 1:
         raise QmQuaException("values cannot be empty")
 
-    arrays = []
+    if len(var) != len(values):
+        raise QmQuaException("number of variables does not match number of array values")
+
+    arrays: List[Union[QuaArrayVariable[bool], QuaArrayVariable[int], QuaArrayVariable[float]]] = []
     for value in values:
-        if isinstance(value, QuaExpression):
+        if isinstance(value, QuaArrayVariable):
             arrays.append(value)
-        elif _is_iter(value):
+        elif isinstance(value, Collection):
             has_bool = collection_has_type_bool(value)
             has_int = collection_has_type_int(value)
             has_float = collection_has_type_float(value)
@@ -1158,30 +1228,27 @@ def for_each_(var: OneOrMore[QuaVariableType], values: ForEachValuesType) -> "_B
                 if has_int or has_float:
                     raise QmQuaException("values can not contain both bool and number values")
                 # Only booleans
-                arrays.append(declare(bool, value=value))
+                arrays.append(declare(bool, value=[bool(x) for x in value]))
             else:
                 if has_float:
                     # All will be considered as fixed
                     arrays.append(declare(fixed, value=[float(x) for x in value]))
                 else:
                     # Only ints
-                    arrays.append(declare(int, value=value))
+                    arrays.append(declare(int, value=[int(x) for x in value]))
         else:
             raise QmQuaException("value is not a QUA array neither iterable")
 
-    var = [_unwrap_var(exp(v)) for v in var]
-    arrays = [a.unwrap() for a in arrays]
+    unwrapped_vars = [v.unwrapped.variable for v in var]
+    unwrapped_arrays = [a.unwrapped for a in arrays]
 
-    if len(var) != len(arrays):
-        raise QmQuaException("number of variables does not match number of array values")
-
-    iterators = [(var[i], ar) for (i, ar) in enumerate(arrays)]
+    iterators = [(unwrapped_vars[i], ar) for i, ar in enumerate(unwrapped_arrays)]
 
     foreach = body.for_each(iterators)
     return _BodyScope(foreach)
 
 
-def while_(cond: QuaExpressionType = None) -> "_BodyScope":
+def while_(cond: Optional[QuaScalar[bool]] = None) -> "_BodyScope":
     """While loop flow control statement in QUA.
 
     To be used with a context manager.
@@ -1204,10 +1271,10 @@ def while_(cond: QuaExpressionType = None) -> "_BodyScope":
 
 
 def for_(
-    var: QuaVariableType = None,
-    init: TypeOrExpression[PyNumberType] = None,
-    cond: QuaExpressionType = None,
-    update: QuaExpressionType = None,
+    var: Optional[QuaVariable[NumberT]] = None,
+    init: Optional[Scalar[NumberT]] = None,
+    cond: Optional[QuaScalar[bool]] = None,
+    update: Optional[QuaScalar[NumberT]] = None,
 ) -> Union["_BodyScope", "_ForScope"]:
     """For loop flow control statement in QUA.
 
@@ -1238,31 +1305,31 @@ def for_(
         body = _get_scope_as_blocks_body()
         for_statement = body.for_block()
         if var is not None and init is not None:
-            for_statement.init = _qua.QuaProgramStatementsCollection(
+            for_statement.init = QuaProgramStatementsCollection(
                 statements=[
-                    _qua.QuaProgramAnyStatement(
-                        assign=_qua.QuaProgramAssignmentStatement(
-                            target=_unwrap_assign_target(exp(var)),
-                            expression=_unwrap_exp(exp(init)),
+                    QuaProgramAnyStatement(
+                        assign=QuaProgramAssignmentStatement(
+                            target=var.assignment_statement,
+                            expression=to_scalar_pb_expression(init),
                             loc=_get_loc(),
                         )
                     )
                 ]
             )
         if var is not None and update is not None:
-            for_statement.update = _qua.QuaProgramStatementsCollection(
+            for_statement.update = QuaProgramStatementsCollection(
                 statements=[
-                    _qua.QuaProgramAnyStatement(
-                        assign=_qua.QuaProgramAssignmentStatement(
-                            target=_unwrap_assign_target(exp(var)),
-                            expression=_unwrap_exp(exp(update)),
+                    QuaProgramAnyStatement(
+                        assign=QuaProgramAssignmentStatement(
+                            target=var.assignment_statement,
+                            expression=to_scalar_pb_expression(update),
                             loc=_get_loc(),
                         )
                     )
                 ]
             )
         if cond is not None:
-            for_statement.condition = _unwrap_exp(exp(cond))
+            for_statement.condition = to_scalar_pb_expression(cond)
         return _BodyScope(_StatementsCollection(for_statement.body))
 
 
@@ -1289,130 +1356,138 @@ def infinite_loop_() -> "_BodyScope":
     """
     body = _get_scope_as_blocks_body()
     for_statement = body.for_block()
-    for_statement.condition = _unwrap_exp(exp(True))
+    for_statement.condition = literal_bool(True)
     return _BodyScope(_StatementsCollection(for_statement.body))
 
 
-def port_condition(condition: QuaExpressionType = None) -> "_BodyScope":
+def port_condition(condition: Scalar[bool]) -> "_BodyScope":
+    """
+    A context manager for a faster conditional play mechanism. Will operate on all the elements inside the context manager.
+    Note that elements sharing a port with an element inside the context manager cannot be played in parallel to the context manager.
+
+    -- Available for MW-FEM Only --
+
+    Args:
+        condition (A logical expression to evaluate): Will play the operation only if the condition is true.
+
+    Example:
+        ```python
+        with port_condition(x > 0):
+            play('pulse', 'element')
+        ```
+    """
     body = _get_scope_as_blocks_body()
-    return _BodyScope(PortConditionedStatementsCollection(body._body, condition=_unwrap_exp(exp(condition))))
+    return _BodyScope(PortConditionedStatementsCollection(body._body, condition=to_scalar_pb_expression(condition)))
 
 
-def L(value) -> MessageExpressionType:
+def L(value: Union[bool, int, float]) -> MessageExpressionType:
     """Creates an expression with a literal value
 
     Args:
         value: int, float or bool to wrap in a literal expression
     """
-    if type(value) is bool:
+    if isinstance(value, bool):
         return literal_bool(value)
-    elif type(value) is int:
+    if isinstance(value, int):
         return literal_int(value)
-    elif type(value) is float:
+    if isinstance(value, float):
         return literal_real(value)
-    else:
-        raise QmQuaException("literal can be bool, int or float")
+    raise QmQuaException("literal can be bool, int or float")
 
 
-class DeclarationType(_Enum):
+class DeclarationType(Enum):
     EmptyScalar = 0
     InitScalar = 1
     EmptyArray = 2
     InitArray = 3
 
 
-def _declare(
-    t: VariableDeclarationType,
-    is_input_stream: bool,
-    value: Optional[OneOrMore[AllPyTypes]] = None,
-    size: Optional[PyNumberType] = None,
-    name: Optional[str] = None,
-) -> QuaVariableType:
+class _DeclarationParams(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
+    def create_variable(
+        self, var_name: str, t: Type[NumberT]
+    ) -> Union[QuaArrayVariable[NumberT], QuaVariable[NumberT]]:
+        pass
+
+    @abc.abstractmethod
+    def create_input_stream(
+        self, var_name: str, t: Type[NumberT]
+    ) -> Union[QuaArrayInputStream[NumberT], QuaVariableInputStream[NumberT]]:
+        pass
+
+
+@dataclass
+class _ArrayDeclarationParams(_DeclarationParams):
+    size: int
+    values: Sequence[Union[bool, int, float]]
+
+    def create_variable(self, var_name: str, t: Type[NumberT]) -> QuaArrayVariable[NumberT]:
+        return QuaArrayVariable(var_name, t, size=self.size, init_value=self.values)
+
+    def create_input_stream(self, var_name: str, t: Type[NumberT]) -> QuaArrayInputStream[NumberT]:
+        return QuaArrayInputStream(var_name, t, size=self.size, init_value=self.values)
+
+
+@dataclass
+class _ScalarDeclarationParams(_DeclarationParams):
+    value: Optional[Union[bool, int, float]]
+
+    def create_variable(self, var_name: str, t: Type[NumberT]) -> QuaVariable[NumberT]:
+        return QuaVariable(var_name, t, init_value=self.value)
+
+    def create_input_stream(self, var_name: str, t: Type[NumberT]) -> QuaVariableInputStream[NumberT]:
+        return QuaVariableInputStream(var_name, t, init_value=self.value)
+
+
+def _standardize_value_and_size(
+    value: Optional[OneOrMore[Union[bool, int, float]]] = None, size: Optional[int] = None
+) -> _DeclarationParams:
+
     if size is not None:
-        size = size.item() if isinstance(size, np.integer) else size
+        size = size.item() if isinstance(size, np.integer) else size  # type: ignore[attr-defined]
         if not (isinstance(size, int) and size > 0):
             raise QmQuaException("size must be a positive integer")
         if value is not None:
             raise QmQuaException("size declaration cannot be made if value is declared")
-        dec_type = DeclarationType.EmptyArray
-    else:
-        if value is None:
-            dec_type = DeclarationType.EmptyScalar
-        elif isinstance(value, Iterable):
-            dec_type = DeclarationType.InitArray
-        else:
-            dec_type = DeclarationType.InitScalar
+        return _ArrayDeclarationParams(size=size, values=[])
 
-    expression_value: OneOrMore[_qua.QuaProgramLiteralExpression] = []
+    if isinstance(value, Collection):
+        size = len(value)
+        return _ArrayDeclarationParams(size=size, values=list(value))
 
-    if dec_type == DeclarationType.InitArray:
-        mem_size = len(value)
-        new_value = []
-        for val in value:
-            new_value.append(to_expression(val).literal)
-        expression_value = new_value
-        dim = 1
-    elif dec_type == DeclarationType.InitScalar:
-        mem_size = 1
-        expression_value = to_expression(value).literal
-        dim = 0
-    elif dec_type == DeclarationType.EmptyArray:
-        mem_size = size
-        dim = 1
-    else:
-        mem_size = 1
-        dim = 0
+    return _ScalarDeclarationParams(value=value)
 
-    scope = _get_root_program_scope()
 
-    if dec_type == DeclarationType.EmptyArray or dec_type == DeclarationType.InitArray:
-        if is_input_stream:
-            if name is not None:
-                var = create_input_stream_name(name)
-                if var in scope.declared_input_streams:
-                    raise QmQuaException("input stream already declared")
-                scope.declared_input_streams.add(var)
-            else:
-                raise QmQuaException("input stream declared without a name")
-        else:
-            scope.array_index += 1
-            var = f"a{scope.array_index}"
-        result = _qua.QuaProgramArrayVarRefExpression(name=var)
-    else:
-        if is_input_stream:
-            if name is not None:
-                var = create_input_stream_name(name)
-                if var in scope.declared_input_streams:
-                    raise QmQuaException("input stream already declared")
-                scope.declared_input_streams.add(var)
-            else:
-                raise QmQuaException("input stream declared without a name")
-        else:
-            scope.var_index += 1
-            var = f"v{scope.var_index}"
-        result = _qua.QuaProgramAnyScalarExpression(variable=_qua.QuaProgramVarRefExpression(name=var))
+@overload
+def declare(t: Type[NumberT]) -> QuaVariable[NumberT]:
+    ...
 
-    prog = scope.program
-    if t == int:
-        prog.declare_int(var, mem_size, expression_value, dim, is_input_stream)
-    elif t == bool:
-        prog.declare_bool(var, mem_size, expression_value, dim, is_input_stream)
-    elif t == float:
-        t = fixed
-        prog.declare_real(var, mem_size, expression_value, dim, is_input_stream)
-    elif t == fixed:
-        prog.declare_real(var, mem_size, expression_value, dim, is_input_stream)
-    else:
-        raise QmQuaException("only int, fixed or bool variables are supported")
 
-    return QuaVariable(result, t)
+@overload
+def declare(t: Type[NumberT], value: Literal[None], size: int) -> QuaArrayVariable[NumberT]:
+    ...
+
+
+@overload
+def declare(t: Type[NumberT], *, size: int) -> QuaArrayVariable[NumberT]:
+    ...
+
+
+@overload
+def declare(t: Type[NumberT], value: Union[int, bool, float]) -> QuaVariable[NumberT]:
+    ...
+
+
+@overload
+def declare(t: Type[NumberT], value: Sequence[Union[int, bool, float]]) -> QuaArrayVariable[NumberT]:
+    ...
 
 
 def declare(
-    t: VariableDeclarationType,
-    value: Optional[OneOrMore[AllPyTypes]] = None,
-    size: Optional[PyNumberType] = None,
-) -> QuaVariableType:
+    t: Type[NumberT],
+    value: Optional[OneOrMore[Union[int, bool, float]]] = None,
+    size: Optional[int] = None,
+) -> Union[QuaVariable[NumberT], QuaArrayVariable[NumberT]]:
     r"""Declare a single QUA variable or QUA vector to be used in subsequent expressions and assignments.
 
     Declaration is performed by declaring a python variable with the return value of this function.
@@ -1452,10 +1527,59 @@ def declare(
         array2 = declare(fixed, size=5)
         ```
     """
-    return _declare(t, is_input_stream=False, value=value, size=size)
+    params = _standardize_value_and_size(value, size)
+
+    scope = _get_root_program_scope()
+    # We could move the following logic inside the classes, but then we would have to deal with the scope there.
+    #  Additionally, we want to separate the concern of choosing the variable name from the declaration logic,
+    if isinstance(params, _ArrayDeclarationParams):
+        scope.array_index += 1
+        var = f"a{scope.array_index}"
+    else:
+        scope.var_index += 1
+        var = f"v{scope.var_index}"
+
+    result = params.create_variable(var, t)
+    scope.program.add_declaration(result.declaration_statement)
+
+    return result
 
 
-def declare_input_stream(t: VariableDeclarationType, name: str, **kwargs) -> QuaVariableType:
+@overload
+def declare_input_stream(t: Type[NumberT], name: str) -> QuaVariableInputStream[NumberT]:
+    ...
+
+
+@overload
+def declare_input_stream(t: Type[NumberT], name: str, value: Literal[None], size: int) -> QuaArrayInputStream[NumberT]:
+    ...
+
+
+@overload
+def declare_input_stream(t: Type[NumberT], name: str, *, size: int) -> QuaArrayInputStream[NumberT]:
+    ...
+
+
+@overload
+def declare_input_stream(
+    t: Type[NumberT], name: str, value: Union[int, bool, float]
+) -> QuaVariableInputStream[NumberT]:
+    ...
+
+
+@overload
+def declare_input_stream(
+    t: Type[NumberT], name: str, value: Sequence[Union[int, bool, float]]
+) -> QuaArrayInputStream[NumberT]:
+    ...
+
+
+def declare_input_stream(
+    t: Type[NumberT],
+    name: str,
+    value: Optional[Optional[OneOrMore[Union[int, bool, float]]]] = None,
+    size: Optional[int] = None,
+) -> Union[QuaVariableInputStream[NumberT], QuaArrayInputStream[NumberT]]:
     """Declare a QUA variable or a QUA vector to be used as an input stream from the job to the QUA program.
 
     Declaration is performed by declaring a python variable with the return value of this function.
@@ -1475,11 +1599,35 @@ def declare_input_stream(t: VariableDeclarationType, name: str, **kwargs) -> Qua
         play('operation', 'element', duration=tau)
         ```
     """
+    if name is None:
+        raise QmQuaException("input stream declared without a name")
 
-    return _declare(t, is_input_stream=True, name=name, **kwargs)
+    scope = _get_root_program_scope()
+    var = f"input_stream_{name}"
+
+    if var in scope.declared_input_streams:
+        raise QmQuaException("input stream already declared")
+
+    params = _standardize_value_and_size(value, size)
+
+    scope.declared_input_streams.add(var)
+    result = params.create_input_stream(var, t)
+
+    scope.program.add_declaration(result.declaration_statement)
+
+    return result
 
 
-def advance_input_stream(input_stream: QuaExpressionType):
+def advance_input_stream(
+    input_stream: Union[
+        QuaVariableInputStream[bool],
+        QuaVariableInputStream[int],
+        QuaVariableInputStream[float],
+        QuaArrayInputStream[bool],
+        QuaArrayInputStream[int],
+        QuaArrayInputStream[float],
+    ]
+) -> None:
     """Advances the input stream pointer to the next available variable/vector.
 
     If there is no new data waiting in the stream, this command will wait until it is available.
@@ -1492,10 +1640,10 @@ def advance_input_stream(input_stream: QuaExpressionType):
     """
 
     body = _get_scope_as_blocks_body()
-    body.advance_input_stream(_unwrap_exp(input_stream))
+    body.advance_input_stream(input_stream.advance())
 
 
-def declare_stream(**kwargs) -> "_ResultSource":
+def declare_stream(adc_trace: bool = False) -> "_ResultSource":
     """Declare a QUA output stream to be used in subsequent statements
     To retrieve the result - it must be saved in the stream processing block.
 
@@ -1519,19 +1667,18 @@ def declare_stream(**kwargs) -> "_ResultSource":
             a.save_all("another tag")
         ```
     """
-    is_adc_trace: bool = kwargs.get("adc_trace", False)
 
     scope = _get_root_program_scope()
     scope.result_index += 1
     var = f"r{scope.result_index}"
-    if is_adc_trace:
+    if adc_trace:
         var = "atr_" + var
 
     return _ResultSource(
         _ResultSourceConfiguration(
             var_name=var,
             timestamp_mode=_ResultSourceTimestampMode.Values,
-            is_adc_trace=is_adc_trace,
+            is_adc_trace=adc_trace,
             input=-1,
             auto_reshape=False,
         )
@@ -1541,10 +1688,10 @@ def declare_stream(**kwargs) -> "_ResultSource":
 class _PulseAmp:
     def __init__(
         self,
-        v1: MessageExpressionType,
-        v2: MessageExpressionType,
-        v3: MessageExpressionType,
-        v4: MessageExpressionType,
+        v1: Optional[MessageExpressionType],
+        v2: Optional[MessageExpressionType],
+        v3: Optional[MessageExpressionType],
+        v4: Optional[MessageExpressionType],
     ):
         if v1 is None:
             raise QmQuaException("amp can be one value or a matrix of 4")
@@ -1567,16 +1714,26 @@ class _PulseAmp:
         return self * other
 
     def __mul__(self, other: str) -> Tuple[str, AmpValuesType]:
-        if type(other) is not str:
+        if not isinstance(other, str):
             raise QmQuaException("you can multiply only a pulse")
         return other, self.value()
 
 
+@overload
+def amp(v1: Scalar[float]) -> _PulseAmp:
+    ...
+
+
+@overload
+def amp(v1: Scalar[float], v2: Scalar[float], v3: Scalar[float], v4: Scalar[float]) -> _PulseAmp:
+    ...
+
+
 def amp(
-    v1: QuaNumberType,
-    v2: Optional[QuaNumberType] = None,
-    v3: Optional[QuaNumberType] = None,
-    v4: Optional[QuaNumberType] = None,
+    v1: Scalar[float],
+    v2: Optional[Scalar[float]] = None,
+    v3: Optional[Scalar[float]] = None,
+    v4: Optional[Scalar[float]] = None,
 ) -> _PulseAmp:
     """To be used only within a [play][qm.qua._dsl.play] or [measure][qm.qua._dsl.measure] command, as a multiplication to
     the `operation`.
@@ -1612,28 +1769,16 @@ def amp(
         v4: The forth element in the amplitude matrix which multiples
             the `pulse` associated with the `operation`.
     """
-    variables: List[MessageExpressionType] = [_unwrap_exp(exp(v)) if v is not None else None for v in [v1, v2, v3, v4]]
-    return _PulseAmp(*variables)
+
+    def _cast_number(v: Optional[Scalar[float]]) -> Optional[QuaProgramAnyScalarExpression]:
+        if v is None:
+            return None
+        return to_scalar_pb_expression(v)
+
+    return _PulseAmp(_cast_number(v1), _cast_number(v2), _cast_number(v3), _cast_number(v4))
 
 
-def _assert_scalar_expression(value: QuaExpression):
-    if not isinstance(_unwrap_exp(value), _qua.QuaProgramAnyScalarExpression):
-        raise QmQuaException(f"invalid expression: '{value}' is not a scalar expression")
-
-
-def _assert_not_lib_expression(value: QuaExpression):
-    expression = _unwrap_exp(value)
-    if (
-        isinstance(expression, _qua.QuaProgramAnyScalarExpression)
-        and betterproto.which_one_of(expression, "expression_oneof")[0] == "lib_function"
-    ):
-        raise QmQuaException(
-            f"library expression {str(value)} is not a valid save source."
-            f" Assign the value to a variable before saving it"
-        )
-
-
-def ramp(v) -> _qua.QuaProgramRampPulse:
+def ramp(v: Scalar[NumberT]) -> QuaProgramRampPulse:
     """To be used only within a [`play`][qm.qua._dsl.play] command, instead of the `operation`.
 
     It’s possible to generate a voltage ramp by using the `ramp(slope)` command.
@@ -1647,23 +1792,20 @@ def ramp(v) -> _qua.QuaProgramRampPulse:
     Args:
         v: The slope in units of `V/ns`
     """
-    value = _unwrap_exp(exp(v))
-    _assert_scalar_expression(exp(v))
-    result = _qua.QuaProgramRampPulse(value=value)
+    value = create_qua_scalar_expression(v)
+    result = QuaProgramRampPulse(value=value.unwrapped)
     return result
 
 
-def exp(value: AllQuaTypes) -> QuaExpressionType:
-    return QuaExpression(to_expression(value))
-
-
 class _BaseScope:
-    def __enter__(self):
+    def __enter__(self) -> None:
         global _block_stack
         _block_stack.append(self)
         return None
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[TracebackType]
+    ) -> Literal[False]:
         global _block_stack
         if _block_stack[-1] != self:
             raise QmQuaException("Unexpected stack structure")
@@ -1677,7 +1819,7 @@ class _BodyScope(_BaseScope):
         self._body = body
 
     def body(self) -> _StatementsCollection:
-        return self._body
+        return cast(_StatementsCollection, self._body)
 
 
 class _ProgramScope(_BodyScope):
@@ -1690,12 +1832,15 @@ class _ProgramScope(_BodyScope):
         self.declared_input_streams: Set[str] = set()
         self._declared_streams: Dict[str, _ResultSource] = {}
 
-    def __enter__(self) -> "Program":
+    def __enter__(self) -> "Program":  # type: ignore[override]
+        # TODO (YR) - split the contexts so we won't need to override
         super().__enter__()
         self._program.set_in_scope()
         return self._program
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[TracebackType]
+    ) -> Literal[False]:
         self._program.result_analysis.generate_proto()
         self._program.set_exit_scope()
         return super().__exit__(exc_type, exc_val, exc_tb)
@@ -1742,22 +1887,22 @@ class _ProgramScope(_BodyScope):
 
 
 class _ForScope(_BodyScope):
-    def __init__(self, for_statement: _qua.QuaProgramForStatement):
+    def __init__(self, for_statement: QuaProgramForStatement):
         super().__init__(None)
         self._for_statement = for_statement
 
-    def body(self):
+    def body(self) -> _StatementsCollection:
         raise QmQuaException("for must be used with for_init, for_update, for_body and for_cond")
 
-    def for_statement(self) -> _qua.QuaProgramForStatement:
+    def for_statement(self) -> QuaProgramForStatement:
         return self._for_statement
 
 
-class _SwitchScope(_BaseScope):
-    def __init__(self, expression: QuaExpression, container: _StatementsCollection, unsafe: bool):
+class _SwitchScope(Generic[NumberT], _BaseScope):
+    def __init__(self, expression: QuaScalar[NumberT], container: _StatementsCollection, unsafe: bool):
         super().__init__()
-        self.expression = expression
-        self.if_statement: Optional[_qua.QuaProgramAnyStatement] = None
+        self.expression: QuaScalar[NumberT] = expression
+        self.if_statement: Optional[QuaProgramAnyStatement] = None
         self.container = container
         self.unsafe = unsafe
 
@@ -1782,7 +1927,8 @@ class _RAScope(_BaseScope):
         super().__init__()
         self._ra = ra
 
-    def __enter__(self):
+    def __enter__(self) -> _ResultAnalysis:  # type: ignore[override]
+        # TODO (YR) - split the contexts so we won't need to override
         super().__enter__()
         return self._ra
 
@@ -1806,7 +1952,7 @@ def _get_scope_as_program() -> "Program":
     return last_block.program
 
 
-def _get_scope_as_for() -> _qua.QuaProgramForStatement:
+def _get_scope_as_for() -> QuaProgramForStatement:
     global _block_stack
     last_block = _block_stack[-1]
     if not isinstance(last_block, _ForScope):
@@ -1822,7 +1968,7 @@ def _get_scope_as_blocks_body() -> _StatementsCollection:
     return last_block.body()
 
 
-def _get_scope_as_switch_scope() -> _SwitchScope:
+def _get_scope_as_switch_scope() -> _SwitchScope[NumberT]:
     global _block_stack
     last_block = _block_stack[-1]
     if not isinstance(last_block, _SwitchScope):
@@ -1835,231 +1981,23 @@ def _get_scope_as_result_analysis() -> _ResultAnalysis:
     return _get_root_program_scope().program.result_analysis
 
 
-def _unwrap_exp(expression: QuaExpression) -> MessageVariableOrExpression:
-    if not isinstance(expression, QuaExpression):
-        raise QmQuaException("invalid expression: " + str(expression))
-    return expression.unwrap()
-
-
-def _unwrap_var(expression: QuaExpression) -> MessageVarType:
-    var = _unwrap_exp(expression)
-    if type(var) is not _qua.QuaProgramAnyScalarExpression:
-        raise QmQuaException("invalid expression: " + str(expression))
-    return var.variable
-
-
-def _unwrap_array_cell(
-    expression: QuaExpression,
-) -> _qua.QuaProgramArrayCellRefExpression:
-    var = _unwrap_exp(expression)
-    if type(var) is not _qua.QuaProgramAnyScalarExpression:
-        raise QmQuaException("invalid expression: " + str(expression))
-    return var.array_cell
-
-
-def _unwrap_assign_target(
-    expression: QuaExpression,
-) -> _qua.QuaProgramAssignmentStatementTarget:
-    result = _qua.QuaProgramAssignmentStatementTarget()
-
-    target = _unwrap_exp(expression)
-    if type(target) is _qua.QuaProgramAnyScalarExpression:
-        one_of, found = betterproto.which_one_of(target, "expression_oneof")
-        if one_of == "array_cell":
-            result.array_cell = target.array_cell
-        elif one_of == "variable":
-            result.variable = target.variable
-        else:
-            raise QmQuaException("invalid target expression: " + str(expression))
-    # We don't support whole array assignment for now
-    # elif type(target) is _Q.ArrayVarRefExpression:
-    #     result.arrayVar.CopyFrom(target.arrayVar)
-    else:
-        raise QmQuaException("invalid target expression: " + str(expression))
-
-    return result
-
-
-def _unwrap_save_source(expression: QuaExpression) -> _qua.QuaProgramSaveStatementSource:
-    result = _qua.QuaProgramSaveStatementSource()
-
-    source = _unwrap_exp(expression)
-    _assert_scalar_expression(expression)
-    _assert_not_lib_expression(expression)
-    one_of, found = betterproto.which_one_of(source, "expression_oneof")
-    if one_of == "array_cell":
-        result.array_cell = source.array_cell
-    elif one_of == "variable":
-        result.variable = source.variable
-    elif one_of == "literal":
-        result.literal = source.literal
-    else:
-        raise QmQuaException("invalid source expression: " + str(expression))
-
-    return result
-
-
-def _unwrap_outer_target(analog_process_target: AnalogProcessTargetType) -> _qua.QuaProgramAnalogProcessTarget:
-    outer_target = _qua.QuaProgramAnalogProcessTarget()
-    if isinstance(analog_process_target, ScalarProcessTarget):
-        target = _qua.QuaProgramAnalogProcessTargetScalarProcessTarget()
-        target_exp = _unwrap_exp(analog_process_target.target)
-        if not isinstance(target_exp, _qua.QuaProgramAnyScalarExpression):
-            raise QmQuaException(f"Unknown type - {type(target_exp)}")
-
-        target_type, found = betterproto.which_one_of(target_exp, "expression_oneof")
-        if target_type == "variable":
-            target.variable = target_exp.variable
-        elif target_type == "array_cell":
-            target.array_cell = target_exp.array_cell
-        else:
-            raise QmQuaException(f"Unknown target type - {target_type}")
-        outer_target.scalar_process = target
-
-    elif isinstance(analog_process_target, VectorProcessTarget):
-        target = _qua.QuaProgramAnalogProcessTargetVectorProcessTarget(
-            array=_unwrap_exp(analog_process_target.target),
-            time_division=_qua.QuaProgramAnalogProcessTargetTimeDivision().from_dict(
-                _unwrap_time_division(analog_process_target.time_division).to_dict()
-            ),
-        )
-        outer_target.vector_process = target
-    else:
-        raise QmQuaException(f"Unknown type - {type(analog_process_target)}")
-    return outer_target
-
-
-def _unwrap_analog_process(
-    analog_process: AnalogMeasureProcess,
-) -> _qua.QuaProgramAnalogMeasureProcess:
-    result = _qua.QuaProgramAnalogMeasureProcess(loc=analog_process.loc)
-
-    if isinstance(analog_process, BareIntegration):
-        result.bare_integration = _qua.QuaProgramAnalogMeasureProcessBareIntegration(
-            integration=_qua.QuaProgramIntegrationWeightReference(name=analog_process.iw),
-            element_output=analog_process.element_output,
-            target=_unwrap_outer_target(analog_process.target),
-        )
-    elif isinstance(analog_process, DualBareIntegration):
-        result.dual_bare_integration = _qua.QuaProgramAnalogMeasureProcessDualBareIntegration(
-            integration1=_qua.QuaProgramIntegrationWeightReference(name=analog_process.iw1),
-            integration2=_qua.QuaProgramIntegrationWeightReference(name=analog_process.iw2),
-            element_output1=analog_process.element_output1,
-            element_output2=analog_process.element_output2,
-            target=_unwrap_outer_target(analog_process.target),
-        )
-    elif isinstance(analog_process, DemodIntegration):
-        result.demod_integration = _qua.QuaProgramAnalogMeasureProcessDemodIntegration(
-            integration=_qua.QuaProgramIntegrationWeightReference(name=analog_process.iw),
-            element_output=analog_process.element_output,
-            target=_unwrap_outer_target(analog_process.target),
-        )
-    elif isinstance(analog_process, DualDemodIntegration):
-        result.dual_demod_integration = _qua.QuaProgramAnalogMeasureProcessDualDemodIntegration(
-            integration1=_qua.QuaProgramIntegrationWeightReference(name=analog_process.iw1),
-            integration2=_qua.QuaProgramIntegrationWeightReference(name=analog_process.iw2),
-            element_output1=analog_process.element_output1,
-            element_output2=analog_process.element_output2,
-            target=_unwrap_outer_target(analog_process.target),
-        )
-    elif isinstance(analog_process, AnalogRawTimeTagging):
-        result.raw_time_tagging = _qua.QuaProgramAnalogMeasureProcessRawTimeTagging(
-            max_time=int(analog_process.max_time),
-            element_output=analog_process.element_output,
-            target=_unwrap_exp(analog_process.target),
-        )
-        if analog_process.targetLen is not None:
-            result.raw_time_tagging.target_len = _unwrap_exp(analog_process.targetLen).variable
-
-    elif isinstance(analog_process, HighResTimeTagging):
-        result.high_res_time_tagging = _qua.QuaProgramAnalogMeasureProcessHighResTimeTagging(
-            max_time=int(analog_process.max_time),
-            element_output=analog_process.element_output,
-            target=_unwrap_exp(analog_process.target),
-        )
-        if analog_process.targetLen is not None:
-            result.high_res_time_tagging.target_len = _unwrap_exp(analog_process.targetLen).variable
-
-    return result
-
-
-def _unwrap_digital_process(
-    digital_process: DigitalMeasureProcess,
-) -> _qua.QuaProgramDigitalMeasureProcess:
-    result = _qua.QuaProgramDigitalMeasureProcess(loc=digital_process.loc)
-
-    if isinstance(digital_process, DigitalRawTimeTagging):
-        result.raw_time_tagging = _qua.QuaProgramDigitalMeasureProcessRawTimeTagging(
-            max_time=int(digital_process.max_time),
-            element_output=digital_process.element_output,
-            target=_unwrap_exp(digital_process.target),
-        )
-        if digital_process.targetLen is not None:
-            result.raw_time_tagging.target_len = _unwrap_exp(digital_process.targetLen).variable
-
-    elif isinstance(digital_process, DigitalMeasureProcessCounting):
-        result.counting = _qua.QuaProgramDigitalMeasureProcessCounting(
-            max_time=int(digital_process.max_time),
-            target=_unwrap_exp(digital_process.target).variable,
-        )
-        if type(digital_process.element_outputs) == tuple:
-            result.counting.element_outputs.extend(digital_process.element_outputs)
-        elif type(digital_process.element_outputs) == str:
-            result.counting.element_outputs.append(digital_process.element_outputs)
-
-    return result
-
-
-def _unwrap_measure_process(
-    process: MeasureProcessType,
-) -> _qua.QuaProgramMeasureProcess():
-    result = _qua.QuaProgramMeasureProcess()
-
-    if isinstance(process, AnalogMeasureProcess):
-        result.analog = _unwrap_analog_process(process)
-    elif isinstance(process, DigitalMeasureProcess):
-        result.digital = _unwrap_digital_process(process)
-
-    return result
-
-
-def _unwrap_time_division(
-    time_division: TimeDivisionType,
-) -> _qua.QuaProgramAnalogProcessTargetTimeDivision:
-    result = _qua.QuaProgramAnalogProcessTargetTimeDivision()
-
-    if isinstance(time_division, SlicedAnalogTimeDivision):
-        result.sliced = _qua.QuaProgramAnalogTimeDivisionSliced(samples_per_chunk=time_division.samples_per_chunk)
-    elif isinstance(time_division, AccumulatedAnalogTimeDivision):
-        result.accumulated = _qua.QuaProgramAnalogTimeDivisionAccumulated(
-            samples_per_chunk=time_division.samples_per_chunk
-        )
-    elif isinstance(time_division, MovingWindowAnalogTimeDivision):
-        result.moving_window = _qua.QuaProgramAnalogTimeDivisionMovingWindow(
-            samples_per_chunk=time_division.samples_per_chunk,
-            chunks_per_window=time_division.chunks_per_window,
-        )
-    return result
-
-
-class AccumulationMethod:
-    def __init__(self):
+class AccumulationMethod(metaclass=abc.ABCMeta):
+    def __init__(self) -> None:
         self.loc = ""
-        self.return_func: Type[AnalogMeasureProcess] = None
 
-    def _full_target(self, target: QuaVariableType) -> ScalarProcessTarget:
+    def _full_target(self, target: Union[QuaVariable[float], QuaArrayCell[float]]) -> ScalarProcessTarget:
         return ScalarProcessTarget(self.loc, target)
 
-    def _sliced_target(self, target: QuaVariableType, samples_per_chunk: int) -> VectorProcessTarget:
+    def _sliced_target(self, target: QuaArrayVariable[float], samples_per_chunk: int) -> VectorProcessTarget:
         analog_time_division = SlicedAnalogTimeDivision(self.loc, samples_per_chunk)
         return VectorProcessTarget(self.loc, target, analog_time_division)
 
-    def _accumulated_target(self, target: QuaVariableType, samples_per_chunk: int) -> VectorProcessTarget:
+    def _accumulated_target(self, target: QuaArrayVariable[float], samples_per_chunk: int) -> VectorProcessTarget:
         analog_time_division = AccumulatedAnalogTimeDivision(self.loc, samples_per_chunk)
         return VectorProcessTarget(self.loc, target, analog_time_division)
 
     def _moving_window_target(
-        self, target: QuaVariableType, samples_per_chunk: int, chunks_per_window: int
+        self, target: QuaArrayVariable[float], samples_per_chunk: int, chunks_per_window: int
     ) -> VectorProcessTarget:
         analog_time_division = MovingWindowAnalogTimeDivision(self.loc, samples_per_chunk, chunks_per_window)
         return VectorProcessTarget(self.loc, target, analog_time_division)
@@ -2072,33 +2010,35 @@ class RealAccumulationMethod(AccumulationMethod):
     processes.
     """
 
-    def __init__(self):
+    def __init__(self, _return_func: Type[BasicIntegration]) -> None:
         super().__init__()
+        self._return_func = _return_func
 
-    def __new__(cls):
-        if cls is AccumulationMethod:
-            raise TypeError("base class may not be instantiated")
-        return object.__new__(cls)
+    @property
+    def return_func(self) -> Type[BasicIntegration]:
+        return self._return_func
 
-    def full(self, iw: str, target: QuaVariableType, element_output: str = ""):
+    def full(
+        self, iw: str, target: Union[QuaVariable[float], QuaArrayCell[float]], element_output: str = ""
+    ) -> BasicIntegration:
         """Perform an ordinary demodulation/integration. See [Full demodulation](../../Guides/features.md#full-demodulation).
 
         Args:
             iw (str): integration weights
             target (QUA variable): variable to which demod result is
                 saved
-            element_output: (optional) the output of an element from
-                which to get ADC results
+            element_output (str): The output of an element from which to get the ADC data.
+                Required for elements with `MWOutput` or with multiple `outputs`. Optional otherwise.
         """
-        return self.return_func(self.loc, element_output, iw, self._full_target(target))
+        return self.return_func(element_output, iw, self._full_target(target))
 
     def sliced(
         self,
         iw: str,
-        target: QuaVariableType,
+        target: QuaArrayVariable[float],
         samples_per_chunk: int,
         element_output: str = "",
-    ):
+    ) -> BasicIntegration:
         """Perform a demodulation/integration in which the demodulation/integration process is split into chunks
         and the value of each chunk is saved in an array cell. See [Sliced demodulation](../../Guides/features.md#sliced-demodulation).
 
@@ -2107,18 +2047,18 @@ class RealAccumulationMethod(AccumulationMethod):
             target (QUA array): variable to which demod result is saved
             samples_per_chunk (int): The number of ADC samples to be
                 used for each chunk is this number times 4.
-            element_output: (optional) the output of an element from
-                which to get ADC results
+            element_output (str): The output of an element from which to get the ADC data.
+                Required for elements with `MWOutput` or with multiple `outputs`. Optional otherwise.
         """
-        return self.return_func(self.loc, element_output, iw, self._sliced_target(target, samples_per_chunk))
+        return self.return_func(element_output, iw, self._sliced_target(target, samples_per_chunk))
 
     def accumulated(
         self,
         iw: str,
-        target: QuaVariableType,
+        target: QuaArrayVariable[float],
         samples_per_chunk: int,
         element_output: str = "",
-    ):
+    ) -> BasicIntegration:
         """Same as ``sliced()``, however the accumulated result of the demodulation/integration
         is saved in each array cell. See [Accumulated demodulation](../../Guides/features.md#accumulated-demodulation).
 
@@ -2127,24 +2067,19 @@ class RealAccumulationMethod(AccumulationMethod):
             target (QUA array): variable to which demod result is saved
             samples_per_chunk (int): The number of ADC samples to be
                 used for each chunk is this number times 4.
-            element_output: (optional) the output of an element from
-                which to get ADC results
+            element_output (str): The output of an element from which to get the ADC data.
+                Required for elements with `MWOutput` or with multiple `outputs`. Optional otherwise.
         """
-        return self.return_func(
-            self.loc,
-            element_output,
-            iw,
-            self._accumulated_target(target, samples_per_chunk),
-        )
+        return self.return_func(element_output, iw, self._accumulated_target(target, samples_per_chunk))
 
     def moving_window(
         self,
         iw: str,
-        target: QuaVariableType,
+        target: QuaArrayVariable[float],
         samples_per_chunk: int,
         chunks_per_window: int,
         element_output: str = "",
-    ):
+    ) -> BasicIntegration:
         """Same as ``sliced()``, however the several chunks are accumulated and saved to each array cell.
         See [Moving window demodulation](../../Guides/features.md#moving-window-demodulation).
 
@@ -2155,11 +2090,10 @@ class RealAccumulationMethod(AccumulationMethod):
                 used for each chunk is this number times 4.
             chunks_per_window (int): The number of chunks to use in the
                 moving window
-            element_output: (optional) the output of an element from
-                which to get ADC results
+            element_output (str): The output of an element from which to get the ADC data.
+                Required for elements with `MWOutput` or with multiple `outputs`. Optional otherwise.
         """
         return self.return_func(
-            self.loc,
             element_output,
             iw,
             self._moving_window_target(target, samples_per_chunk, chunks_per_window),
@@ -2173,21 +2107,21 @@ class DualAccumulationMethod(AccumulationMethod):
     ``dual_integration`` processes.
     """
 
-    def __init__(self):
+    def __init__(self, return_func: Type[DualMeasureProcess]):
         super().__init__()
+        self._return_func = return_func
 
-    def __new__(cls):
-        if cls is AccumulationMethod:
-            raise TypeError("base class may not be instantiated")
-        return object.__new__(cls)
+    @property
+    def return_func(self) -> Type[DualMeasureProcess]:
+        return self._return_func
 
     @overload
     def full(
         self,
         iw1: str,
         iw2: str,
-        target: QuaVariableType,
-    ):
+        target: Union[QuaVariable[float], QuaArrayCell[float]],
+    ) -> DualMeasureProcess:
         """Perform an ordinary dual demodulation/integration. See [Dual demodulation](../../Guides/demod.md#dual-demodulation).
 
         Args:
@@ -2207,8 +2141,8 @@ class DualAccumulationMethod(AccumulationMethod):
         element_output1: str,
         iw2: str,
         element_output2: str,
-        target: QuaVariableType,
-    ):
+        target: Union[QuaVariable[float], QuaArrayCell[float]],
+    ) -> DualMeasureProcess:
         """Perform an ordinary dual demodulation/integration. See [Dual demodulation](../../Guides/demod.md#dual-demodulation).
 
         Args:
@@ -2225,7 +2159,17 @@ class DualAccumulationMethod(AccumulationMethod):
         """
         pass
 
-    def full(self, *args, **kwargs):
+    def full(self, *args: Any, **kwargs: Any) -> DualMeasureProcess:
+        """Perform an ordinary dual demodulation/integration. See [Dual demodulation](../../Guides/demod.md#dual-demodulation).
+
+        Args:
+            iw1 (str): integration weights to be applied to
+                the I quadrature (or 'out1')
+            iw2 (str): integration weights to be applied to
+                the Q quadrature (or 'out2')
+            target (QUA variable): variable to which demod result is
+                saved
+        """
         if len(args) + len(kwargs) == 3:
             kwargs.update(_make_dict_from_args(args, ["iw1", "iw2", "target"]))
             kwargs["element_output1"] = DEFAULT_OUT1
@@ -2237,7 +2181,6 @@ class DualAccumulationMethod(AccumulationMethod):
             raise QmQuaException("Invalid number of arguments")
 
         return self.return_func(
-            self.loc,
             kwargs["element_output1"],
             kwargs["element_output2"],
             kwargs["iw1"],
@@ -2251,8 +2194,8 @@ class DualAccumulationMethod(AccumulationMethod):
         iw1: str,
         iw2: str,
         samples_per_chunk: int,
-        target: QuaVariableType,
-    ):
+        target: QuaArrayVariable[float],
+    ) -> DualMeasureProcess:
         pass
 
     @overload
@@ -2263,11 +2206,11 @@ class DualAccumulationMethod(AccumulationMethod):
         iw2: str,
         element_output2: str,
         samples_per_chunk: int,
-        target: QuaVariableType,
-    ):
+        target: QuaArrayVariable[float],
+    ) -> DualMeasureProcess:
         pass
 
-    def sliced(self, *args, **kwargs):
+    def sliced(self, *args: Any, **kwargs: Any) -> DualMeasureProcess:
         """This feature is currently not supported in QUA"""
         if len(args) + len(kwargs) == 4:
             kwargs.update(_make_dict_from_args(args, ["iw1", "iw2", "samples_per_chunk", "target"]))
@@ -2285,7 +2228,6 @@ class DualAccumulationMethod(AccumulationMethod):
             raise QmQuaException("Invalid number of arguments")
 
         return self.return_func(
-            self.loc,
             kwargs["element_output1"],
             kwargs["element_output2"],
             kwargs["iw1"],
@@ -2299,8 +2241,8 @@ class DualAccumulationMethod(AccumulationMethod):
         iw1: str,
         iw2: str,
         samples_per_chunk: int,
-        target: QuaVariableType,
-    ):
+        target: QuaArrayVariable[float],
+    ) -> DualMeasureProcess:
         pass
 
     @overload
@@ -2311,11 +2253,11 @@ class DualAccumulationMethod(AccumulationMethod):
         iw2: str,
         element_output2: str,
         samples_per_chunk: int,
-        target: QuaVariableType,
-    ):
+        target: QuaArrayVariable[float],
+    ) -> DualMeasureProcess:
         pass
 
-    def accumulated(self, *args, **kwargs):
+    def accumulated(self, *args: Any, **kwargs: Any) -> DualMeasureProcess:
         """This feature is currently not supported in QUA"""
         if len(args) + len(kwargs) == 4:
             kwargs.update(_make_dict_from_args(args, ["iw1", "iw2", "samples_per_chunk", "target"]))
@@ -2333,7 +2275,6 @@ class DualAccumulationMethod(AccumulationMethod):
             raise QmQuaException("Invalid number of arguments")
 
         return self.return_func(
-            self.loc,
             kwargs["element_output1"],
             kwargs["element_output2"],
             kwargs["iw1"],
@@ -2348,8 +2289,8 @@ class DualAccumulationMethod(AccumulationMethod):
         iw2: str,
         samples_per_chunk: int,
         chunks_per_window: int,
-        target: QuaVariableType,
-    ):
+        target: QuaArrayVariable[float],
+    ) -> DualMeasureProcess:
         pass
 
     @overload
@@ -2361,11 +2302,11 @@ class DualAccumulationMethod(AccumulationMethod):
         element_output2: str,
         samples_per_chunk: int,
         chunks_per_window: int,
-        target: QuaVariableType,
-    ):
+        target: QuaArrayVariable[float],
+    ) -> DualMeasureProcess:
         pass
 
-    def moving_window(self, *args, **kwargs):
+    def moving_window(self, *args: Any, **kwargs: Any) -> DualMeasureProcess:
         """This feature is currently not supported in QUA"""
         if len(args) + len(kwargs) == 5:
             kwargs.update(
@@ -2393,7 +2334,6 @@ class DualAccumulationMethod(AccumulationMethod):
             raise QmQuaException("Invalid number of arguments")
 
         return self.return_func(
-            self.loc,
             kwargs["element_output1"],
             kwargs["element_output2"],
             kwargs["iw1"],
@@ -2402,49 +2342,21 @@ class DualAccumulationMethod(AccumulationMethod):
         )
 
 
-class _Demod(RealAccumulationMethod):
-    def __init__(self):
-        super().__init__()
-        self.loc = ""
-        self.return_func = DemodIntegration
-
-
-class _BareIntegration(RealAccumulationMethod):
-    def __init__(self):
-        super().__init__()
-        self.loc = ""
-        self.return_func = BareIntegration
-
-
-class _DualDemod(DualAccumulationMethod):
-    def __init__(self):
-        super().__init__()
-        self.loc = ""
-        self.return_func = DualDemodIntegration
-
-
-class _DualBareIntegration(DualAccumulationMethod):
-    def __init__(self):
-        super().__init__()
-        self.loc = ""
-        self.return_func = DualBareIntegration
-
-
 class TimeTagging:
     """A base class for specifying the time tagging process in the [measure][qm.qua._dsl.measure] statement.
     These are the options which can be used inside the measure command as part of the ``time_tagging`` process.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.loc = ""
 
     def analog(
         self,
-        target: QuaVariableType,
+        target: QuaArrayVariable[int],
         max_time: int,
-        targetLen: Optional[QuaNumberType] = None,
+        targetLen: Optional[QuaVariable[int]] = None,
         element_output: str = "",
-    ):
+    ) -> AnalogRawTimeTagging:
         """Performs time tagging. See [Time tagging](../../Guides/features.md#time-tagging).
 
         Args:
@@ -2454,18 +2366,18 @@ class TimeTagging:
                 (Must be larger than the pulse duration)
             targetLen (QUA int): A QUA int which will get the number of
                 pulses detected
-            element_output (str): the output of an element from which to
-                get the pulses
+            element_output (str): The output of an element from which to get the pulses.
+                Required when there are multiple outputs in the element. Optional otherwise.
         """
-        return AnalogRawTimeTagging(self.loc, element_output, target, targetLen, max_time)
+        return AnalogRawTimeTagging(element_output, target, targetLen, max_time)
 
     def digital(
         self,
-        target: QuaVariableType,
+        target: QuaArrayVariable[int],
         max_time: int,
-        targetLen: Optional[QuaNumberType] = None,
+        targetLen: Optional[QuaVariable[int]] = None,
         element_output: str = "",
-    ):
+    ) -> DigitalRawTimeTagging:
         """Performs time tagging from the attached OPD.
          See [Time tagging](../../Guides/features.md#time-tagging).
 
@@ -2478,18 +2390,18 @@ class TimeTagging:
                 (Must be larger than the pulse duration)
             targetLen (QUA int): A QUA int which will get the number of
                 pulses detected
-            element_output (str): the output of an element from which to
-                get the pulses
+            element_output (str): The output of an element from which to get the pulses.
+                Required when there are multiple outputs in the element. Optional otherwise.
         """
-        return DigitalRawTimeTagging(self.loc, element_output, target, targetLen, max_time)
+        return DigitalRawTimeTagging(element_output, target, targetLen, max_time)
 
     def high_res(
         self,
-        target: QuaVariableType,
+        target: QuaArrayVariable[int],
         max_time: int,
-        targetLen: Optional[QuaNumberType] = None,
+        targetLen: Optional[QuaVariable[int]] = None,
         element_output: str = "",
-    ):
+    ) -> HighResTimeTagging:
         """Performs high resolution time tagging. See [Time tagging](../../Guides/features.md#time-tagging).
 
         -- Available from QOP 2.0 --
@@ -2501,10 +2413,10 @@ class TimeTagging:
                 (Must be larger than the pulse duration)
             targetLen (QUA int): A QUA int which will get the number of
                 pulses detected
-            element_output (str): the output of an element from which to
-                get the pulses
+            element_output (str): The output of an element from which to get the pulses.
+                Required when there are multiple outputs in the element. Optional otherwise.
         """
-        return HighResTimeTagging(self.loc, element_output, target, targetLen, max_time)
+        return HighResTimeTagging(element_output, target, targetLen, max_time)
 
 
 class Counting:
@@ -2514,15 +2426,15 @@ class Counting:
     -- Available with the OPD addon --
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.loc = ""
 
     def digital(
         self,
-        target: QuaVariableType,
+        target: QuaVariable[int],
         max_time: int,
         element_outputs: str = "",
-    ):
+    ) -> DigitalMeasureProcessCounting:
         """Performs counting from the attached OPD. See [Time tagging](../../Guides/features.md#time-tagging).
 
         -- Available with the OPD addon --
@@ -2535,15 +2447,138 @@ class Counting:
             element_outputs (str): the outputs of an element from which
                 to get ADC results
         """
-        return DigitalMeasureProcessCounting(self.loc, element_outputs, target, max_time)
+        return DigitalMeasureProcessCounting(element_outputs, target, max_time)
 
 
-demod = _Demod()
-dual_demod = _DualDemod()
-integration = _BareIntegration()
-dual_integration = _DualBareIntegration()
+class _FunctionExpressions:
+    """A class that provides functionality for creating function expressions, a specific type of AnyScalarExpression.
+    Currently, this class is private, as all function expressions are exclusively accessible to users through the
+    broadcast object.
+    This approach is a newer and improved alternative to the functionality provided by LibFunctions, and it works in
+    much the same way. However, unlike LibFunctions, each function in this class has its own dedicated Proto message for
+    its description. This results in a significantly clearer API, as opposed to LibFunctions, where all functions share
+    the same Proto message, making it more challenging to understand the purpose of individual functions.
+    """
+
+    @staticmethod
+    def _standardize_args(
+        *args: Union[Scalar[NumberT], QuaArrayVariable[NumberT]]
+    ) -> List[QuaProgramFunctionExpressionScalarOrVectorArgument]:
+        standardized_args = []
+
+        for arg in args:
+            if isinstance(arg, QuaArrayVariable):
+                standardized_args.append(QuaProgramFunctionExpressionScalarOrVectorArgument(array=arg.unwrapped))
+            else:
+                arg = create_qua_scalar_expression(arg)
+                standardized_args.append(QuaProgramFunctionExpressionScalarOrVectorArgument(scalar=arg.unwrapped))
+
+        return standardized_args
+
+    @staticmethod
+    def and_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaFunctionOutput[bool]:
+        """Performs a logical AND operation on the input values.
+
+        Args:
+            *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
+            logical AND operation. Each input can be a single boolean, a QUA boolean or a QUA array of booleans.
+        """
+        function_expression = QuaProgramFunctionExpression(
+            and_=QuaProgramFunctionExpressionAndFunction(_FunctionExpressions._standardize_args(*values)),
+            loc=_get_loc(),
+        )
+        return QuaFunctionOutput(function_expression, bool)
+
+    @staticmethod
+    def or_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaFunctionOutput[bool]:
+        """Performs a logical OR operation on the input values.
+
+        Args:
+            *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
+            logical OR operation. Each input can be a single boolean, a QUA boolean or a QUA array of booleans.
+        """
+        function_expression = QuaProgramFunctionExpression(
+            or_=QuaProgramFunctionExpressionOrFunction(_FunctionExpressions._standardize_args(*values)),
+            loc=_get_loc(),
+        )
+        return QuaFunctionOutput(function_expression, bool)
+
+    @staticmethod
+    def xor_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaFunctionOutput[bool]:
+        """Performs a logical XOR (exclusive OR) operation on the input values.
+
+        Args:
+            *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
+            logical XOR operation. Each input can be a single boolean, a QUA boolean, or a QUA array of booleans.
+        """
+        function_expression = QuaProgramFunctionExpression(
+            xor=QuaProgramFunctionExpressionXorFunction(_FunctionExpressions._standardize_args(*values)),
+            loc=_get_loc(),
+        )
+        return QuaFunctionOutput(function_expression, bool)
+
+
+class Broadcast:
+    """A class that provides functionality for creating broadcast expressions.
+    Broadcasting allows more control over making a locally measured variable available to all elements in the QUA program.
+    """
+
+    @staticmethod
+    def _create_broadcast_expression(value: QuaFunctionOutput[bool]) -> QuaBroadcast[bool]:
+        _get_root_program_scope().program.add_used_capability(QopCaps.broadcast)
+        return QuaBroadcast(bool, value.unwrapped)
+
+    @staticmethod
+    def and_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaBroadcast[bool]:
+        """
+        Preforms a logical AND operation on the input values and broadcasts the result to all elements in the QUA program.
+
+        Args:
+            *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
+                logical AND operation. Each input can be a single boolean, a QUA boolean or a QUA array of booleans.
+
+        Returns:
+            A boolean broadcast object, that can be used as input for any QUA command requiring a QUA boolean.
+        """
+        return Broadcast._create_broadcast_expression(_FunctionExpressions.and_(*values))
+
+    @staticmethod
+    def or_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaBroadcast[bool]:
+        """
+        Preforms a logical OR operation on the input values and broadcasts the result to all elements in the QUA program.
+
+        Args:
+            *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
+                logical OR operation. Each input can be a single boolean, a QUA boolean or a QUA array of booleans.
+
+        Returns:
+            A boolean broadcast object, that can be used as input for any QUA command requiring a QUA boolean.
+        """
+        return Broadcast._create_broadcast_expression(_FunctionExpressions.or_(*values))
+
+    @staticmethod
+    def xor_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaBroadcast[bool]:
+        """
+        Preforms a logical XOR (exclusive OR) operation on the input values and broadcasts the result to all elements in
+        the QUA program.
+
+        Args:
+            *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
+                logical XOR operation. Each input can be a single boolean, a QUA boolean or a QUA array of booleans.
+
+        Returns:
+            A boolean broadcast object, that can be used as input for any QUA command requiring a QUA boolean.
+        """
+        return Broadcast._create_broadcast_expression(_FunctionExpressions.xor_(*values))
+
+
+demod = RealAccumulationMethod(DemodIntegration)
+dual_demod = DualAccumulationMethod(DualDemodIntegration)
+integration = RealAccumulationMethod(BareIntegration)
+dual_integration = DualAccumulationMethod(DualBareIntegration)
 time_tagging = TimeTagging()
 counting = Counting()
+broadcast = Broadcast()
 
 
 def stream_processing() -> _RAScope:
@@ -2575,250 +2610,24 @@ def stream_processing() -> _RAScope:
     return _RAScope(prog.result_analysis)
 
 
-CommandsType = List[str]
+FUNCTIONS = MapFunctions()
 
 
-class _Functions:
-    @staticmethod
-    def average(axis: OneOrMore[PyNumberType] = None) -> CommandsType:
-        """Perform a running average on a stream item. The Output of this operation is the
-        running average of the values in the stream starting from the beginning of the
-        QUA program.
-
-        Args:
-            axis: optional Axis or axes along which to average.
-
-        Returns:
-            stream object
-        """
-        if axis is None:
-            return ["average"]
-        else:
-            if hasattr(axis, "__len__"):
-                # vector
-                return [
-                    "average",
-                    ["@array"] + [str(item) for item in list(axis)],
-                ]
-            else:
-                # scalar
-                return ["average", str(axis)]
-
-    @staticmethod
-    def dot_product(vector: PyNumberArrayType) -> CommandsType:
-        """Computes dot product of the given vector and an item of the input stream
-
-        Args:
-            vector: constant vector of numbers
-
-        Returns:
-            stream object
-        """
-        return ["dot", ["@array"] + [str(item) for item in list(vector)]]
-
-    @staticmethod
-    def tuple_dot_product() -> CommandsType:
-        """Computes dot product between the two vectors of the input stream
-
-        Returns:
-            stream object
-        """
-        return ["dot"]
-
-    @staticmethod
-    def multiply_by(scalar_or_vector: OneOrMore[PyNumberType]) -> CommandsType:
-        """Multiply the input stream item by a constant scalar or vector.
-        the input item can be either scalar or vector.
-
-        Args:
-            scalar_or_vector: either a scalar number, or a vector of
-                scalars.
-
-        Returns:
-            stream object
-        """
-        if hasattr(scalar_or_vector, "__len__"):
-            # vector
-            return [
-                "vmult",
-                ["@array"] + [str(item) for item in list(scalar_or_vector)],
-            ]
-        else:
-            # scalar
-            return ["smult", str(scalar_or_vector)]
-
-    @staticmethod
-    def tuple_multiply() -> CommandsType:
-        """Computes multiplication between the two elements of the input stream.
-        Can be any combination of scalar and vectors.
-
-        Returns:
-            stream object
-        """
-        return ["tmult"]
-
-    @staticmethod
-    def convolution(constant_vector: PyNumberArrayType, mode: Optional[str] = None) -> CommandsType:
-        """Computes discrete, linear convolution of one-dimensional constant vector and
-        one-dimensional vector item of the input stream.
-
-        Args:
-            constant_vector: vector of numbers
-            mode: "full", "same" or "valid"
-
-        Returns:
-            stream object
-        """
-        if mode is None:
-            mode = ""
-        return [
-            "conv",
-            str(mode),
-            ["@array"] + [str(item) for item in list(constant_vector)],
-        ]
-
-    @staticmethod
-    def tuple_convolution(mode: Optional[str] = None) -> CommandsType:
-        """Computes discrete, linear convolution of two one-dimensional vectors of the
-        input stream
-
-        Args:
-            mode: "full", "same" or "valid"
-
-        Returns:
-            stream object
-        """
-        if mode is None:
-            mode = ""
-        return ["conv", str(mode)]
-
-    @staticmethod
-    def fft(output: Optional[str] = None) -> CommandsType:
-        """Computes one-dimensional discrete fourier transform for every item in the
-        stream.
-        Item can be a vector of numbers, in this case fft will assume all imaginary
-        numbers are 0.
-        Item can also be a vector of number pairs - in this case for each pair - the
-        first will be real and second imaginary.
-
-        Args:
-            output: supported from QOP 1.30 and QOP 2.0, options are
-                "normal", "abs" and "angle":
-
-                *   "normal" - Same as default (none), returns a 2d array of
-                    size Nx2, where N is the length of the original vector.
-                    The first item in each pair is the real part, and the 2nd
-                    is the imaginary part.
-                *   "abs" - Returns a 1d array of size N with the abs of the fft.
-                *   "angle" - Returns the angle between the imaginary and real
-                    parts in radians.
-
-        Returns:
-            stream object
-        """
-        if output is None:
-            return ["fft"]
-        else:
-            return ["fft", str(output)]
-
-    @staticmethod
-    def boolean_to_int() -> CommandsType:
-        """
-        Converts boolean to integer number - 1 for true and 0 for false
-
-        Returns:
-            stream object
-        """
-        return ["booleancast"]
-
-    @staticmethod
-    def demod(
-        frequency: PyNumberType,
-        iw_cos: PyNumberType,
-        iw_sin: PyNumberType,
-        *,
-        integrate: Optional[bool] = None,
-    ):
-        """Demodulates the acquired data from the indicated stream at the given frequency
-        and integration weights.
-        If operating on a stream of tuples, assumes that the 2nd item is the timestamps
-        and uses them for the demodulation, reproducing the demodulation performed
-        in real time.
-        If operated on a single stream, assumes that the first item is at time zero and
-        that the elements are separated by 1ns.
-
-        Args:
-            frequency: frequency for demodulation calculation
-            iw_cos: cosine integration weight. Integration weight can be
-                either a scalar for constant integration weight, or a
-                python iterable for arbitrary integration weights.
-            iw_sin: sine integration weight. Integration weight can be
-                either a scalar for constant integration weight, or a
-                python iterable for arbitrary integration weights.
-            integrate: sum the demodulation result and returns a scalar
-                if True (default), else the demodulated stream without
-                summation is returned
-
-        Returns:
-            stream object
-
-        Example:
-            ```python
-            with stream_processing():
-                adc_stream.input1().with_timestamps().map(FUNCTIONS.demod(freq, 1.0, 0.0, integrate=False)).average().save('cos_env')
-                adc_stream.input1().with_timestamps().map(FUNCTIONS.demod(freq, 1.0, 0.0)).average().save('cos_result')  # Default is integrate=True
-            ```
-
-        Note:
-            The demodulation in the stream processing **does not** take in consideration
-            any real-time modifications to the frame, phase or frequency of the element.
-            If the program has any QUA command that changes them, the result of the
-            stream processing demodulation will be invalid.
-
-        """
-        if hasattr(iw_cos, "__len__"):
-            iw_cos = ["@array"] + [str(item) for item in list(iw_cos)]
-        else:
-            iw_cos = str(iw_cos)
-        if hasattr(iw_sin, "__len__"):
-            iw_sin = ["@array"] + [str(item) for item in list(iw_sin)]
-        else:
-            iw_sin = str(iw_sin)
-        out = ["demod", str(frequency), iw_cos, iw_sin]
-        if type(integrate) is bool:
-            out.append("1" if integrate else "0")
-        return out
-
-
-FUNCTIONS = _Functions()
-
-
-class _ResultStream:
-    def __init__(
-        self,
-        input_stream: Optional[Union[CommandsType, "_ResultStream"]],
-        operator_array: Optional[CommandsType],
-    ):
-        if operator_array is not None:
-            self._operator_array = [*operator_array]
-            self._operator_array.append(input_stream)
-        else:
-            self._operator_array = input_stream
-
-    def average(self) -> "_ResultStream":
+class _ResultStream(metaclass=abc.ABCMeta):
+    def average(self) -> "UnaryMathOperation":
         """
         Perform a running average on a stream item. The Output of this operation is the running average
         of the values in the stream starting from the beginning of the QUA program.
         """
-        return _ResultStream(self, ["average"])
+        return UnaryMathOperation(self, "average")
 
-    def real(self) -> "_ResultStream":
-        return _ResultStream(self, ["real"])
+    def real(self) -> "UnaryMathOperation":
+        return UnaryMathOperation(self, "real")
 
-    def image(self) -> "_ResultStream":
-        return _ResultStream(self, ["image"])
+    def image(self) -> "UnaryMathOperation":
+        return UnaryMathOperation(self, "image")
 
-    def buffer(self, *args) -> "_ResultStream":
+    def buffer(self, *args: int) -> "BufferOfStream":
         """Gather items into vectors - creates an array of input stream items and outputs the array as one item.
         only outputs full buffers.
 
@@ -2835,10 +2644,9 @@ class _ResultStream:
                 number, which gives the results as a 1d array or
                 multiple numbers for a multidimensional array.
         """
-        int_args = [str(int(arg)) for arg in args]
-        return _ResultStream(self, ["buffer"] + int_args)
+        return BufferOfStream(self, *args)
 
-    def buffer_and_skip(self, length: PyNumberType, skip: PyNumberType) -> "_ResultStream":
+    def buffer_and_skip(self, length: Number, skip: Number) -> "SkippedBufferOfStream":
         """Gather items into vectors - creates an array of input stream items and outputs
         the array as one item.
         Skips the number of given elements. Note that length and skip start from the
@@ -2864,11 +2672,11 @@ class _ResultStream:
             skip: number of items to skip for each buffer, starting from
                 the same index as length
         """
-        return _ResultStream(self, ["bufferAndSkip", str(int(length)), str(int(skip))])
+        return SkippedBufferOfStream(self, int(length), int(skip))
 
-    def map(self, function: CommandsType) -> "_ResultStream":
+    def map(self, function: FunctionBase) -> "MapOfStream":
         """Transform the item by applying a
-        [function][qm.qua._dsl._Functions] to it
+        [function][qm.qua._stream_processing_map_functions.MapFunctions] to it
 
         Args:
             function: a function to transform each item to a different
@@ -2876,39 +2684,39 @@ class _ResultStream:
                 elements in a buffer you should write
                 ".buffer(len).map(FUNCTIONS.average())"
         """
-        return _ResultStream(self, ["map", function])
+        return MapOfStream(self, function)
 
-    def flatten(self) -> "_ResultStream":
+    def flatten(self) -> "UnaryMathOperation":
         """
         Deconstruct an array item - and send its elements one by one as items
         """
-        return _ResultStream(self, ["flatten"])
+        return UnaryMathOperation(self, "flatten")
 
-    def skip(self, length: PyNumberType) -> "_ResultStream":
+    def skip(self, length: Number) -> "DiscardedStream":
         """Suppress the first n items of the stream
 
         Args:
             length: number of items to skip
         """
-        return _ResultStream(self, ["skip", str(int(length))])
+        return DiscardedStream(self, int(length), "skip")
 
-    def skip_last(self, length: PyNumberType) -> "_ResultStream":
+    def skip_last(self, length: Number) -> "DiscardedStream":
         """Suppress the last n items of the stream
 
         Args:
             length: number of items to skip
         """
-        return _ResultStream(self, ["skipLast", str(int(length))])
+        return DiscardedStream(self, int(length), "skipLast")
 
-    def take(self, length: PyNumberType) -> "_ResultStream":
+    def take(self, length: Number) -> "DiscardedStream":
         """Outputs only the first n items of the stream
 
         Args:
             length: number of items to take
         """
-        return _ResultStream(self, ["take", str(int(length))])
+        return DiscardedStream(self, int(length), "take")
 
-    def histogram(self, bins: List[List[PyNumberType]]) -> "_ResultStream":
+    def histogram(self, bins: List[List[Number]]) -> "HistogramStream":
         """Compute the histogram of all items in stream
 
         Args:
@@ -2916,20 +2724,18 @@ class _ResultStream:
                 bin. example: [[1,10],[11,20]] - two bins, one between 1
                 and 10, second between 11 and 20
         """
-        converted_bins = []
-        for sub_list in list(bins):
-            converted_bins = converted_bins + [["@array"] + [str(item) for item in list(sub_list)]]
-        return _ResultStream(self, ["histogram", ["@array"] + converted_bins])
+        standardized_bins = [(_bin[0], _bin[1]) for _bin in bins]
+        return HistogramStream(self, standardized_bins)
 
-    def zip(self, other: "_ResultStream") -> "_ResultStream":
+    def zip(self, other: "_ResultStream") -> "BinaryOperation":
         """Combine the emissions of two streams to one item that is a tuple of items of input streams
 
         Args:
             other: second stream to combine with self
         """
-        return _ResultStream(self, ["zip", other._to_proto()])
+        return BinaryOperation(other, self, "zip")
 
-    def save_all(self, tag: str):
+    def save_all(self, tag: str) -> None:
         """Save all items received in stream.
 
         Args:
@@ -2938,7 +2744,7 @@ class _ResultStream:
         ra = _get_scope_as_result_analysis()
         ra.save_all(tag, self)
 
-    def save(self, tag: str):
+    def save(self, tag: str) -> None:
         """Save only the last item received in stream
 
         Args:
@@ -2947,21 +2753,21 @@ class _ResultStream:
         ra = _get_scope_as_result_analysis()
         ra.save(tag, self)
 
-    def dot_product(self, vector: PyNumberArrayType) -> "_ResultStream":
+    def dot_product(self, vector: Sequence[Number]) -> "MapOfStream":
         """Computes dot product of the given vector and each item of the input stream
 
         Args:
             vector: constant vector of numbers
         """
-        return self.map(FUNCTIONS.dot_product(vector))
+        return self.map(DotProduct(vector))
 
-    def tuple_dot_product(self) -> "_ResultStream":
+    def tuple_dot_product(self) -> "MapOfStream":
         """
         Computes dot product of the given item of the input stream - that should include two vectors
         """
-        return self.map(FUNCTIONS.tuple_dot_product())
+        return self.map(TupleDotProduct())
 
-    def multiply_by(self, scalar_or_vector: OneOrMore[PyNumberType]) -> "_ResultStream":
+    def multiply_by(self, scalar_or_vector: OneOrMore[Number]) -> "MapOfStream":
         """Multiply the input stream item by a constant scalar or vector.
         The input item can be either scalar or vector.
 
@@ -2969,16 +2775,19 @@ class _ResultStream:
             scalar_or_vector: either a scalar number, or a vector of
                 scalars.
         """
-        return self.map(FUNCTIONS.multiply_by(scalar_or_vector))
+        if isinstance(scalar_or_vector, IterableClass):
+            return self.map(MultiplyByVector(scalar_or_vector))
+        else:
+            return self.map(MultiplyByScalar(scalar_or_vector))
 
-    def tuple_multiply(self) -> "_ResultStream":
+    def tuple_multiply(self) -> "MapOfStream":
         """
         Computes multiplication of the given item of the input stream - that can be any
         combination of scalar and vectors.
         """
-        return self.map(FUNCTIONS.tuple_multiply())
+        return self.map(TupleMultiply())
 
-    def convolution(self, constant_vector: PyNumberArrayType, mode: Optional[str] = None) -> "_ResultStream":
+    def convolution(self, constant_vector: Sequence[Number], mode: Optional[ConvolutionMode] = "") -> "MapOfStream":
         """Computes discrete, linear convolution of one-dimensional constant vector and one-dimensional vector
         item of the input stream.
 
@@ -2986,17 +2795,29 @@ class _ResultStream:
             constant_vector: vector of numbers
             mode: "full", "same" or "valid"
         """
-        return self.map(FUNCTIONS.convolution(constant_vector, mode))
+        if mode is None:
+            warnings.warn(
+                "mode=None is deprecated, use empty-string or (recommended) don't write the mode at-all.",
+                DeprecationWarning,
+            )
+            mode = ""
+        return self.map(Convolution(constant_vector, mode))
 
-    def tuple_convolution(self, mode: Optional[str] = None) -> "_ResultStream":
+    def tuple_convolution(self, mode: Optional[ConvolutionMode] = "") -> "MapOfStream":
         """Computes discrete, linear convolution of two one-dimensional vectors that received as the one item from the input stream
 
         Args:
             mode: "full", "same" or "valid"
         """
-        return self.map(FUNCTIONS.tuple_convolution(mode))
+        if mode is None:
+            warnings.warn(
+                "mode=None is deprecated, use empty-string or (recommended) don't write the mode at-all.",
+                DeprecationWarning,
+            )
+            mode = ""
+        return self.map(TupleConvolution(mode))
 
-    def fft(self, output: Optional[str] = None) -> "_ResultStream":
+    def fft(self, output: Optional[str] = None) -> "MapOfStream":
         """Computes one-dimensional discrete fourier transform for every item in the
         stream.
         Item can be a vector of numbers, in this case fft will assume all imaginary
@@ -3019,32 +2840,22 @@ class _ResultStream:
         Returns:
             stream object
         """
-        return self.map(FUNCTIONS.fft(output))
+        return self.map(FFT(output))
 
-    def boolean_to_int(self) -> "_ResultStream":
+    def boolean_to_int(self) -> "MapOfStream":
         """
         converts boolean to an integer number - 1 for true and 0 for false
         """
-        return self.map(FUNCTIONS.boolean_to_int())
+        return self.map(BooleanToInt())
 
-    def _array_to_proto(self, array: List[Union[str, CommandsType, "_ResultStream", "_ResultSource"]]) -> CommandsType:
-        res = []
-        for x in array:
-            if isinstance(x, str):
-                res.append(x)
-            elif isinstance(x, list):
-                res.append(self._array_to_proto(x))
-            elif isinstance(x, _ResultSource):
-                res.append(x._to_proto())
-            elif isinstance(x, _ResultStream):
-                res.append(x._to_proto())
-        return res
+    def to_proto(self) -> Value:
+        return Value(list_value=ListValue(values=list(self._to_list_of_values())))
 
-    def _to_proto(self) -> CommandsType:
-        res = self._array_to_proto(self._operator_array)
-        return res
+    @abc.abstractmethod
+    def _to_list_of_values(self) -> Sequence[Value]:
+        pass
 
-    def add(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
+    def add(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
         """Allows addition between streams. The addition is done element-wise.
         Can also be performed on buffers and other operators, but they must have the
         same dimensions.
@@ -3071,7 +2882,7 @@ class _ResultStream:
         """
         return self.__add__(other)
 
-    def subtract(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
+    def subtract(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
         """Allows subtraction between streams. The subtraction is done element-wise.
         Can also be performed on buffers and other operators, but they must have the
         same dimensions.
@@ -3098,7 +2909,7 @@ class _ResultStream:
         """
         return self.__sub__(other)
 
-    def multiply(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
+    def multiply(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
         """Allows multiplication between streams. The multiplication is done element-wise.
         Can also be performed on buffers and other operators, but they must have the
         same dimensions.
@@ -3125,7 +2936,7 @@ class _ResultStream:
         """
         return self.__mul__(other)
 
-    def divide(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
+    def divide(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
         """Allows division between streams. The division is done element-wise.
         Can also be performed on buffers and other operators, but they must have the
         same dimensions.
@@ -3152,93 +2963,61 @@ class _ResultStream:
         """
         return self.__truediv__(other)
 
-    def __add__(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
-        if isinstance(other, _ResultStream):
-            return _ResultStream(["+", self, other], None)
-        elif isinstance(other, (int, float, np.integer, np.floating)) and not isinstance(other, (bool, np.bool_)):
-            return _ResultStream(["+", self, str(other)], None)
-        elif hasattr(other, "__len__"):
-            return _ResultStream(["+", self, ["@array"] + [str(item) for item in list(other)]], None)
+    def __add__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
+        return BinaryOperation(self, other, "+")
 
-    def __radd__(self, other: OneOrMore[PyNumberType]) -> "_ResultStream":
-        if isinstance(other, (int, float, np.integer, np.floating)) and not isinstance(other, (bool, np.bool_)):
-            return _ResultStream(["+", str(other), self], None)
-        elif hasattr(other, "__len__"):
-            return _ResultStream(["+", ["@array"] + [str(item) for item in list(other)], self], None)
+    def __radd__(self, other: OneOrMore[Number]) -> "BinaryOperation":
+        return BinaryOperation(other, self, "+")
 
-    def __sub__(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
-        if isinstance(other, _ResultStream):
-            return _ResultStream(["-", self, other], None)
-        elif isinstance(other, (int, float, np.integer, np.floating)) and not isinstance(other, (bool, np.bool_)):
-            return _ResultStream(["-", self, str(other)], None)
-        elif hasattr(other, "__len__"):
-            return _ResultStream(["-", self, ["@array"] + [str(item) for item in list(other)]], None)
+    def __sub__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
+        return BinaryOperation(self, other, "-")
 
-    def __rsub__(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
-        if isinstance(other, (int, float, np.integer, np.floating)) and not isinstance(other, (bool, np.bool_)):
-            return _ResultStream(["-", str(other), self], None)
-        elif hasattr(other, "__len__"):
-            return _ResultStream(["-", ["@array"] + [str(item) for item in list(other)], self], None)
+    def __rsub__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
+        return BinaryOperation(other, self, "-")
 
-    def __gt__(self, _):
+    def __gt__(self, other: object) -> bool:
         raise QmQuaException("Can't use > operator on results")
 
-    def __ge__(self, _):
+    def __ge__(self, other: object) -> bool:
         raise QmQuaException("Can't use >= operator on results")
 
-    def __lt__(self, _):
+    def __lt__(self, other: object) -> bool:
         raise QmQuaException("Can't use < operator on results")
 
-    def __le__(self, _):
+    def __le__(self, other: object) -> bool:
         raise QmQuaException("Can't use <= operator on results")
 
-    def __eq__(self, _):
+    def __eq__(self, other: object) -> bool:
         raise QmQuaException("Can't use == operator on results")
 
-    def __mul__(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
-        if isinstance(other, _ResultStream):
-            return _ResultStream(["*", self, other], None)
-        elif isinstance(other, (int, float, np.integer, np.floating)) and not isinstance(other, (bool, np.bool_)):
-            return _ResultStream(["*", self, str(other)], None)
-        elif hasattr(other, "__len__"):
-            return _ResultStream(["*", self, ["@array"] + [str(item) for item in list(other)]], None)
+    def __mul__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
+        return BinaryOperation(self, other, "*")
 
-    def __rmul__(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
-        if isinstance(other, (int, float, np.integer, np.floating)) and not isinstance(other, (bool, np.bool_)):
-            return _ResultStream(["*", str(other), self], None)
-        elif hasattr(other, "__len__"):
-            return _ResultStream(["*", ["@array"] + [str(item) for item in list(other)], self], None)
+    def __rmul__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
+        return BinaryOperation(other, self, "*")
 
-    def __div__(self, _):
+    def __div__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> None:
         raise QmQuaException("Can't use / operator on results")
 
-    def __truediv__(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
-        if isinstance(other, _ResultStream):
-            return _ResultStream(["/", self, other], None)
-        elif isinstance(other, (int, float, np.integer, np.floating)) and not isinstance(other, (bool, np.bool_)):
-            return _ResultStream(["/", self, str(other)], None)
-        elif hasattr(other, "__len__"):
-            return _ResultStream(["/", self, ["@array"] + [str(item) for item in list(other)]], None)
+    def __truediv__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
+        return BinaryOperation(self, other, "/")
 
-    def __rtruediv__(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]) -> "_ResultStream":
-        if isinstance(other, (int, float, np.integer, np.floating)) and not isinstance(other, (bool, np.bool_)):
-            return _ResultStream(["/", str(other), self], None)
-        elif hasattr(other, "__len__"):
-            return _ResultStream(["/", ["@array"] + [str(item) for item in list(other)], self], None)
+    def __rtruediv__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
+        return BinaryOperation(other, self, "/")
 
-    def __lshift__(self, other: Union["_ResultStream", OneOrMore[PyNumberType]]):
-        save(other, self)
+    def __lshift__(self, other: PyQuaScalar) -> None:
+        raise TypeError("Can't use << operator on results of type '_ResultStream', only '_ResultSource'")
 
-    def __rshift__(self, _):
+    def __rshift__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> None:
         raise QmQuaException("Can't use >> operator on results")
 
-    def __and__(self, _):
+    def __and__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> None:
         raise QmQuaException("Can't use & operator on results")
 
-    def __or__(self, _):
+    def __or__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> None:
         raise QmQuaException("Can't use | operator on results")
 
-    def __xor__(self, _):
+    def __xor__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> None:
         raise QmQuaException("Can't use ^ operator on results")
 
 
@@ -3266,23 +3045,33 @@ class _ResultSource(_ResultStream):
     """
 
     def __init__(self, configuration: _ResultSourceConfiguration):
-        super().__init__(None, None)
         self._configuration = configuration
 
-    def _to_proto(self) -> List[str]:
+    @property
+    def is_adc_trace(self) -> bool:
+        return self._configuration.is_adc_trace
+
+    def _to_list_of_values(self) -> Sequence[Value]:
         result = [
-            _RESULT_SYMBOL,
-            str(self._configuration.timestamp_mode.value),
-            self._configuration.var_name,
+            Value(string_value=_RESULT_SYMBOL),
+            Value(string_value=str(self._configuration.timestamp_mode.value)),
+            Value(string_value=self._configuration.var_name),
         ]
-        inputs = ["@macro_input", str(self._configuration.input), result] if self._configuration.input != -1 else result
-        auto_reshape = ["@macro_auto_reshape", inputs] if self._configuration.auto_reshape else inputs
-        return ["@macro_adc_trace", auto_reshape] if self._configuration.is_adc_trace else auto_reshape
+        tmp = [
+            Value(string_value="@macro_input"),
+            Value(string_value=str(self._configuration.input)),
+            Value(list_value=ListValue(values=result)),
+        ]
+        inputs = result if self._configuration.input == -1 else tmp
+        macro_auto_reshape = [Value(string_value="@macro_auto_reshape"), Value(list_value=ListValue(values=inputs))]
+        auto_reshape = macro_auto_reshape if self._configuration.auto_reshape else inputs
+        macro_adc_trace = [Value(string_value="@macro_adc_trace"), Value(list_value=ListValue(values=auto_reshape))]
+        return macro_adc_trace if self._configuration.is_adc_trace else auto_reshape
 
     def get_var_name(self) -> str:
         return self._configuration.var_name
 
-    def with_timestamps(self) -> _ResultStream:
+    def with_timestamps(self) -> "_ResultSource":
         """Get a stream with the relevant timestamp for each stream-item"""
         return _ResultSource(
             dataclasses.replace(
@@ -3291,7 +3080,7 @@ class _ResultSource(_ResultStream):
             )
         )
 
-    def timestamps(self) -> _ResultStream:
+    def timestamps(self) -> "_ResultSource":
         """Get a stream with only the timestamps of the stream-items"""
         return _ResultSource(
             dataclasses.replace(
@@ -3329,17 +3118,148 @@ class _ResultSource(_ResultStream):
         """
         return _ResultSource(dataclasses.replace(self._configuration, auto_reshape=True))
 
+    def __lshift__(self, other: PyQuaScalar) -> None:
+        save(other, self)
 
-def bins(start: PyNumberType, end: PyNumberType, number_of_bins: PyFloatType):
-    bin_size = _math.ceil((end - start + 1) / float(number_of_bins))
-    bins_list = []
-    while start < end:
-        step_end = start + bin_size - 1
-        if step_end >= end:
-            step_end = end
-        bins_list = bins_list + [[start, step_end]]
-        start += bin_size
-    return bins_list
+
+class _UnaryOperation(_ResultStream, metaclass=abc.ABCMeta):
+    def __init__(self, input_stream: "_ResultStream"):
+        self._input_stream = input_stream
+
+    def _to_list_of_values(self) -> Sequence[Value]:
+        return [Value(string_value=self._operator_name)] + list(self._args) + [self._input_stream.to_proto()]
+
+    @property
+    @abc.abstractmethod
+    def _operator_name(self) -> str:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def _args(self) -> Sequence[Value]:
+        pass
+
+
+class UnaryMathOperation(_UnaryOperation):
+    def __init__(
+        self, input_stream: "_ResultStream", operator_name: Literal["average", "real", "image", "flatten", "tmult"]
+    ) -> None:
+        super().__init__(input_stream)
+        self._operator = operator_name
+
+    @property
+    def _operator_name(self) -> str:
+        return self._operator
+
+    @property
+    def _args(self) -> Sequence[Value]:
+        return []
+
+
+class BufferOfStream(_UnaryOperation):
+    def __init__(self, input_stream: "_ResultStream", *args: int):
+        super().__init__(input_stream)
+        self._args_input = args
+
+    @property
+    def _args(self) -> List[Value]:
+        return [Value(string_value=str(int(arg))) for arg in self._args_input]
+
+    @property
+    def _operator_name(self) -> str:
+        return "buffer"
+
+
+class SkippedBufferOfStream(_UnaryOperation):
+    def __init__(self, input_stream: "_ResultStream", length: int, skip: int):
+        super().__init__(input_stream)
+        self._length = length
+        self._skip = skip
+
+    @property
+    def _args(self) -> List[Value]:
+        return [Value(string_value=str(self._length)), Value(string_value=str(self._skip))]
+
+    @property
+    def _operator_name(self) -> str:
+        return "bufferAndSkip"
+
+
+class MapOfStream(_UnaryOperation):
+    def __init__(self, input_stream: "_ResultStream", function: FunctionBase):
+        super().__init__(input_stream)
+        self._function = function
+
+    @property
+    def _operator_name(self) -> str:
+        return "map"
+
+    @property
+    def _args(self) -> List[Value]:
+        return [self._function.to_proto()]
+
+
+class DiscardedStream(_UnaryOperation):
+    def __init__(self, input_stream: "_ResultStream", length: int, operator_name: Literal["skip", "skipLast", "take"]):
+        super().__init__(input_stream)
+        self._length = length
+        self._operator_input = operator_name
+
+    @property
+    def _operator_name(self) -> str:
+        return self._operator_input
+
+    @property
+    def _args(self) -> List[Value]:
+        return [Value(string_value=str(self._length))]
+
+
+class HistogramStream(_UnaryOperation):
+    def __init__(self, input_stream: "_ResultStream", bins_: Sequence[Tuple[Number, Number]]):
+        super().__init__(input_stream)
+        self._bins = bins_
+
+    @property
+    def _operator_name(self) -> str:
+        return "histogram"
+
+    @property
+    def _args(self) -> List[Value]:
+        tmp = [Value(string_value=_ARRAY_SYMBOL)]
+        converted_bins = [create_array(sub_list) for sub_list in self._bins]
+        _bins = Value(list_value=ListValue(values=tmp + converted_bins))
+        return [_bins]
+
+
+class BinaryOperation(_ResultStream):
+    def __init__(
+        self,
+        lhs: Union["_ResultStream", OneOrMore[Number]],
+        rhs: Union["_ResultStream", OneOrMore[Number]],
+        operator_name: Literal["+", "-", "*", "/", "zip"],
+    ):
+        self._lhs = lhs
+        self._rhs = rhs
+        self._operator_name = operator_name
+
+    def _standardize_output(self, other: Union["_ResultStream", OneOrMore[Number]]) -> Value:
+        if isinstance(other, _ResultStream):
+            return other.to_proto()
+        elif isinstance(other, (int, float, np.integer, np.floating)) and not isinstance(other, (bool, np.bool_)):
+            return Value(string_value=str(other))
+        elif isinstance(other, IterableClass):
+            return create_array(other)
+        if self._operator_name == "zip":
+            raise TypeError(f"Unsupported zip for '{type(self._lhs)} and {type(self._rhs)}.")
+        else:
+            raise TypeError(f"Unsupported operation - '{type(self._lhs)} {self._operator_name} {type(self._rhs)}.")
+
+    def _to_list_of_values(self) -> Sequence[Value]:
+        return [
+            Value(string_value=self._operator_name),
+            self._standardize_output(self._lhs),
+            self._standardize_output(self._rhs),
+        ]
 
 
 def _make_dict_from_args(args: Sequence[object], names: Sequence[str]) -> Dict[str, object]:

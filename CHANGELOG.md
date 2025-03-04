@@ -6,11 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
+## [1.2.2a3] - 2025-03-04
+### Fixed
+- Fixed `mypy` returning false positive type errors.
+- The DSL now is fully typed.
+- A `JobNotFoundException` is now raised when trying to get a job that does not exist (using functions - `qm.get_job`, `qm.get_job_by_id()` and `qmm.get_job()`).
+- Fixed a QUA program serialization error casued by malparsing of certain variable names.
+- Fixed wrong serialization for a random number with a seed.
+- QOP 3.3 - It is now possible to fetch results with a large number of data points, and it will not result in a gRPC timeout.
+- Fixed a bug that prevented calibration of octave with frequencies of type np.int32.
+
+### Changed
+- Supports the new simulator flow in QOP 3.3 in which the `simulate` command becomes non-blocking and the job object can be interacted with. Most Job APIs are not supported yet.
+- `qm.get_job()`, `qm.get_job_by_id()` and `qmm.get_job()` can now return a simulated job.
+- Added new fields for filters in the LF-FEM config: `exponential` and `high_pass`. These are used in QOP 3.3 for a new mechanism for analog output IIR filters.
+- Improved labels for the simulators' samples plot and waveform report plot
+- The simulator's samples plot will no longer plot waveforms that are all zeros (not changed in the simulation)
+
+### Added
+- Added `broadcast` object to the QUA DSL, supporting the functions: `broadcast.and_()`, `broadcast.or_()` and `broadcast.xor_()`, supported from QOP 3.3.
+- Raise an error when trying to fetch results but there is data loss on the OPX1000
+- Added the ability to export the capabilities of the QOP, using `qmm.capabilities`.
+- Added the ability to set capabilities without connecting to a QOP server, using the static function `QuantumMachinesManager.set_capabilities_offline()`.
+- Added arguments to the constructor of `QuantumMachinesManager` to allow control of the connection redirection:
+  - `follow_gateway_redirections` (bool): If True (default), the client will follow redirections to find a QuantumMachinesManager and Octaves. Otherwise, it will only connect to the given host and port.
+  - `async_follow_redirects` (bool): If False (default), async httpx will not follow redirections, relevant only in case follow_gateway_redirections is True.
+  - `async_trust_env` (bool): If True (default), async httpx will read the environment variables for settings as proxy settings, relevant only in case follow_gateway_redirections is True.
+  
+### Deprecated
+- The `measure` command signature has changed, `stream` has been renamed `adc_stream` and moved to the end of the arguments list. The old signature is deprecated and will be removed in the future.
+- The field `outputPulseParameters` in the element part of the config has been deprecated and will be replaced with the field `timeTaggingParameters`.
+- `"Ascending"` and  `"Descending"` have been deprecated and are replaced by `"Above"` and `"Below"` for the fields of the polarity in `timeTaggingParameters`
+- The field `thread` in the element part of the config has been deprecated and will be replaced with the field `core`.
+- In QOP >= 3.3, the function `fast_frame_rotation` is deprecated as it is no longer faster than frame_rotation_2pi (and in fact, it is less efficient). It will be removed in future versions.
+
+
 ## [1.2.2a2] - 2024-12-11
 
 ### Fixed
 - Fixed the function `job.update_oscillator_frequency` to work on the latest QOP 3.2.
 - Fixed a bug for OPX1000 in which `qm.get_digital_delay()` would return the digital buffer instead.
+- Fix usage of removeprefix for Python 3.8 compatibility.
 
 ### Deprecated
 - The method `job.update_oscillator_frequency` is replaced by `job.set_converter_frequency` and will be removed in the future.
@@ -24,6 +60,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Added the method `add_octave_to_opx_port_mapping` to the `QmOctaveConfig`. When defined, it allows calibration of an Octave connected to multiple FEMs. This method is deprecated and will be removed in the future.
 - Added `AbstractCalibrationDB` class to allow for custom Octave calibration databases. (`from qm.octave import AbstractCalibrationDB`)
 - `QuantumMachinesManager` can now accept an object of type `AbstractCalibrationDB` in its `octave_calibration_db_path` argument
+
+## [1.2.1.1a1] - 2024-12-17
+### Fixed
+- Fixed a bug in the MW-FEM samples returned from the cloud simulator (using `qm-saas`) which prevented plotting them
+
+### Changed
+- Improved labels for the simulators' samples plot and waveform report plot
+- The simulator's samples plot will no longer plot waveforms that are all zeros (not changed in the simulation)
 
 ## [1.2.1] - 2024-11-20
 Tested against QOP 2.4, 3.2

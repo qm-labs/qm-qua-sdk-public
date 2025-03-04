@@ -2,18 +2,20 @@ from collections import defaultdict
 from typing import Dict, List, Union, Optional, Sequence
 
 import betterproto
+from betterproto.lib.std.google.protobuf import Struct
 
 from qm.api.v2.job_api import JobApi
 from qm.persistence import BaseStore
 from qm.utils.async_utils import run_async
-from qm.exceptions import QMSimulationError
 from qm.waveform_report import WaveformReport
 from qm.utils.config_utils import get_fem_config
 from qm.grpc.frontend import SimulatedResponsePart
 from qm.jobs.simulated_job import extract_struct_value
-from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.job_api.job_api import JobApiWithDeprecations
+from qm.api.base_api import connection_error_handle_decorator
+from qm.exceptions import QopResponseError, QMSimulationError
+from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.results.simulator_samples import SimulatorSamples, SimulatorControllerSamples
 from qm.grpc.qua_config import (
     QuaConfigControllerDec,
@@ -23,6 +25,7 @@ from qm.grpc.qua_config import (
 )
 from qm.grpc.v2 import (
     PullSamplesRequest,
+    GetWaveformReportRequest,
     PullSamplesResponsePullSamplesResponseSuccess,
     PullSamplesResponsePullSamplesResponseSuccessLf,
     PullSamplesResponsePullSamplesResponseSuccessMw,
@@ -36,19 +39,38 @@ class SimulatedJobApi(JobApi):
         connection_details: ConnectionDetails,
         job_id: str,
         store: BaseStore,
-        simulated_response: SimulatedResponsePart,
+        simulated_response: Optional[SimulatedResponsePart],
         capabilities: ServerCapabilities,
     ) -> None:
         super().__init__(connection_details, job_id, store, capabilities)
-        self._simulated_response = simulated_response
+        self._waveform_report = None
 
-        self._waveform_report = WaveformReport.from_dict(
-            extract_struct_value(simulated_response.waveform_report), self.id
-        )
+        # In QOP 3.2 and earlier, the waveform_report is included inside the simulated_response, which is provided
+        # during the creation of the SimulatedJobApi. This if statement is checking this case.
+        # TODO: Remove the support for this flow in QOP 3.6
+        if not capabilities.supports(QopCaps.waveform_report_endpoint) and simulated_response:
+            self._waveform_report = self._build_waveform_report(simulated_response.waveform_report)
 
-    def get_simulated_waveform_report(self) -> Optional[WaveformReport]:
+    def _build_waveform_report(self, raw_waveform_report: Struct) -> WaveformReport:
+        return WaveformReport.from_dict(extract_struct_value(raw_waveform_report), self.id)
+
+    def _get_raw_waveform_report_from_api(self) -> Struct:
+        request = GetWaveformReportRequest(self.id)
+        try:
+            response = self._run(self._stub.get_waveform_report(request, timeout=self._timeout))
+        except QopResponseError as e:
+            raise QMSimulationError("Error while getting waveform report from API. Error: " + str(e))
+
+        return response.waveform_report
+
+    def get_simulated_waveform_report(self) -> WaveformReport:
+        if self._waveform_report is None:
+            raw_waveform_report = self._get_raw_waveform_report_from_api()
+            self._waveform_report = self._build_waveform_report(raw_waveform_report)
+
         return self._waveform_report
 
+    @connection_error_handle_decorator
     async def _pull_simulator_samples(
         self, include_analog: bool, include_digital: bool
     ) -> Dict[str, List[PullSamplesResponsePullSamplesResponseSuccess]]:
@@ -102,10 +124,10 @@ class SimulatedJobApi(JobApi):
         return SimulatorSamples(controller_to_samples)
 
     def plot_waveform_report_with_simulated_samples(self) -> None:
-        self._waveform_report.create_plot(self.get_simulated_samples())
+        self.get_simulated_waveform_report().create_plot(self.get_simulated_samples())
 
     def plot_waveform_report_without_samples(self) -> None:
-        self._waveform_report.create_plot()
+        self.get_simulated_waveform_report().create_plot()
 
 
 class SimulatedJobApiWithDeprecations(JobApiWithDeprecations, SimulatedJobApi):
