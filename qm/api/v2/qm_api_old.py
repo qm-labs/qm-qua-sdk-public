@@ -455,8 +455,8 @@ class QmApiWithDeprecations(QmApi):
         self,
         element: str,
         input: str,
-        feedforward: Sequence[NumpySupportedFloat],
-        feedback: Sequence[NumpySupportedFloat],
+        feedforward: Optional[Sequence[NumpySupportedFloat]],
+        feedback: Optional[Sequence[NumpySupportedFloat]],
     ) -> None:
         raise NotImplementedError
 

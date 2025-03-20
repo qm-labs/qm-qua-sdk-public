@@ -35,8 +35,11 @@ def _set_single_output_port_dc_offset(
 
 
 def _create_taps_filter(
-    feedforward: Sequence[NumpySupportedFloat], feedback: Sequence[NumpySupportedFloat]
+    feedforward: Optional[Sequence[NumpySupportedFloat]], feedback: Optional[Sequence[NumpySupportedFloat]]
 ) -> AnalogOutputPortFilter:
+    feedforward = [] if feedforward is None else feedforward
+    feedback = [] if feedback is None else feedback
+
     for name, instance in zip(["feedforward", "feedback"], [feedforward, feedback]):
         if not isinstance(instance, (numpy.ndarray, list)):
             raise TypeError(f"{name} must be a list, or a numpy array. Got {type(instance)}.")
@@ -123,8 +126,8 @@ class SingleInput(ElementInput[QuaConfigSingleInput]):
 
     def set_output_filter(
         self,
-        feedforward: Sequence[NumpySupportedFloat],
-        feedback: Sequence[NumpySupportedFloat],
+        feedforward: Optional[Sequence[NumpySupportedFloat]],
+        feedback: Optional[Sequence[NumpySupportedFloat]],
     ) -> None:
         analog_filter = _create_taps_filter(feedforward, feedback)
         self._frontend.set_output_filter_taps(self._id, self._name, "single", analog_filter)
@@ -181,8 +184,8 @@ class MixInputs(ElementInput[QuaConfigMixInputs]):
     def set_output_filter(
         self,
         input_name: str,
-        feedforward: Sequence[NumpySupportedFloat],
-        feedback: Sequence[NumpySupportedFloat],
+        feedforward: Optional[Sequence[NumpySupportedFloat]],
+        feedback: Optional[Sequence[NumpySupportedFloat]],
     ) -> None:
         analog_filter = _create_taps_filter(feedforward, feedback)
         self._frontend.set_output_filter_taps(

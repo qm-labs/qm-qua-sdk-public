@@ -4,7 +4,7 @@ from marshmallow import Schema, ValidationError, fields, post_load
 from marshmallow_polyfield import PolyField  # type: ignore[import-untyped]
 
 from qm.grpc.frontend import WaveformOverride, ExecutionOverrides
-from qm.type_hinting.exceution_overrides import ExecutionOverridesType
+from qm.type_hinting.execution_overrides import ExecutionOverridesType
 
 
 def _non_empty(v: Sized) -> None:

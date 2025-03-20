@@ -125,7 +125,8 @@ class CapabilitiesNotInitializedError(QmQuaException):
     def __init__(self) -> None:
         super().__init__(
             "Capabilities are required but not initialized. Please use QuantumMachinesManager to connect to a QOP server"
-            " or manually set the capabilities using QuantumMachinesManager.set_capabilities_offline()."
+            " or manually set the capabilities using the `QuantumMachinesManager.set_capabilities_offline()` function."
+            " Please see the function documentation on how to set the capabilities you need."
         )
 
 

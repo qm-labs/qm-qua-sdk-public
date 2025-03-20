@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing_extensions import Literal
 from collections.abc import Collection
 from collections.abc import Iterable as IterableClass
-from typing import Any, Set, Dict, List, Type, Tuple, Union, Generic, Optional, Sequence, cast, overload
+from typing import Any, Set, Dict, List, Type, Tuple, Union, Generic, Mapping, Optional, Sequence, cast, overload
 
 import betterproto
 import numpy as np
@@ -32,12 +32,12 @@ from qm.utils.types_utils import collection_has_type_int, collection_has_type_bo
 from qm.qua._dsl_specific_type_hints import (
     ChirpType,
     OneOrMore,
+    ChirpUnits,
     AmpValuesType,
     PlayPulseType,
     ConvolutionMode,
     MeasurePulseType,
     MessageExpressionType,
-    fixed,
 )
 from qm.qua._stream_processing_function_classes import (
     FFT,
@@ -71,15 +71,16 @@ from qm.qua._expressions import (
     Scalar,
     Vector,
     QuaScalar,
-    PyQuaScalar,
     QuaVariable,
     QuaArrayCell,
     QuaBroadcast,
     QuaExpression,
+    ScalarOfAnyType,
     QuaArrayVariable,
     QuaFunctionOutput,
     QuaArrayInputStream,
     QuaVariableInputStream,
+    fixed,
     literal_int,
     literal_bool,
     literal_real,
@@ -115,7 +116,7 @@ _block_stack: List["_BaseScope"] = []
 logger = logging.getLogger(__name__)
 
 StreamType = Union[str, "_ResultSource"]
-
+"""A type for a stream object in QUA."""
 
 _RESULT_SYMBOL = "@re"
 
@@ -182,13 +183,12 @@ def play(
             possible to dynamically change the duration of both constant
             and arbitrary pulses. Arbitrary pulses can only be stretched,
             not compressed.
-        chirp (Union[(list[int], str), (int, str)]): Allows to perform
-            piecewise linear sweep of the element’s intermediate
-            frequency in time. Input should be a tuple, with the 1st
-            element being a list of rates and the second should be a
-            string with the units. The units can be either: ‘Hz/nsec’,
-            ’mHz/nsec’, ’uHz/nsec’, ’pHz/nsec’ or ‘GHz/sec’, ’MHz/sec’,
-            ’KHz/sec’, ’Hz/sec’, ’mHz/sec’.
+        chirp (ChirpType): Allows to perform piecewise linear sweep
+            of the element’s intermediate frequency in time. Input
+            should be a tuple, with the 1st element being a list of
+            rates and the second should be a string with the units.
+            The units can be either: ‘Hz/nsec’, ’mHz/nsec’, ’uHz/nsec’,
+            ’pHz/nsec’ or ‘GHz/sec’, ’MHz/sec’, ’KHz/sec’, ’Hz/sec’, ’mHz/sec’.
         truncate (Union[int, QUA variable of type int]): Allows playing
             only part of the pulse, truncating the end. If provided,
             will play only up to the given time in units of the clock
@@ -266,7 +266,6 @@ def _standardize_chirp(chirp: Optional[ChirpType], continue_chirp: bool) -> Opti
         chirp_var = [int(x) for x in chirp_var]
         chirp_var = declare(int, value=chirp_var)
 
-    # chirp_exp = to_expression(chirp_var)
     chirp_obj = QuaProgramChirp()
     chirp_obj.continue_chirp = continue_chirp
     if chirp_times_list is not None:
@@ -275,10 +274,8 @@ def _standardize_chirp(chirp: Optional[ChirpType], continue_chirp: bool) -> Opti
         chirp_obj.array_rate = chirp_var.unwrapped
     else:
         chirp_obj.scalar_rate = to_scalar_pb_expression(chirp_var)
-    # else:
-    #     raise TypeError(f"Unknown chirp type - {type(chirp_obj)}")
 
-    units_mapping = {
+    units_mapping: Mapping[ChirpUnits, int] = {
         "Hz/nsec": QuaProgramChirpUnits.HzPerNanoSec,
         "GHz/sec": QuaProgramChirpUnits.HzPerNanoSec,
         "mHz/nsec": QuaProgramChirpUnits.mHzPerNanoSec,
@@ -748,7 +745,7 @@ def wait_for_trigger(
     body.wait_for_trigger(pulse_to_play, trigger_element, time_tag_target_pb, element)
 
 
-def save(var: PyQuaScalar, stream_or_tag: Union[str, "_ResultSource"]) -> None:
+def save(var: ScalarOfAnyType, stream_or_tag: Union[str, "_ResultSource"]) -> None:
     """Stream a QUA variable, a QUA array cell, or a constant scalar.
     the variable is streamed and not immediately saved (see [Stream processing](../../Guides/stream_proc.md#stream-processing)).
     In case ``result_or_tag`` is a string, the data will be immediately saved to a result handle under the same name.
@@ -1685,6 +1682,8 @@ def declare_stream(adc_trace: bool = False) -> "_ResultSource":
     )
 
 
+# Although _PulseAmp is a protected class, it is used by QUAM.
+# Therefore, any breaking changes should be communicated to the QUAM authors.
 class _PulseAmp:
     def __init__(
         self,
@@ -3005,7 +3004,7 @@ class _ResultStream(metaclass=abc.ABCMeta):
     def __rtruediv__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> "BinaryOperation":
         return BinaryOperation(other, self, "/")
 
-    def __lshift__(self, other: PyQuaScalar) -> None:
+    def __lshift__(self, other: ScalarOfAnyType) -> None:
         raise TypeError("Can't use << operator on results of type '_ResultStream', only '_ResultSource'")
 
     def __rshift__(self, other: Union["_ResultStream", OneOrMore[Number]]) -> None:
@@ -3118,7 +3117,7 @@ class _ResultSource(_ResultStream):
         """
         return _ResultSource(dataclasses.replace(self._configuration, auto_reshape=True))
 
-    def __lshift__(self, other: PyQuaScalar) -> None:
+    def __lshift__(self, other: ScalarOfAnyType) -> None:
         save(other, self)
 
 

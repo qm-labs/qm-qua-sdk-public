@@ -11,7 +11,7 @@ from qm.api.models.compiler import CompilerOptionArguments
 from qm.api.job_manager_api import create_job_manager_from_api
 from qm.api.models.jobs import PendingJobData, InsertDirection
 from qm.jobs.job_queue_base import QmQueueBase, JobNotFoundError
-from qm.type_hinting.exceution_overrides import ExecutionOverridesType
+from qm.type_hinting.execution_overrides import ExecutionOverridesType
 from qm.program._execution_overrides_schema import ExecutionOverridesSchema
 
 logger = logging.getLogger(__name__)

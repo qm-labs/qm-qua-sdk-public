@@ -164,7 +164,7 @@ class QuaExpression(Generic[S, NumberT], metaclass=abc.ABCMeta):
         return self.is_bool()
 
     def is_fixed(self) -> bool:
-        return self._type == float
+        return issubclass(self._type, float)
 
     def is_int(self) -> bool:
         return self._type == int
@@ -185,8 +185,13 @@ class QuaScalarExpression(
     ScalarMessageInterface[ScalarMessageType],
     metaclass=abc.ABCMeta,
 ):
+    """
+    A class representing a QUA scalar - could be a single value (like a variable), or the result of multiple operations
+    (between several expressions) that result in a Scalar value.
+    """
+
     def _get_binary_pb_expression(
-        self, other: "PyQuaScalar", op: QuaProgramBinaryExpressionBinaryOperator, self_is_first: bool = True
+        self, other: "ScalarOfAnyType", op: QuaProgramBinaryExpressionBinaryOperator, self_is_first: bool = True
     ) -> QuaProgramAnyScalarExpression:
         other_as_exp = to_scalar_pb_expression(other)
         self_as_exp = self.unwrapped
@@ -343,6 +348,8 @@ class AssignmentTargetInterface(metaclass=abc.ABCMeta):
 
 
 class QuaVariable(AssignmentTargetInterface, QuaScalarExpression[NumberT, QuaProgramVarRefExpression]):
+    """A class representing a QUA scalar variable. Note that a `QuaVariable` is also a `QuaScalarExpression`."""
+
     def __init__(self, name: str, t: Type[NumberT], init_value: Optional[Union[int, bool, float]]):
         super(QuaScalarExpression, self).__init__(
             QuaProgramAnyScalarExpression(variable=QuaProgramVarRefExpression(name)), t
@@ -384,6 +391,8 @@ class QuaLiteral(QuaScalarExpression[NumberT, QuaProgramLiteralExpression]):
 
 
 class QuaArrayCell(AssignmentTargetInterface, QuaScalarExpression[NumberT, QuaProgramArrayCellRefExpression]):
+    """A class representing a QUA variable inside a QUA array cell."""
+
     @property
     def unwrapped_scalar(self) -> QuaProgramArrayCellRefExpression:
         return self.unwrapped.array_cell
@@ -410,6 +419,8 @@ class QuaArrayLength(QuaScalarExpression[NumberT, QuaProgramArrayLengthExpressio
 
 
 class QuaLibFunctionOutput(QuaScalarExpression[NumberT, QuaProgramLibFunctionExpression]):
+    """A class representing the result of a QUA lib function."""
+
     @property
     def unwrapped_scalar(self) -> QuaProgramLibFunctionExpression:
         return self.unwrapped.lib_function
@@ -425,6 +436,8 @@ class QuaFunctionOutput(QuaScalarExpression[NumberT, QuaProgramFunctionExpressio
 
 
 class QuaBroadcast(QuaScalarExpression[NumberT, QuaProgramBroadcastExpression]):
+    """A class representing the result of a QUA broadcast expression."""
+
     def __init__(self, t: Type[NumberT], value: _ScalarExpressionType):
         super(QuaScalarExpression, self).__init__(
             QuaProgramAnyScalarExpression(broadcast=QuaProgramBroadcastExpression(value, loc=_get_loc())), t
@@ -442,6 +455,8 @@ class InputStreamInterface(metaclass=abc.ABCMeta):
 
 
 class QuaArrayInputStream(QuaArrayVariable[NumberT], InputStreamInterface):
+    """A class representing the QUA vector that will be used as an input stream from the job to the QUA program."""
+
     def advance(self) -> QuaProgramAnyStatement:
         return QuaProgramAnyStatement(
             advance_input_stream=QuaProgramAdvanceInputStreamStatement(loc=_get_loc(), stream_array=self.unwrapped)
@@ -449,6 +464,8 @@ class QuaArrayInputStream(QuaArrayVariable[NumberT], InputStreamInterface):
 
 
 class QuaVariableInputStream(QuaVariable[NumberT], InputStreamInterface):
+    """A class representing the QUA variable that will be used as an input stream from the job to the QUA program."""
+
     def advance(self) -> QuaProgramAnyStatement:
         return QuaProgramAnyStatement(
             advance_input_stream=QuaProgramAdvanceInputStreamStatement(
@@ -458,6 +475,8 @@ class QuaVariableInputStream(QuaVariable[NumberT], InputStreamInterface):
 
 
 class QuaIO(AssignmentTargetInterface):
+    """A class representing the QUA IO type."""
+
     def __init__(self, number: Literal[1, 2]):
         self._number = number
 
@@ -483,7 +502,7 @@ def _fix_object_data_type(obj: Any) -> Any:
         return obj
 
 
-def to_scalar_pb_expression(value: Union["PyQuaScalar", QuaIO]) -> _ScalarExpressionType:
+def to_scalar_pb_expression(value: Union["ScalarOfAnyType", QuaIO]) -> _ScalarExpressionType:
     other = _fix_object_data_type(value)
     if isinstance(other, QuaScalarExpression):
         return other.unwrapped
@@ -524,6 +543,10 @@ def create_qua_scalar_expression(value: "Scalar[NumberT]") -> "QuaScalar[NumberT
     raise NotImplementedError
 
 
+class fixed(float):
+    pass
+
+
 QuaScalar = Union[
     QuaVariable[NumberT],
     QuaLiteral[NumberT],
@@ -534,6 +557,15 @@ QuaScalar = Union[
     QuaFunctionOutput[NumberT],
     QuaBroadcast[NumberT],
 ]
+
 Scalar = Union[QuaScalar[NumberT], NumberT]
+"""A generic type representing the generic `NumberT` or the QUA equivalent of it."""
+
 Vector = Union[Sequence[NumberT], QuaArrayVariable[NumberT]]
-PyQuaScalar = Union[Scalar[bool], Scalar[int], Scalar[float]]
+"""A generic type representing a generic array of `NumberT`, or the QUA equivalent of it."""
+
+ScalarOfAnyType = Union[Scalar[bool], Scalar[int], Scalar[float]]
+"""A type representing a scalar value in QUA, or the equivalent python type."""
+
+VectorOfAnyType = Union[Vector[bool], Vector[int], Vector[float]]
+"""A type representing a vector value in QUA, or the equivalent python type."""

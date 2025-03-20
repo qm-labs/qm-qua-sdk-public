@@ -1,7 +1,7 @@
 from qm.exceptions import QmQuaException
-from qm.qua._expressions import IO1, IO2  # noqa
 from qm.qua._stream_processing_utils import bins
 from qm.qua._dsl import _Variable as Variable  # noqa
+from qm.qua._expressions import IO1, IO2, fixed  # noqa
 from qm.qua.AnalogMeasureProcess import AnalogMeasureProcess
 from qm.qua.DigitalMeasureProcess import DigitalMeasureProcess
 from qm.qua.lib import Cast, Math, Util, Random, call_library_function, call_vectors_library_function  # noqa
@@ -13,7 +13,6 @@ from qm.qua._dsl_specific_type_hints import (
     MessageVarType,
     MeasurePulseType,
     MessageExpressionType,
-    fixed,
 )
 from qm.qua._dsl import (  # noqa; exp,
     FUNCTIONS,

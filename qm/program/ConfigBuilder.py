@@ -2,8 +2,11 @@ import warnings
 from typing import Dict, List, Tuple, Union, Literal, Mapping, Optional, cast
 
 import betterproto
+from dependency_injector.wiring import Provide, inject
 
 from qm.type_hinting import Number
+from qm.api.models.capabilities import QopCaps, ServerCapabilities
+from qm.containers.capabilities_container import CapabilitiesContainer
 from qm.type_hinting.config_types import (
     FEM_IDX,
     Band,
@@ -516,26 +519,20 @@ def _convert_element_thread(element_thread: QuaConfigElementThread) -> str:
     return element_thread.thread_name
 
 
+@inject
 def _convert_analog_output_filters(
     data: QuaConfigAnalogOutputPortFilter,
+    capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
 ) -> Union[AnalogOutputFilterConfigTypeQop33, AnalogOutputFilterConfigType]:
-    if data.iir:
+    if capabilities.supports(QopCaps.exponential_iir_filter):
         ret33: AnalogOutputFilterConfigTypeQop33 = {
             "feedforward": data.feedforward,
             "exponential": [(exp_params.amplitude, exp_params.time_constant) for exp_params in data.iir.exponential],
+            "high_pass": data.iir.high_pass,
         }
-        if data.iir.high_pass is not None:
-            ret33["high_pass"] = data.iir.high_pass
-
         return ret33
-
     else:
-        ret: AnalogOutputFilterConfigType = {"feedforward": data.feedforward}
-        # Checking if the feedback is present in the data is necessary because it may also be the case that a version
-        # of QOP later than 3.3 was used but no filters were given.
-        if data.feedback:
-            ret["feedback"] = data.feedback
-
+        ret: AnalogOutputFilterConfigType = {"feedforward": data.feedforward, "feedback": data.feedback}
         return ret
 
 

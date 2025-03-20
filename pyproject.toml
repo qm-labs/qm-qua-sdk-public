@@ -62,7 +62,7 @@ pytest-order = "^1.0.0"
 
 apispec = "^5.1.1"
 poetry-dynamic-versioning = { extras = ["plugin"], version = "^0.21.2" }
-mypy = "^1.1.1"
+mypy = "^1.1"
 isort = "^5.11.5"
 tox = "^4.0.0"
 

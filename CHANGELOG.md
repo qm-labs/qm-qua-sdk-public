@@ -6,7 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
+## [1.2.2a4] - 2025-03-20
+
+- Requires Python >=3.8, <3.13
+
+### Added
+- Added `qm.qua.type_hints` file to allow the import of type hints relevant to the QUA DSL.
+
+### Fixed
+- `qm.get_config()` and `job.get_compilation_config()` now return the correct default values for analog output filters.
+- The `Math.dot()` function in qm.qua.lib supports different data types for the x and y arguments.
+
+### Changed
+- Made parameters `feedforward` and `feedback` optional in `qm.set_output_filter_by_element` (OPX+)
+
+
 ## [1.2.2a3] - 2025-03-04
+
+- Requires Python >=3.8, <3.13
+
 ### Fixed
 - Fixed `mypy` returning false positive type errors.
 - The DSL now is fully typed.
@@ -32,7 +50,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `follow_gateway_redirections` (bool): If True (default), the client will follow redirections to find a QuantumMachinesManager and Octaves. Otherwise, it will only connect to the given host and port.
   - `async_follow_redirects` (bool): If False (default), async httpx will not follow redirections, relevant only in case follow_gateway_redirections is True.
   - `async_trust_env` (bool): If True (default), async httpx will read the environment variables for settings as proxy settings, relevant only in case follow_gateway_redirections is True.
-  
+
+
 ### Deprecated
 - The `measure` command signature has changed, `stream` has been renamed `adc_stream` and moved to the end of the arguments list. The old signature is deprecated and will be removed in the future.
 - The field `outputPulseParameters` in the element part of the config has been deprecated and will be replaced with the field `timeTaggingParameters`.
@@ -42,6 +61,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 ## [1.2.2a2] - 2024-12-11
+
+- Requires Python >=3.8, <3.13
 
 ### Fixed
 - Fixed the function `job.update_oscillator_frequency` to work on the latest QOP 3.2.
@@ -56,12 +77,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.2.2a1] - 2024-11-28
 
+- Requires Python >=3.8, <3.13
+
 ### Added
 - Added the method `add_octave_to_opx_port_mapping` to the `QmOctaveConfig`. When defined, it allows calibration of an Octave connected to multiple FEMs. This method is deprecated and will be removed in the future.
 - Added `AbstractCalibrationDB` class to allow for custom Octave calibration databases. (`from qm.octave import AbstractCalibrationDB`)
 - `QuantumMachinesManager` can now accept an object of type `AbstractCalibrationDB` in its `octave_calibration_db_path` argument
 
 ## [1.2.1.1a1] - 2024-12-17
+
+- Requires Python >=3.8, <3.13
+
 ### Fixed
 - Fixed a bug in the MW-FEM samples returned from the cloud simulator (using `qm-saas`) which prevented plotting them
 
@@ -70,13 +96,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - The simulator's samples plot will no longer plot waveforms that are all zeros (not changed in the simulation)
 
 ## [1.2.1] - 2024-11-20
-Tested against QOP 2.4, 3.2
+
+- Requires Python >=3.8, <3.13
+- Tested against QOP 2.4, 3.2
 
 ### Fixed
 - Fixed a bug with qm.get_config() in the OPX1000.
 
 
 ## [1.2.1a3] - 2024-11-06
+
+- Requires Python >=3.8, <3.13
 
 ### Fixed
 - Fixed serialization for the `.image()` and `.real()` operations in the stream processor.
@@ -87,7 +117,9 @@ Tested against QOP 2.4, 3.2
 - Serializing a QUA program after it was executed will now also include the `CompilerOptions` it was executed with.
 
 ## [1.2.1a2] - 2024-09-16
-Tested against QOP 3.2
+
+- Requires Python >=3.8, <3.12
+- Tested against QOP 3.2
 
 ### Changed
 - Changed the package license to BSD-3
@@ -131,7 +163,9 @@ Tested against QOP 3.2
     - `qmm.close()` - Function removed.
 
 ## [1.2.1a1] - 2024-07-30
-Tested against QOP 2.4.1
+
+- Requires Python >=3.8, <3.12
+- Tested against QOP 2.4.1
 
 ### Added
 - Added new math functions - atan, atan_2pi, atan2, atan2_2pi - supported from QOP 2.4.
@@ -145,7 +179,9 @@ Tested against QOP 2.4.1
 - After calibration, dc offsets are set only if found LO *and* IF frequencies that match the current element state. 
 
 ## [1.2.0] - 2024-07-02
-Tested against QOP 3.1
+
+- Requires Python >=3.8, <3.12
+- Tested against QOP 3.1
 
 **Note, this version was [Yanked](https://pypi.org/help/#yanked), it was supposed to be pre-released as 1.2.0a1**
 
@@ -282,7 +318,9 @@ Tested against QOP 3.1
     - The property `job.manager` has been removed.
 
 ## [1.1.7] - 2024-02-19
-Tested against QOP 1.2, 2.2
+
+- Requires Python >=3.8, <3.12
+- Tested against QOP 1.2, 2.2
 
 ### Changed
 - Changed the flag `check_for_errors` default, in all fetching functions, to `True`. This will produce a warning if any run-time errors are detected during the job execution.

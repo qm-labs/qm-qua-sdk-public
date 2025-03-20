@@ -689,11 +689,17 @@ class QuantumMachinesManager:
         an alternative to connecting to a QOP server via QuantumMachinesManager, by setting the capabilities
         manually and globally.
 
+        It is possible to extract the capabilities of an existing QuantumMachinesManager object by checking the capabilities attribute.
+        e.g. `qmm = QuantumMachinesManager(); capabilities = qmm.capabilities`.
+
+        The QopCaps class (from `qm import QopCaps`) can be used to get and view all capabilities.
+
         Warning: Setting the capabilities when there is an open QuantumMachinesManager will override them and can cause unexpected behavior.
 
         Args:
             capabilities: A set of capabilities (or a ServerCapabilities object) to create the container with. If None,
-            all capabilities are set. Use QopCaps class (from qm import QopCaps) to get all capabilities.
+                all capabilities are set. Warning: Using all capabilities might not produce the expected behavior.
+
         """
         if capabilities is None:
             capabilities = QopCaps.get_all()

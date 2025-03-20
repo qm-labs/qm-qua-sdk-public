@@ -1,7 +1,7 @@
 import random
 import warnings
 from typing_extensions import ParamSpec
-from typing import List, Type, Tuple, Union, TypeVar, Callable, Optional, Sequence
+from typing import List, Type, Tuple, Union, TypeVar, Callable, Optional, Sequence, overload
 
 from qm._loc import _get_loc
 from qm.type_hinting import NumberT
@@ -15,10 +15,12 @@ from qm.grpc.qua import (
 from qm.qua._expressions import (
     Scalar,
     Vector,
-    PyQuaScalar,
     QuaVariable,
+    ScalarOfAnyType,
+    VectorOfAnyType,
     QuaArrayVariable,
     QuaLibFunctionOutput,
+    fixed,
     create_qua_scalar_expression,
 )
 
@@ -39,7 +41,7 @@ def _create_qua_vector_expression(value: Vector[NumberT]) -> QuaArrayVariable[Nu
     return declare(data_type, value=value)
 
 
-def _standardize_args(*args: Union[PyQuaScalar, Vector[NumberT]]) -> List[QuaProgramLibFunctionExpressionArgument]:
+def _standardize_args(*args: Union[ScalarOfAnyType, VectorOfAnyType]) -> List[QuaProgramLibFunctionExpressionArgument]:
     standardized_args = []
 
     for arg in args:
@@ -58,7 +60,7 @@ def _standardize_args(*args: Union[PyQuaScalar, Vector[NumberT]]) -> List[QuaPro
 def __create_output_expression(
     function: Callable[P, Ret],
     output_type: Type[NumberT],
-    *args: Union[PyQuaScalar, Vector[S]],
+    *args: Union[ScalarOfAnyType, VectorOfAnyType],
 ) -> QuaLibFunctionOutput[NumberT]:
     standardized_args = _standardize_args(*args)
     lib_name, func_name = _get_func_lib_and_name(function)
@@ -71,19 +73,19 @@ def __create_output_expression(
 
 
 def _create_output_expression(
-    function: Callable[P, Ret], output_type: Type[NumberT], *args: PyQuaScalar
+    function: Callable[P, Ret], output_type: Type[NumberT], *args: ScalarOfAnyType
 ) -> QuaLibFunctionOutput[NumberT]:
     return __create_output_expression(function, output_type, *args)
 
 
 def _create_vectors_output_expression(
-    function: Callable[P, Ret], output_type: Type[S], *args: Vector[NumberT]
+    function: Callable[P, Ret], output_type: Type[S], *args: VectorOfAnyType
 ) -> QuaLibFunctionOutput[S]:
     return __create_output_expression(function, output_type, *args)
 
 
 def call_library_function(
-    function: Callable[P, Ret], output_type: Type[NumberT], *args: PyQuaScalar
+    function: Callable[P, Ret], output_type: Type[NumberT], *args: ScalarOfAnyType
 ) -> QuaLibFunctionOutput[NumberT]:
     warnings.warn(
         deprecation_message(
@@ -549,7 +551,22 @@ class Math:
         return _create_vectors_output_expression(Math.argmin, int, standard_x)
 
     @staticmethod
-    def dot(x: Vector[NumberT], y: Vector[NumberT]) -> QuaLibFunctionOutput[NumberT]:
+    @overload
+    def dot(x: Union[Vector[int], Vector[bool]], y: Union[Vector[int], Vector[bool]]) -> QuaLibFunctionOutput[int]:
+        ...
+
+    @staticmethod
+    @overload
+    def dot(x: Vector[float], y: VectorOfAnyType) -> QuaLibFunctionOutput[float]:
+        ...
+
+    @staticmethod
+    @overload
+    def dot(x: VectorOfAnyType, y: Vector[float]) -> QuaLibFunctionOutput[float]:
+        ...
+
+    @staticmethod
+    def dot(x: VectorOfAnyType, y: VectorOfAnyType) -> Union[QuaLibFunctionOutput[float], QuaLibFunctionOutput[int]]:
         r"""Calculates a dot product of two QUA arrays of identical size.
 
         Args:
@@ -557,18 +574,21 @@ class Math:
             y: a QUA array
 
         Returns:
-            The dot product of x and y, has same type as x and y
+            The dot product of x and y.
+            If either x or y is an array of type `Fixed`, then the result is `Fixed`. Otherwise, it is an `Int`
 
         Example:
             ```python
             assign(c, dot(a, b))
             ```
         """
-        standard_x = _create_qua_vector_expression(x)
-        standard_y = _create_qua_vector_expression(y)
-        if standard_x.dtype != standard_y.dtype:
-            raise ValueError("Arrays data-type should be the same")
-        return _create_vectors_output_expression(Math.dot, standard_x.dtype, standard_x, standard_y)
+        standard_x = _create_qua_vector_expression(x)  # type: ignore[misc]
+        standard_y = _create_qua_vector_expression(y)  # type: ignore[misc]
+
+        if issubclass(standard_x.dtype, float) or issubclass(standard_y.dtype, float):
+            return _create_vectors_output_expression(Math.dot, fixed, standard_x, standard_y)
+        else:
+            return _create_vectors_output_expression(Math.dot, int, standard_x, standard_y)
 
 
 class Cast:

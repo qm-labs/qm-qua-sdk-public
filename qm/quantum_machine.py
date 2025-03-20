@@ -486,10 +486,10 @@ class QuantumMachine:
         self,
         element: str,
         input: str,
-        feedforward: Sequence[NumpySupportedFloat],
-        feedback: Sequence[NumpySupportedFloat],
+        feedforward: Optional[Sequence[NumpySupportedFloat]],
+        feedback: Optional[Sequence[NumpySupportedFloat]],
     ) -> None:
-        """Sets the intermediate frequency of the element
+        """Sets the output port filters of the element
 
         Args:
             element: the name of the element whose ports filters will be
@@ -502,8 +502,8 @@ class QuantumMachine:
 
                 `'I'` or `'Q'`
                     for an element with mixer inputs
-            feedforward: the values for the feedforward filter
-            feedback: the values for the feedback filter
+            feedforward: the values for the feedforward filter (can be set to None, which will disable the filter)
+            feedback: the values for the feedback filter (can be set to None, which will disable the filter)
 
         """
         logger.debug(
