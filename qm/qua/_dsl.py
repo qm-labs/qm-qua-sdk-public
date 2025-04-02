@@ -194,6 +194,7 @@ def play(
             will play only up to the given time in units of the clock
             cycle (4ns).
         condition (A logical expression to evaluate.): Will play the operation only if the condition is true.
+            The play command will take the same amount of time regardless of the condition (If false, would wait instead).
             Prior to QOP 2.2, only the analog part was conditioned, i.e., any digital pulses associated
             with the operation would always play.
         timestamp_stream (Union[str, _ResultSource]): (Supported from
@@ -1366,6 +1367,7 @@ def port_condition(condition: Scalar[bool]) -> "_BodyScope":
 
     Args:
         condition (A logical expression to evaluate): Will play the operation only if the condition is true.
+            The play command will take the same amount of time regardless of the condition (If false, would wait instead).
 
     Example:
         ```python
