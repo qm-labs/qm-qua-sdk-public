@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
+## [1.2.3a1] - 2025-05-11
+
+- Requires Python >=3.8, <3.13
+- Tested against QOP 3.4
+
+
+### Fixed
+- Fixed a bug that caused `generate_qua_script` to raise an error when attempting to serialize a program and configuration without a `QuantumMachineManager` instance opened.
+
+
 ## [1.2.2] - 2025-04-01
 
 - Requires Python >=3.8, <3.13
@@ -47,6 +57,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Added new fields for filters in the LF-FEM config: `exponential` and `high_pass`. These are used in QOP 3.3 for a new mechanism for analog output IIR filters.
 - Improved labels for the simulators' samples plot and waveform report plot
 - The simulator's samples plot will no longer plot waveforms that are all zeros (not changed in the simulation)
+- Refined connection error handling: Errors are now caught specifically for connection issues, rather than broadly across larger scopes as was previously the case. 
 
 ### Added
 - Added `broadcast` object to the QUA DSL, supporting the functions: `broadcast.and_()`, `broadcast.or_()` and `broadcast.xor_()`, supported from QOP 3.3.

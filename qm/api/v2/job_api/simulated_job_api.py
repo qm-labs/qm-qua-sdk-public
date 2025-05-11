@@ -13,7 +13,6 @@ from qm.grpc.frontend import SimulatedResponsePart
 from qm.jobs.simulated_job import extract_struct_value
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.job_api.job_api import JobApiWithDeprecations
-from qm.api.base_api import connection_error_handle_decorator
 from qm.exceptions import QopResponseError, QMSimulationError
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.results.simulator_samples import SimulatorSamples, SimulatorControllerSamples
@@ -70,13 +69,12 @@ class SimulatedJobApi(JobApi):
 
         return self._waveform_report
 
-    @connection_error_handle_decorator
     async def _pull_simulator_samples(
         self, include_analog: bool, include_digital: bool
     ) -> Dict[str, List[PullSamplesResponsePullSamplesResponseSuccess]]:
         request = PullSamplesRequest(self._id, include_analog, include_digital)
         bare_results = defaultdict(list)
-        async for result in self._stub.pull_samples(request, timeout=self._timeout):
+        async for result in self._run_async_iterator(self._stub.pull_samples, request, timeout=self._timeout):
             _, response = betterproto.which_one_of(result, "response_oneof")
             if isinstance(response, PullSamplesResponsePullSamplesResponseSuccess):
                 bare_results[response.controller].append(response)

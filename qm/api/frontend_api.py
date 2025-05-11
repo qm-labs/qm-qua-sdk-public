@@ -6,13 +6,12 @@ from betterproto.lib.google.protobuf import Empty
 import qm.grpc.qm_api
 from qm.type_hinting import Value
 from qm.grpc.qua import QuaProgram
+from qm.api.base_api import BaseApi
 from qm.grpc.compiler import QuaValues
-from qm.utils.async_utils import run_async
 from qm.grpc.general_messages import Matrix
 from qm.api.models.jobs import InsertDirection
 from qm.utils.protobuf_utils import LOG_LEVEL_MAP
 from qm.api.models.capabilities import OPX_FEM_IDX
-from qm.api.base_api import BaseApi, connection_error_handle
 from qm.api.models.quantum_machine import QuantumMachineData
 from qm.api.models.devices import Polarity, MixerInfo, AnalogOutputPortFilter
 from qm.grpc.qua_config import QuaConfig, QuaConfigFemTypes, QuaConfigDeviceDec
@@ -69,19 +68,18 @@ from qm.grpc.qm_api import (
 logger = logging.getLogger(__name__)
 
 
-@connection_error_handle()
 class FrontendApi(BaseApi[FrontendStub]):
     @property
     def _stub_class(self) -> Type[FrontendStub]:
         return FrontendStub
 
     def get_version(self) -> str:
-        response = run_async(self._stub.get_version(Empty(), timeout=self._timeout))
+        response = self._run(self._stub.get_version(Empty(), timeout=self._timeout))
         return response.value
 
     def healthcheck(self, strict: bool) -> None:
         logger.info("Performing health check")
-        response = run_async(self._stub.health_check(Empty(), timeout=self._timeout))
+        response = self._run(self._stub.health_check(Empty(), timeout=self._timeout))
 
         for warning in response.warning_messages:
             logger.warning(f"Health check warning: {warning}")
@@ -99,7 +97,7 @@ class FrontendApi(BaseApi[FrontendStub]):
         logger.info("Health check passed")
 
     def reset_data_processing(self) -> None:
-        run_async(self._stub.reset_data_processing(ResetDataProcessingRequest(), timeout=self._timeout))
+        self._run(self._stub.reset_data_processing(ResetDataProcessingRequest(), timeout=self._timeout))
 
     def open_qm(self, config: QuaConfig, close_other_machines: bool, keep_dc_offsets_when_closing: bool = False) -> str:
         request = OpenQuantumMachineRequest(config=config, keep_dc_offsets_when_closing=keep_dc_offsets_when_closing)
@@ -109,7 +107,7 @@ class FrontendApi(BaseApi[FrontendStub]):
         else:
             request.never = True
 
-        response = run_async(self._stub.open_quantum_machine(request, timeout=self._timeout))
+        response = self._run(self._stub.open_quantum_machine(request, timeout=self._timeout))
 
         if not response.success:
             error_messages = []
@@ -139,12 +137,12 @@ class FrontendApi(BaseApi[FrontendStub]):
         return response.machine_id
 
     def list_open_quantum_machines(self) -> List[str]:
-        response = run_async(self._stub.list_open_quantum_machines(Empty(), timeout=self._timeout))
+        response = self._run(self._stub.list_open_quantum_machines(Empty(), timeout=self._timeout))
         return response.machine_i_ds
 
     def get_quantum_machine(self, qm_id: str) -> QuantumMachineData:
         request = GetQuantumMachineRequest(machine_id=qm_id)
-        response = run_async(self._stub.get_quantum_machine(request, timeout=self._timeout))
+        response = self._run(self._stub.get_quantum_machine(request, timeout=self._timeout))
 
         if not response.success:
             error_message = "\n".join([error.message for error in response.errors])
@@ -154,7 +152,7 @@ class FrontendApi(BaseApi[FrontendStub]):
 
     def close_quantum_machine(self, machine_id: str) -> bool:
         request = CloseQuantumMachineRequest(machine_id=machine_id)
-        response = run_async(self._stub.close_quantum_machine(request, timeout=self._timeout))
+        response = self._run(self._stub.close_quantum_machine(request, timeout=self._timeout))
         if not response.success:
             raise QmFailedToCloseQuantumMachineError("\n".join(err.message for err in response.errors))
         return True
@@ -172,7 +170,7 @@ class FrontendApi(BaseApi[FrontendStub]):
         return machine_data.config
 
     def close_all_quantum_machines(self) -> None:
-        response = run_async(self._stub.close_all_quantum_machines(Empty(), timeout=self._timeout))
+        response = self._run(self._stub.close_all_quantum_machines(Empty(), timeout=self._timeout))
         if not response.success:
             messages = [error.message for error in response.errors]
             for msg in messages:
@@ -183,15 +181,15 @@ class FrontendApi(BaseApi[FrontendStub]):
             )
 
     def get_controllers(self) -> List[Controller]:
-        response = run_async(self._stub.get_controllers(Empty(), timeout=self._timeout))
+        response = self._run(self._stub.get_controllers(Empty(), timeout=self._timeout))
         return response.controllers
 
     def clear_all_job_results(self) -> None:
-        run_async(self._stub.clear_all_job_results(Empty(), timeout=self._timeout))
+        self._run(self._stub.clear_all_job_results(Empty(), timeout=self._timeout))
 
     def send_debug_command(self, controller_name: str, command: str) -> str:
         request = PerformHalDebugCommandRequest(controller_name=controller_name, command=command)
-        response = run_async(self._stub.perform_hal_debug_command(request, timeout=self._timeout))
+        response = self._run(self._stub.perform_hal_debug_command(request, timeout=self._timeout))
 
         if not response.success:
             raise QMConnectionError(response.response)
@@ -220,7 +218,7 @@ class FrontendApi(BaseApi[FrontendStub]):
 
         logger.info("Sending program to QOP for compilation")
 
-        response = run_async(self._stub.add_to_queue(request, timeout=None))
+        response = self._run(self._stub.add_to_queue(request, timeout=None))
 
         for message in response.messages:
             logger.log(LOG_LEVEL_MAP[message.level], message.message)
@@ -243,7 +241,7 @@ class FrontendApi(BaseApi[FrontendStub]):
             execution_overrides=execution_overrides,
         )
 
-        response = run_async(self._stub.add_compiled_to_queue(request, timeout=self._timeout))
+        response = self._run(self._stub.add_compiled_to_queue(request, timeout=self._timeout))
 
         job_id = response.job_id
 
@@ -265,7 +263,7 @@ class FrontendApi(BaseApi[FrontendStub]):
         program.compiler_options = get_request_compiler_options(compiler_options)
         request = CompileRequest(quantum_machine_id=machine_id, high_level_program=program)
 
-        response = run_async(self._stub.compile(request, timeout=None))
+        response = self._run(self._stub.compile(request, timeout=None))
 
         for message in response.messages:
             logger.log(LOG_LEVEL_MAP[message.level], message.message)
@@ -277,7 +275,7 @@ class FrontendApi(BaseApi[FrontendStub]):
         return program_id
 
     def _perform_qm_request(self, request: HighQmApiRequest) -> None:
-        response = run_async(self._stub.perform_qm_request(request, timeout=self._timeout))
+        response = self._run(self._stub.perform_qm_request(request, timeout=self._timeout))
 
         if not response.ok:
             error_message = "\n".join(it.message for it in response.errors)
@@ -427,7 +425,7 @@ class FrontendApi(BaseApi[FrontendStub]):
                 IoValueRequest(io_number=2, quantum_machine_id=machine_id),
             ]
         )
-        response = run_async(self._stub.request_data(request, timeout=self._timeout))
+        response = self._run(self._stub.request_data(request, timeout=self._timeout))
 
         if not response.success:
             raise QMRequestDataError("\n".join(err.message for err in response.errors))

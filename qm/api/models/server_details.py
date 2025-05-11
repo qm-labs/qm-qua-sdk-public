@@ -2,8 +2,12 @@ import ssl
 import dataclasses
 from typing import Dict, Tuple, Optional
 
+from grpclib.client import Channel
+
+from qm.utils.async_utils import run_async
 from qm.api.models.info import QuaMachineInfo
 from qm.api.models.debug_data import DebugData
+from qm.api.models.channel import create_channel
 from qm.api.models.capabilities import ServerCapabilities
 
 MAX_MESSAGE_SIZE = 1024 * 1024 * 100  # 100 mb in bytes
@@ -20,6 +24,18 @@ class ConnectionDetails:
     headers: Dict[str, str] = dataclasses.field(default_factory=dict)
     timeout: float = dataclasses.field(default=BASE_TIMEOUT)
     debug_data: Optional[DebugData] = dataclasses.field(default=None)
+    _channel: Optional[Channel] = dataclasses.field(repr=False, default=None)
+
+    @property
+    def channel(self) -> Channel:
+        if self._channel is None:
+            self._channel = run_async(
+                create_channel(
+                    self.host, self.port, self.ssl_context, self.max_message_size, self.headers, self.debug_data
+                )
+            )
+
+        return self._channel
 
     def __hash__(self) -> int:
         return hash(

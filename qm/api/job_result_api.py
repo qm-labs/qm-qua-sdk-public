@@ -1,10 +1,9 @@
 import logging
 from typing import Dict, List, Type, Tuple, AsyncIterator
 
-from qm.utils.async_utils import run_async
+from qm.api.base_api import BaseApi
 from qm.api.models.jobs import JobNamedResult
 from qm.api.models.server_details import ConnectionDetails
-from qm.api.base_api import BaseApi, connection_error_handle
 from qm.StreamMetadata import StreamMetadata, StreamMetadataError, _get_stream_metadata_dict_from_proto_resp
 from qm.grpc.results_analyser import (
     GetJobStateRequest,
@@ -23,7 +22,6 @@ from qm.grpc.results_analyser import (
 logger = logging.getLogger(__name__)
 
 
-@connection_error_handle()
 class JobResultServiceApi(BaseApi[JobResultsServiceStub]):
     def __init__(self, connection_details: ConnectionDetails, job_id: str):
         super().__init__(connection_details)
@@ -39,7 +37,7 @@ class JobResultServiceApi(BaseApi[JobResultsServiceStub]):
 
     def get_job_errors(self) -> List[GetJobErrorsResponseError]:
         request = GetJobErrorsRequest(job_id=self._id)
-        response = run_async(self._stub.get_job_errors(request, timeout=self._timeout))
+        response = self._run(self._stub.get_job_errors(request, timeout=self._timeout))
         return response.errors
 
     async def get_job_named_result(
@@ -48,24 +46,24 @@ class JobResultServiceApi(BaseApi[JobResultsServiceStub]):
         request = GetJobNamedResultRequest(
             job_id=self._id, output_name=output_name, long_offset=long_offset, limit=limit
         )
-        response = self._stub.get_job_named_result(request, timeout=self._timeout)
+        response = self._run_async_iterator(self._stub.get_job_named_result, request, timeout=self._timeout)
         async for result in response:
             yield JobNamedResult(data=result.data, count_of_items=result.count_of_items)
 
     def get_job_state(self) -> GetJobStateResponse:
         request = GetJobStateRequest(job_id=self._id)
-        response = run_async(self._stub.get_job_state(request, timeout=self._timeout))
+        response = self._run(self._stub.get_job_state(request, timeout=self._timeout))
         return response
 
     def get_named_header(self, output_name: str, flat_struct: bool) -> GetJobNamedResultHeaderResponse:
         request = GetJobNamedResultHeaderRequest(job_id=self._id, output_name=output_name, flat_format=flat_struct)
-        response = run_async(self._stub.get_job_named_result_header(request, timeout=self._timeout))
+        response = self._run(self._stub.get_job_named_result_header(request, timeout=self._timeout))
         return response
 
     def get_program_metadata(self) -> Tuple[List[StreamMetadataError], Dict[str, StreamMetadata]]:
         request = GetProgramMetadataRequest(job_id=self._id)
 
-        response = run_async(self._stub.get_program_metadata(request, timeout=self._timeout))
+        response = self._run(self._stub.get_program_metadata(request, timeout=self._timeout))
 
         if response.success:
             metadata_errors = [
@@ -79,5 +77,5 @@ class JobResultServiceApi(BaseApi[JobResultsServiceStub]):
 
     def get_job_result_schema(self) -> GetJobResultSchemaResponse:
         request = GetJobResultSchemaRequest(job_id=self._id)
-        response = run_async(self._stub.get_job_result_schema(request, timeout=self._timeout))
+        response = self._run(self._stub.get_job_result_schema(request, timeout=self._timeout))
         return response

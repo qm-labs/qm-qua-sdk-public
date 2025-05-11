@@ -19,7 +19,7 @@ from qm.serialization.qua_node_visitor import QuaNodeVisitor
 from qm.utils.list_compression_utils import Chunk, split_list_to_chunks
 from qm.serialization.qua_serializing_visitor import QuaSerializingVisitor
 from qm.grpc.qua import QuaProgram, QuaResultAnalysis, QuaProgramCompilerOptions
-from qm.exceptions import ConfigValidationException, ConfigSerializationException
+from qm.exceptions import ConfigValidationException, ConfigSerializationException, CapabilitiesNotInitializedError
 
 SERIALIZATION_VALIDATION_ERROR = "SERIALIZATION VALIDATION ERROR"
 
@@ -64,7 +64,7 @@ def generate_qua_script(prog: Program, config: Optional[DictQuaConfig] = None) -
             proto_config = load_config(config)
         except (ConfigValidationException, ValidationError) as e:
             raise RuntimeError("Can not generate script - bad config") from e
-        except AttributeError:
+        except CapabilitiesNotInitializedError:
             logger.warning("Could not generate a loaded config. Maybe there is no `QuantumMachinesManager` instance?")
 
     proto_prog = prog.qua_program

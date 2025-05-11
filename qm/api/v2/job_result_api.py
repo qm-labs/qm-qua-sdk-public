@@ -7,7 +7,6 @@ from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.exceptions import DataFetchingError
 from qm.api.models.jobs import JobNamedResult
 from qm.api.models.server_details import ConnectionDetails
-from qm.api.base_api import connection_error_handle_decorator
 from qm.StreamMetadata import StreamMetadata, StreamMetadataError, _get_stream_metadata_dict_from_proto_resp
 from qm.grpc.v2 import (
     JobServiceStub,
@@ -93,14 +92,13 @@ class JobResultApi(BaseApiV2[JobServiceStub]):
     def id(self) -> str:
         return self._id
 
-    @connection_error_handle_decorator
     async def get_job_named_result(
         self, output_name: str, long_offset: int, limit: int
     ) -> AsyncIterator[JobNamedResult]:
         request = GetNamedResultRequest(job_id=self._id, output_name=output_name, long_offset=long_offset, limit=limit)
         if self._supports_chunk_streaming:
             accumulated_bytes = b""
-            async for response in self._stub.get_named_result(request, timeout=self._timeout):
+            async for response in self._run_async_iterator(self._stub.get_named_result, request, timeout=self._timeout):
                 _, response_val = betterproto.which_one_of(response, "response_oneof")
                 if isinstance(response_val, GetNamedResultResponseGetNamedResultResponseError):
                     raise DataFetchingError(f"{response_val.details}")

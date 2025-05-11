@@ -4,7 +4,6 @@ from typing import Type, Tuple, Union, AsyncIterator
 from qm.simulate import interface
 from qm.api.base_api import BaseApi
 from qm.grpc.qua_config import QuaConfig
-from qm.utils.async_utils import run_async
 from qm.program import Program, load_config
 from qm.utils.protobuf_utils import LOG_LEVEL_MAP
 from qm.simulate.interface import SimulationConfig
@@ -130,7 +129,7 @@ class SimulationApi(BaseApi[FrontendStub]):
         request = create_simulation_request(config, program, simulate, compiler_options)
         logger.info("Simulating program")
 
-        response = run_async(self._stub.simulate(request, timeout=self._timeout))
+        response = self._run(self._stub.simulate(request, timeout=self._timeout))
 
         messages = [(LOG_LEVEL_MAP[msg.level], msg.message) for msg in response.messages]
 
@@ -154,7 +153,7 @@ class SimulationApi(BaseApi[FrontendStub]):
 
     def get_simulated_quantum_state(self, job_id: str) -> DensityMatrix:
         request = GetSimulatedQuantumStateRequest(job_id=job_id)
-        response = run_async(self._stub.get_simulated_quantum_state(request, timeout=self._timeout))
+        response = self._run(self._stub.get_simulated_quantum_state(request, timeout=self._timeout))
 
         if response.ok:
             return response.state
@@ -170,4 +169,4 @@ class SimulationApi(BaseApi[FrontendStub]):
             include_digital=include_digital,
             include_all_connections=True,  # TODO: Check whether it should appear
         )
-        return self._stub.pull_simulator_samples(request)
+        return self._run_async_iterator(self._stub.pull_simulator_samples, request)

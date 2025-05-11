@@ -1,20 +1,18 @@
-import json
 import math
 import time
 import asyncio
 import logging
-import functools
+import contextlib
 from abc import ABCMeta, abstractmethod
-from typing_extensions import ParamSpec
-from typing import Type, Generic, TypeVar, Callable, Optional, cast
+from typing import Any, Type, Generic, TypeVar, Callable, Optional, Coroutine, Generator, AsyncIterator
 
+import betterproto
 import grpclib.exceptions
 from grpclib import Status
 from grpclib.client import Channel
-from grpclib.config import Configuration
+from grpclib.metadata import Deadline
 from grpclib.exceptions import StreamTerminatedError
-from betterproto.grpc.grpclib_client import ServiceStub
-from grpclib.events import SendMessage, SendRequest, RecvInitialMetadata, listen
+from betterproto.grpc.grpclib_client import ServiceStub, MetadataLike
 
 from qm.utils.async_utils import run_async
 from qm.utils.general_utils import is_debug
@@ -22,9 +20,6 @@ from qm.api.models.server_details import ConnectionDetails
 from qm.exceptions import QMTimeoutError, QMConnectionError
 
 logger = logging.getLogger(__name__)
-
-Ret = TypeVar("Ret")
-P = ParamSpec("P")
 
 
 class GatewayNotImplementedError(NotImplementedError):
@@ -41,81 +36,99 @@ def _check_stream_terminated_is_timeout(func_start_time: float, func_timeout: fl
     """
     func_end_time = time.time()
     func_runtime = func_end_time - func_start_time
-    # Check if the function's runtime is within 5% of the specified timeout
-    return math.isclose(func_runtime, func_timeout, rel_tol=0.05)
+    # Check if the function's runtime is within 10% of the specified timeout
+    return math.isclose(func_runtime, func_timeout, rel_tol=0.1)
 
 
-def connection_error_handle_decorator(func: Callable[P, Ret]) -> Callable[P, Ret]:
-    @functools.wraps(func)
-    def wrapped(*args: P.args, **kwargs: P.kwargs) -> Ret:
-        func_start_time = time.time()
-        try:
-            return func(*args, **kwargs)
-        except grpclib.exceptions.GRPCError as e:
-            if is_debug():
-                logger.exception("Encountered connection error from QOP")
-            if e.status == Status.UNIMPLEMENTED:
-                raise GatewayNotImplementedError(
-                    f"Encountered connection error from QOP: details: {e.message}, status: {e.status}"
-                ) from e
-            raise QMConnectionError(
+@contextlib.contextmanager
+def _handle_connection_error(timeout: Optional[float] = None) -> Generator[None, None, None]:
+    func_start_time = time.time()
+    try:
+        yield
+    except grpclib.exceptions.GRPCError as e:
+        if is_debug():
+            logger.exception("Encountered connection error from QOP")
+        if e.status == Status.UNIMPLEMENTED:
+            raise GatewayNotImplementedError(
                 f"Encountered connection error from QOP: details: {e.message}, status: {e.status}"
             ) from e
-        except asyncio.TimeoutError as e:
-            if is_debug():
-                logger.exception(f"Timeout reached while running '{func.__name__}'")
-            raise QMTimeoutError(f"Timeout reached while running '{func.__name__}'") from e
-        except StreamTerminatedError as e:
-            if is_debug():
-                logger.exception(f"Stream terminated while running '{func.__name__}'")
-            if "timeout" in kwargs:
-                if _check_stream_terminated_is_timeout(func_start_time, cast(float, kwargs["timeout"])):
-                    raise QMTimeoutError(
-                        f"Stream terminated, most likely due to a timeout while running '{func.__name__}'"
-                    ) from e
-            raise e
+        raise QMConnectionError(
+            f"Encountered connection error from QOP: details: {e.message}, status: {e.status}"
+        ) from e
+    except asyncio.TimeoutError as e:
+        if is_debug():
+            logger.exception("Timeout reached")
+        raise QMTimeoutError("Timeout reached") from e
+    except StreamTerminatedError as e:
+        if is_debug():
+            logger.exception("Stream terminated")
 
-    return wrapped
+        if timeout is not None:
+            if _check_stream_terminated_is_timeout(func_start_time, timeout):
+                raise QMTimeoutError("Stream terminated, most likely due to a timeout") from e
+        raise e
 
 
 T = TypeVar("T")
 StubType = TypeVar("StubType", bound=ServiceStub)
-
-
-def connection_error_handle() -> Callable[[Type[T]], Type[T]]:
-    def decorate(cls: Type[T]) -> Type[T]:
-        for attr in cls.__dict__:
-            if callable(getattr(cls, attr)):
-                setattr(cls, attr, connection_error_handle_decorator(getattr(cls, attr)))
-        return cls
-
-    return decorate
-
-
-async def create_channel(connection_details: ConnectionDetails) -> Channel:
-    return Channel(
-        host=connection_details.host,
-        port=connection_details.port,
-        ssl=connection_details.ssl_context,
-        config=Configuration(
-            http2_connection_window_size=connection_details.max_message_size,
-            http2_stream_window_size=connection_details.max_message_size,
-        ),
-    )
+RequestMessageType = TypeVar("RequestMessageType", bound=betterproto.Message)
+ResponseMessageType = TypeVar("ResponseMessageType", bound=betterproto.Message)
 
 
 class BaseApi(Generic[StubType], metaclass=ABCMeta):
     def __init__(self, connection_details: ConnectionDetails):
         self._connection_details = connection_details
 
-        self._channel = run_async(create_channel(self._connection_details))
+        self._channel = self._connection_details.channel
         self._stub: StubType = self._stub_class(self._channel)
 
-        if self._connection_details.debug_data:
-            self._create_debug_data_event()
-
-        self._create_add_headers_event()
         self._timeout: Optional[float] = self._connection_details.timeout
+
+    def _run(
+        self, coroutine: Coroutine[Any, Any, ResponseMessageType], timeout: Optional[float] = None
+    ) -> ResponseMessageType:
+        """
+        Run a coroutine (primarily from the self._stub functions) and handle connection errors.
+
+        Args:
+            coroutine: Any coroutine function from the `self._stub` class
+            timeout: A duplicate of the timeout parameter provided to the `self._stub` function. If the default
+            `self._timeout` is used, this parameter can be left empty.
+
+        Returns:
+            The response message from the coroutine
+        """
+        if timeout is None:
+            timeout = self._timeout
+
+        with _handle_connection_error(timeout):
+            return run_async(coroutine)
+
+    async def _run_async_iterator(
+        self,
+        stub_func: Callable[[Any], AsyncIterator[ResponseMessageType]],
+        # The parameters are typed as 'Any' because MyPy encounters issues when attempting to declare more specific types.
+        request: RequestMessageType,
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None,
+    ) -> AsyncIterator[ResponseMessageType]:
+        """
+        Run a function that returns an AsyncIterator (primarily from the self._stub functions), and handle connection errors.
+
+        Args:
+            stub_func: A function from the `self._stub` class that returns an AsyncIterator
+            request: The request message to be sent to the function
+            func_kwargs: Any additional keyword arguments to be passed to the function
+
+        Returns:
+            The AsyncIterator of response messages from the function
+        """
+
+        with _handle_connection_error(timeout):
+            async for response in stub_func(request, timeout=timeout, deadline=deadline, metadata=metadata):  # type: ignore[call-arg]
+                yield response
 
     @property
     def connection_details(self) -> ConnectionDetails:
@@ -126,47 +139,6 @@ class BaseApi(Generic[StubType], metaclass=ABCMeta):
     def _stub_class(self) -> Type[StubType]:
         pass
 
-    def _create_debug_data_event(self) -> None:
-        async def intercept_response(event: RecvInitialMetadata) -> None:
-            assert self._connection_details.debug_data is not None
-
-            metadata = event.metadata
-            logger.debug(f"Collected response metadata: {json.dumps(dict(metadata), indent=4)}")
-            self._connection_details.debug_data.append(metadata)
-
-        async def send_request_debug(event: SendRequest) -> None:
-            logger.debug("-----------request start-----------")
-            logger.debug("   ---    request headers    ---   ")
-            logger.debug(f"method:       {event.method_name}")
-            logger.debug(f"metadata:     {json.dumps(dict(event.metadata), indent=4)}")
-            logger.debug(f"content type: {event.content_type}")
-            if event.deadline:
-                deadline = event.deadline.time_remaining()
-            else:
-                deadline = None
-            logger.debug(f"deadline:     {deadline}")
-
-        async def send_message_debug(event: SendMessage) -> None:
-            logger.debug("   ---    request message    ---   ")
-            try:
-                logger.debug(f"message:      {event.message.to_json(4)}")
-            except TypeError:
-                pass
-            logger.debug("------------end request------------")
-
-        listen(self._channel, RecvInitialMetadata, intercept_response)
-        listen(self._channel, SendRequest, send_request_debug)
-        listen(self._channel, SendMessage, send_message_debug)
-
-    def _create_add_headers_event(self) -> None:
-        async def add_headers(event: SendRequest) -> None:
-            event.metadata.update(self._connection_details.headers)
-
-        listen(self._channel, SendRequest, add_headers)
-
     @property
     def channel(self) -> Channel:
         return self._channel
-
-    def __del__(self) -> None:
-        self.channel.close()

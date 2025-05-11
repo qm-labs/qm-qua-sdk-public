@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import warnings
 from dataclasses import dataclass
@@ -36,7 +35,6 @@ from qm.api.models.server_details import ConnectionDetails
 from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.api.v2.job_api.job_elements_db import JobElementsDB
 from qm.utils.general_utils import create_input_stream_name
-from qm.api.base_api import connection_error_handle_decorator
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.exceptions import QmValueError, QMTimeoutError, FunctionInputError
 from qm.grpc.job_manager import IntStreamData, BoolStreamData, FixedStreamData
@@ -284,7 +282,6 @@ class JobApi(JobGenericApi):
         """
         return self.get_status() == "Running"
 
-    @connection_error_handle_decorator
     def wait_until(self, state: Union[JobStatus, Collection[JobStatus]], timeout: float) -> None:
         """
         Waits until a specific state is reached. If the job is already passed the given state, the function will
@@ -302,12 +299,12 @@ class JobApi(JobGenericApi):
             state = {state}
         try:
             run_async(self._wait_until(state, timeout))
-        except asyncio.exceptions.TimeoutError:
-            raise QMTimeoutError(f"Job {self.id} did not reach any state of {state} within {timeout} seconds")
+        except QMTimeoutError as e:
+            raise QMTimeoutError(f"Job {self.id} did not reach any state of {state} within {timeout} seconds") from e
 
     async def _wait_until(self, states: Collection[JobStatus], timeout: float) -> None:
         request = JobServiceGetJobStatusRequest(job_id=self._id)
-        async for status in self._stub.get_job_status_updates(request, timeout=timeout):
+        async for status in self._run_async_iterator(self._stub.get_job_status_updates, request, timeout=timeout):
             status_str = JOB_STATUS_MAPPING[status.success.status]
             if status_str in states:
                 logger.debug(f"Job {self.id} reached state {status_str}")

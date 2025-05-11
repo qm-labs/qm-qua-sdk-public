@@ -81,7 +81,9 @@ SERVER_TO_QOP_VERSION_MAP = {
     "3.0-beta-78b5e00": "3.2.0",
     "3.0-beta-b43e229": "3.2.2",
     "3.0-beta-ba2d179": "3.2.3",
+    "3.0-beta-eddf92b": "3.2.4",
     "3.0-beta-a3d43d5": "3.3.0",
+    "3.0-beta-f47a556": "3.4.0",
 }
 
 
@@ -116,7 +118,7 @@ class QuantumMachinesManager:
             host (string): Host where to find the QM orchestrator. If ``None``, local settings are used.
             port: Port where to find the QM orchestrator. If None, local settings are used.
             cluster_name (string): The name of the cluster, requires redirection between devices.
-            timeout (float): The timeout, in seconds, for detecting the qmm. Default is 60.
+            timeout (float): The timeout, in seconds, for detecting the qmm and most other gateway API calls. Default is 60.
             log_level (string): The logging level for the connection instance. Defaults to `INFO`. Please check `logging` for available options.
             octave (QmOctaveConfig): The configuration for the Octave devices. Deprecated from QOP 2.4.0.
             octave_calibration_db_path (PathLike): The path for storing the Octave's calibration database. It can also be a calibration database which is an instance of `AbstractCalibrationDB`.
