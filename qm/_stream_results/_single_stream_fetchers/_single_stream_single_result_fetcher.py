@@ -4,19 +4,22 @@ from typing import Union, Optional, cast
 import numpy.typing
 
 from qm.exceptions import QmInvalidSchemaError
-from qm.results.base_streaming_result_fetcher import BaseStreamingResultFetcher
+from qm._stream_results._single_stream_fetchers._base_single_stream_fetcher import (
+    VERY_LONG_TIME,
+    BaseSingleStreamFetcher,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class SingleStreamingResultFetcher(BaseStreamingResultFetcher):
+class SingleStreamSingleResultFetcher(BaseSingleStreamFetcher):
     """A handle to a result of a pipeline terminating with ``save``"""
 
     def _validate_schema(self) -> None:
         if not self._schema.is_single:
             raise QmInvalidSchemaError("expecting a single-result schema")
 
-    def wait_for_values(self, count: int = 1, timeout: float = float("inf")) -> None:
+    def wait_for_values(self, count: int = 1, timeout: float = VERY_LONG_TIME) -> None:
         if count != 1:
             raise RuntimeError("single result can wait only for a single value")
         super().wait_for_values(1, timeout)
@@ -66,19 +69,17 @@ class SingleStreamingResultFetcher(BaseStreamingResultFetcher):
         if (isinstance(item, int) and item != 0) or isinstance(item, slice):
             logger.warning("Fetching single result will always return the single value")
         value = self.strict_fetch(0, check_for_errors=check_for_errors, flat_struct=flat_struct)
+        if len(value) == 0:
+            logger.warning("Nothing to fetch: no results were found. Please wait until the results are ready.")
+            return None
         if flat_struct:
-            if len(value) == 0:
-                logger.warning("Nothing to fetch: no results were found. Please wait until the results are ready.")
-                return None
-            elif len(value) == 1:
-                return cast(numpy.typing.NDArray[numpy.generic], value[0])
-            else:
-                return value
+            data = value
         else:
-            if len(value) == 0:
-                logger.warning("Nothing to fetch: no results were found. Please wait until the results are ready.")
-                return None
-            elif len(value[0]) == 1:
-                return cast(numpy.typing.NDArray[numpy.generic], value[0][0])
-            else:
-                return cast(numpy.typing.NDArray[numpy.generic], value[0])
+            data = value[0]
+
+        if len(data) == 1:
+            to_return = data[0]
+        else:
+            to_return = data
+
+        return cast(numpy.typing.NDArray[numpy.generic], to_return)

@@ -5,7 +5,6 @@ from typing import List, Optional
 import betterproto
 
 from qm.type_hinting import Value
-from qm.persistence import BaseStore
 from qm.exceptions import QmQuaException
 from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
@@ -27,13 +26,11 @@ class QmBaseJob:
         machine_id: str,
         frontend_api: FrontendApi,
         capabilities: ServerCapabilities,
-        store: BaseStore,
     ):
         self._id = job_id
         self._machine_id = machine_id
         self._frontend = frontend_api
         self._capabilities = capabilities
-        self._store = store
 
         self._job_manager = create_job_manager_from_api(frontend_api)
 
@@ -110,7 +107,7 @@ class QmBaseJob:
         The data is then ready to be read by the program using the advance
         input stream QUA statement.
 
-        Multiple data entries can be inserted before the data is read by the program.
+        Multiple data entries can be inserted before the data is read by the program through successive calls of this method (one for each entry).
 
         See [Input streams](../Guides/features.md#input-streams) for more information.
 

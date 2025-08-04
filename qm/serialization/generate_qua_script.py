@@ -13,7 +13,7 @@ from qm.grpc import qua
 from qm.program import load_config
 from qm.grpc.qua_config import QuaConfig
 from qm.utils.protobuf_utils import Node
-from qm import Program, DictQuaConfig, version
+from qm import Program, FullQuaConfig, version
 from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.serialization.qua_node_visitor import QuaNodeVisitor
 from qm.utils.list_compression_utils import Chunk, split_list_to_chunks
@@ -51,10 +51,10 @@ def standardize_program_for_comparison(prog: QuaProgram) -> QuaProgram:
 def assert_programs_are_equal(prog1: QuaProgram, prog2: QuaProgram) -> None:
     prog1 = standardize_program_for_comparison(prog1)
     prog2 = standardize_program_for_comparison(prog2)
-    assert prog1 == prog2
+    assert prog1.to_dict() == prog2.to_dict()
 
 
-def generate_qua_script(prog: Program, config: Optional[DictQuaConfig] = None) -> str:
+def generate_qua_script(prog: Program, config: Optional[FullQuaConfig] = None) -> str:
     if prog.is_in_scope():
         raise RuntimeError("Can not generate script inside the qua program scope")
 
@@ -72,7 +72,7 @@ def generate_qua_script(prog: Program, config: Optional[DictQuaConfig] = None) -
 
 
 def _generate_qua_script_pb(
-    proto_prog: QuaProgram, proto_config: Optional[QuaConfig], original_config: Optional[DictQuaConfig]
+    proto_prog: QuaProgram, proto_config: Optional[QuaConfig], original_config: Optional[FullQuaConfig]
 ) -> str:
     extra_info = ""
     serialized_program = ""
@@ -120,9 +120,14 @@ loaded_config = {pretty_proto_config}
 
 def _validate_program(old_prog: QuaProgram, serialized_program: str) -> str:
     generated_mod = types.ModuleType("gen")
-    exec(serialized_program, generated_mod.__dict__)
-    new_prog = generated_mod.prog.qua_program
+    # In Python 3.8 and 3.9, the tests fail with a KeyError because "gen" is missing.
+    if sys.version_info < (3, 10):
+        sys.modules["gen"] = generated_mod
 
+    exec(serialized_program, generated_mod.__dict__)
+    sys.modules.pop("gen", None)
+
+    new_prog = generated_mod.prog.qua_program
     try:
         assert_programs_are_equal(old_prog, new_prog)
         return ""

@@ -1,13 +1,12 @@
 import logging
-from typing import Type, Tuple, Union, AsyncIterator
+from typing import Type, Tuple, AsyncIterator
 
+from qm.program import Program
 from qm.simulate import interface
 from qm.api.base_api import BaseApi
 from qm.grpc.qua_config import QuaConfig
-from qm.program import Program, load_config
 from qm.utils.protobuf_utils import LOG_LEVEL_MAP
 from qm.simulate.interface import SimulationConfig
-from qm.type_hinting.config_types import DictQuaConfig
 from qm.api.models.server_details import ConnectionDetails
 from qm.exceptions import QMSimulationError, FailedToExecuteJobException
 from qm.api.models.compiler import CompilerOptionArguments, get_request_compiler_options
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_simulation_request(
-    config: Union[DictQuaConfig, QuaConfig],
+    config: QuaConfig,
     program: Program,
     simulate: SimulationConfig,
     compiler_options: CompilerOptionArguments,
@@ -39,11 +38,12 @@ def create_simulation_request(
         raise Exception("program argument must be of type qm.program.Program")
 
     request = SimulationRequest()
-    msg_config = config if isinstance(config, QuaConfig) else load_config(config)
-    msg_config.v1_beta._unknown_fields = b""  # The above correction is for a return of an unknown fields from
-    # an old GW, that changes the flow of the config parsing (in the GW, and to a buggy one).
-    # Check a year from now (Feb/2024) if this is still necessary.
-    request.config = msg_config
+
+    if hasattr(config, "v1_beta"):
+        config.v1_beta._unknown_fields = b""  # This correction is for a return of unknown fields from
+        # an old GW, that changes the flow of the config parsing (in the GW, and to a buggy one).
+        # Check a year from now (This change was done on Feb/2024) if this is still necessary.
+    request.config = config
 
     if isinstance(simulate, SimulationConfig):
         request.simulate = ExecutionRequestSimulate(
@@ -118,7 +118,7 @@ class SimulationApi(BaseApi[FrontendStub]):
 
     def simulate(
         self,
-        config: Union[DictQuaConfig, QuaConfig],
+        config: QuaConfig,
         program: Program,
         simulate: SimulationConfig,
         compiler_options: CompilerOptionArguments,

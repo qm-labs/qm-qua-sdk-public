@@ -110,7 +110,7 @@ class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
         else:
             raise QmValueError(
                 f"Invalid type in data, type is '{set(type(el) for el in data)}', "
-                f"excepted types are bool | int | float"
+                f"accepted types are bool | int | float"
             )
 
         response = self._run(self._stub.insert_input_stream(request, timeout=self._timeout))

@@ -1,77 +1,56 @@
+from qm.qua._dsl.other import L
+from qm.qua._expressions import fixed
 from qm.exceptions import QmQuaException
-from qm.qua._stream_processing_utils import bins
-from qm.qua._dsl import _Variable as Variable  # noqa
-from qm.qua._expressions import IO1, IO2, fixed  # noqa
-from qm.qua.AnalogMeasureProcess import AnalogMeasureProcess
-from qm.qua.DigitalMeasureProcess import DigitalMeasureProcess
-from qm.qua.lib import Cast, Math, Util, Random, call_library_function, call_vectors_library_function  # noqa
-from qm.qua._dsl_specific_type_hints import (
-    ChirpType,
-    OneOrMore,
-    AmpValuesType,
-    PlayPulseType,
-    MessageVarType,
-    MeasurePulseType,
-    MessageExpressionType,
+from qm.qua._expressions import IO1, IO2
+from qm.qua._dsl.broadcast import broadcast
+from qm.qua._qua_struct import QuaArray, qua_struct
+from qm.qua._dsl.amplitude import AmpValuesType, amp
+from qm.qua._expressions import QuaVariable as Variable
+from qm.qua._dsl.pulses_utils import ramp_to_zero, load_waveform
+from qm.qua._dsl.measure.measure import MeasurePulseType, measure
+from qm.qua._dsl.play import ChirpType, PlayPulseType, play, ramp
+from qm.qua._dsl.wait import wait, align, pause, wait_for_trigger
+from qm.qua._dsl.stream_processing.stream_processing_utils import bins
+from qm.qua._dsl.measure.analog_measure_process import AnalogMeasureProcess
+from qm.qua._dsl.measure.digital_measure_process import DigitalMeasureProcess
+from qm.qua._dsl.stream_processing.map_functions.map_functions import FUNCTIONS
+from qm.qua._dsl.phase_reset import reset_phase, reset_if_phase, reset_global_phase
+from qm.qua._dsl._type_hints import OneOrMore, MessageVarType, MessageExpressionType
+from qm.qua._dsl.stream_processing.stream_processing import StreamType, declare_stream
+from qm.qua._dsl.calibration_params_update import set_dc_offset, update_frequency, update_correction
+from qm.qua.lib import Cast, Math, Util, Random, call_library_function, call_vectors_library_function
+from qm.qua._dsl.frame_rotation import reset_frame, frame_rotation, frame_rotation_2pi, fast_frame_rotation
+from qm.qua._dsl.measure.measure_process_factories import demod, counting, dual_demod, integration, time_tagging
+from qm.qua._dsl.external_stream import (
+    QuaStreamDirection,
+    declare_external_stream,
+    send_to_external_stream,
+    receive_from_external_stream,
 )
-from qm.qua._dsl import (  # noqa; exp,
-    FUNCTIONS,
-    L,
-    Counting,
-    StreamType,
-    TimeTagging,
+from qm.qua._dsl.variable_handling import (
     DeclarationType,
-    AccumulationMethod,
-    DualAccumulationMethod,
-    RealAccumulationMethod,
-    amp,
-    if_,
-    for_,
-    play,
-    ramp,
     save,
-    wait,
-    align,
-    case_,
-    demod,
-    elif_,
-    else_,
-    pause,
     assign,
-    while_,
     declare,
-    measure,
-    program,
-    switch_,
-    counting,
-    default_,
-)
-from qm.qua._dsl import (  # noqa; exp,
-    broadcast,
-    for_each_,
-    dual_demod,
-    integration,
-    reset_frame,
-    reset_phase,
-    ramp_to_zero,
-    time_tagging,
-    set_dc_offset,
-    declare_stream,
-    frame_rotation,
-    infinite_loop_,
-    port_condition,
-    reset_if_phase,
-    strict_timing_,
-    dual_integration,
-    update_frequency,
-    wait_for_trigger,
-    stream_processing,
-    update_correction,
-    frame_rotation_2pi,
-    reset_global_phase,
-    fast_frame_rotation,
+    declare_struct,
     advance_input_stream,
     declare_input_stream,
+)
+from qm.qua._dsl.scope_functions import (
+    if_,
+    for_,
+    case_,
+    elif_,
+    else_,
+    while_,
+    program,
+    switch_,
+    default_,
+    for_each_,
+    infinite_loop_,
+    port_condition,
+    strict_timing_,
+    stream_processing,
 )
 
 __all__ = [
@@ -104,7 +83,6 @@ __all__ = [
     "switch_",
     "declare",
     "default_",
-    "Counting",
     "counting",
     "Variable",
     "broadcast",
@@ -115,10 +93,10 @@ __all__ = [
     "dual_demod",
     "reset_frame",
     "reset_phase",
-    "TimeTagging",
     "integration",
     "ramp_to_zero",
     "time_tagging",
+    "load_waveform",
     "AmpValuesType",
     "PlayPulseType",
     "set_dc_offset",
@@ -134,12 +112,10 @@ __all__ = [
     "MeasurePulseType",
     "update_frequency",
     "wait_for_trigger",
-    "dual_integration",
     "update_correction",
     "stream_processing",
     "frame_rotation_2pi",
     "reset_global_phase",
-    "AccumulationMethod",
     "fast_frame_rotation",
     "AnalogMeasureProcess",
     "declare_input_stream",
@@ -147,7 +123,12 @@ __all__ = [
     "MessageExpressionType",
     "DigitalMeasureProcess",
     "call_library_function",
-    "RealAccumulationMethod",
-    "DualAccumulationMethod",
     "call_vectors_library_function",
+    "qua_struct",
+    "QuaArray",
+    "declare_struct",
+    "declare_external_stream",
+    "QuaStreamDirection",
+    "receive_from_external_stream",
+    "send_to_external_stream",
 ]

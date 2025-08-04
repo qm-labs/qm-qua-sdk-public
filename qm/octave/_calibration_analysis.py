@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Union, Optional, cast
+from typing import Dict, List, Tuple, Union, Mapping, Optional, cast
 
 import numpy as np
 
@@ -137,7 +137,7 @@ def _paraboloid2d_fit(x: Array, y: Array, z: Array) -> FitResult:
 
 def _get_reshaped_data(
     job: Union[RunningQmJob, JobApi], n_samples: int, offset: int, count: int, *names: str
-) -> Dict[str, Array]:
+) -> Mapping[str, Array]:
     data_first = offset * n_samples**2
     data_last = (offset + count) * n_samples**2
 
@@ -153,7 +153,7 @@ def _get_reshaped_data(
         result_handle = name_to_result_handle[name]
         raw_data[name] = result_handle.fetch(slice(data_first, data_last), flat_struct=True)
 
-    full_data = {}
+    full_data: Dict[str, Array] = {}
     for name, value in raw_data.items():
         full_data[name] = np.array(value).reshape((-1, n_samples, n_samples))
 
@@ -180,6 +180,7 @@ class LOAnalysisDebugData:
     i_scan: Array
     q_scan: Array
     lo: Array
+    signal: Array
     fit: FitResult
     corrections: CorrectionsDebugData
 
@@ -187,13 +188,14 @@ class LOAnalysisDebugData:
 def _get_and_analyze_lo_data(
     job: Union[RunningQmJob, JobApi], lo_res: int, offset: int, count: int
 ) -> Tuple[Array, Array, List[LOAnalysisDebugData]]:
-    data = _get_reshaped_data(job, lo_res, offset, count, Names.i_scan, Names.q_scan, Names.lo)
+    data = _get_reshaped_data(job, lo_res, offset, count, Names.i_scan, Names.q_scan, Names.lo, Names.signal)
 
     calibration_pulse_amp = 0.25  # TODO(nofek): take it from the right place
 
     i_scan_full = data[Names.i_scan] * calibration_pulse_amp
     q_scan_full = data[Names.q_scan] * calibration_pulse_amp
     lo_full = data[Names.lo]
+    signal = data[Names.signal]
 
     q0_shift = []
     i0_shift = []
@@ -236,9 +238,11 @@ def _get_and_analyze_lo_data(
         dc_phase = np.sin(dc_phase) / np.cos(2 * dc_phase)
         dc_gain = (1 + 2 * (dc_gain - 1)) ** 0.5 - 1
 
-        corrections = CorrectionsDebugData(dc_gain=dc_gain, dc_phase=dc_phase, dc_correction=dc_correction)
+        corrections = CorrectionsDebugData(dc_gain=float(dc_gain), dc_phase=dc_phase, dc_correction=dc_correction)
 
-        debug_data.append(LOAnalysisDebugData(i_scan=i_scan, q_scan=q_scan, lo=lo, fit=fit, corrections=corrections))
+        debug_data.append(
+            LOAnalysisDebugData(i_scan=i_scan, q_scan=q_scan, lo=lo, fit=fit, corrections=corrections, signal=signal)
+        )
 
     return np.array(i0_shift), np.array(q0_shift), debug_data
 

@@ -1,7 +1,6 @@
 import logging
 from typing import TYPE_CHECKING, Tuple, Generic, TypeVar, Optional
 
-from qm.persistence import BaseStore
 from qm.program.program import Program
 from qm.api.v2.job_api.job_api import JobApi
 from qm.jobs.pending_job import QmPendingJob
@@ -26,8 +25,7 @@ class QmNewApiNotImplementedError(NotImplementedError):
 
 
 class QmQueueBase(Generic[JobTypeVar]):
-    def __init__(self, store: BaseStore, capabilities: ServerCapabilities):
-        self._store = store
+    def __init__(self, capabilities: ServerCapabilities):
         self._capabilities = capabilities
 
     def _get_pending_jobs(

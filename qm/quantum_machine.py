@@ -7,7 +7,6 @@ import betterproto
 from qm.program import Program
 from qm.jobs.qm_job import QmJob
 from qm.octave import QmOctaveConfig
-from qm.persistence import BaseStore
 from qm.octave.qm_octave import QmOctave
 from qm.api.models.devices import Polarity
 from qm.api.frontend_api import FrontendApi
@@ -29,8 +28,9 @@ from qm.octave._calibration_names import COMMON_OCTAVE_PREFIX
 from qm.api.job_manager_api import create_job_manager_from_api
 from qm.api.models.capabilities import OPX_FEM_IDX, ServerCapabilities
 from qm.jobs.job_queue_with_deprecations import QmQueueWithDeprecations
+from qm.program._fill_defaults_in_config_v1 import fill_defaults_in_config_v1
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
-from qm.type_hinting.config_types import StandardPort, DictQuaConfig, PortReferenceType
+from qm.type_hinting.config_types import StandardPort, FullQuaConfig, PortReferenceType
 from qm.elements.element_inputs import MixInputs, SingleInput, static_set_mixer_correction
 from qm.type_hinting.general import Value, PathLike, NumpySupportedFloat, NumpySupportedValue, NumpySupportedNumber
 from qm.octave.octave_mixer_calibration import AutoCalibrationParams, OctaveMixerCalibration, MixerCalibrationResults
@@ -69,7 +69,6 @@ class QuantumMachine:
         pb_config: QuaConfig,
         frontend_api: FrontendApi,
         capabilities: ServerCapabilities,
-        store: BaseStore,
         octave_manager: OctaveManager,
         octave_config: Optional[QmOctaveConfig] = None,
     ):
@@ -82,13 +81,11 @@ class QuantumMachine:
         self._simulation_api = SimulationApi(self._frontend.connection_details)
         self._job_manager = create_job_manager_from_api(frontend_api)
 
-        self._store = store
         self._queue = QmQueue(
             config=self._config,
             quantum_machine_id=self._id,
             frontend_api=self._frontend,
             capabilities=self._capabilities,
-            store=self._store,
         )
 
         self._elements: ElementsDB = init_elements(
@@ -200,7 +197,6 @@ class QuantumMachine:
                 job_id=job_id,
                 frontend_api=self._frontend,
                 capabilities=self._capabilities,
-                store=self._store,
                 simulated_response=simulated_response_part,
             )
 
@@ -412,7 +408,9 @@ class QuantumMachine:
         if isinstance(specific_fem, QuaConfigMicrowaveFemDec):
             raise InvalidConfigError(f"Port num {port_number} is a MW-FEM port, has no offset")
         if port_number in specific_fem.analog_outputs:
-            return specific_fem.analog_outputs[port_number].offset
+            offset = specific_fem.analog_outputs[port_number].offset
+            assert offset is not None  # Mypy thinks it can be None, but it can't really (offset has a default value)
+            return offset
         else:
             raise InvalidConfigError(f"Port num {port_number} does not exist")
 
@@ -563,7 +561,9 @@ class QuantumMachine:
             raise InvalidConfigError(f"Port num {port.number} is a MW-FEM port, has no offset")
 
         if port.number in specific_fem.analog_inputs:
-            return specific_fem.analog_inputs[port.number].offset
+            offset = specific_fem.analog_inputs[port.number].offset
+            assert offset is not None  # Mypy thinks it can be None, but it can't really (offset has a default value)
+            return offset
         else:
             raise InvalidConfigError(f"Port num {port.number} does not exist")
 
@@ -789,12 +789,14 @@ class QuantumMachine:
         ]
 
     def _get_pb_config(self) -> QuaConfig:
-        return self._frontend.get_quantum_machine_config(self._id)
+        config = self._frontend.get_quantum_machine_config(self._id)
+        fill_defaults_in_config_v1(config)
+        return config
 
     def _get_config_as_object(self) -> QuaConfigQuaConfigV1:
         return self._get_pb_config().v1_beta
 
-    def get_config(self) -> DictQuaConfig:
+    def get_config(self) -> FullQuaConfig:
         """Gets the current config of the qm
 
         Returns:
@@ -827,7 +829,6 @@ class QuantumMachine:
                 machine_id=self._id,
                 frontend_api=self._frontend,
                 capabilities=self._capabilities,
-                store=self._store,
             )
             return pending_job.wait_for_execution(timeout=10.0)
         except JobCancelledError:
@@ -852,7 +853,6 @@ class QuantumMachine:
                 machine_id=self._id,
                 frontend_api=self._frontend,
                 capabilities=self._capabilities,
-                store=self._store,
             )
         if isinstance(status_inst, (JobExecutionStatusPending, JobExecutionStatusLoading)):
             return QmPendingJob(
@@ -860,7 +860,6 @@ class QuantumMachine:
                 machine_id=self._id,
                 frontend_api=self._frontend,
                 capabilities=self._capabilities,
-                store=self._store,
             )
 
         raise ErrorJobStateError(
@@ -896,7 +895,9 @@ class QuantumMachine:
         Returns:
             The threshold in volts
         """
-        return self._get_digital_input_port(port).threshold
+        threshold = self._get_digital_input_port(port).threshold
+        assert threshold is not None  # Mypy thinks it can be None, but it can't really (threshold is a required field)
+        return threshold
 
     def set_digital_input_deadtime(self, port: PortReferenceType, deadtime: int) -> None:
         """Sets the threshold of the digital input
@@ -917,7 +918,9 @@ class QuantumMachine:
         Returns:
             The deadtime in ns
         """
-        return self._get_digital_input_port(port).deadtime
+        deadtime = self._get_digital_input_port(port).deadtime
+        assert deadtime is not None  # Mypy thinks it can be None, but it can't really (deadtime is a required field)
+        return deadtime
 
     def set_digital_input_polarity(self, port: PortReferenceType, polarity: str) -> None:
         """Sets the polarity of the digital input
@@ -945,10 +948,11 @@ class QuantumMachine:
         Returns:
             The polarity
         """
-        return QuaConfigDigitalInputPortDecPolarity(self._get_digital_input_port(port).polarity).name  # type: ignore[return-value]
+        digital_input_port = self._get_digital_input_port(port)
+        return QuaConfigDigitalInputPortDecPolarity(digital_input_port.polarity).name  # type: ignore[return-value]
 
 
 def _standardize_port(port: PortReferenceType) -> StandardPort:
     if len(port) == 2:
         return port[0], OPX_FEM_IDX, port[1]
-    return cast(StandardPort, port)
+    return port

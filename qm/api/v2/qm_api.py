@@ -1,9 +1,24 @@
 import logging
-from typing import List, Type, Union, Literal, Mapping, Iterable, Optional, Sequence, TypedDict, cast, overload
+import contextlib
+from typing import (
+    List,
+    Type,
+    Union,
+    Literal,
+    Mapping,
+    TypeVar,
+    Iterable,
+    Optional,
+    Protocol,
+    Sequence,
+    Generator,
+    TypedDict,
+    cast,
+    overload,
+)
 
 from qm.utils import LOG_LEVEL_MAP
 from qm.octave import QmOctaveConfig
-from qm.persistence import BaseStore
 from qm.grpc.qua_config import QuaConfig
 from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.program import Program, load_config
@@ -12,26 +27,36 @@ from qm.elements_db import init_octave_elements
 from qm.grpc.frontend import SimulatedResponsePart
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
-from qm.type_hinting.config_types import DictQuaConfig
+from qm.grpc.qm_manager import ConfigValidationMessage
 from qm.api.models.server_details import ConnectionDetails
 from qm.program.ConfigBuilder import convert_msg_to_config
+from qm.utils.config_utils import get_controller_pb_config
 from qm.api.simulation_api import create_simulation_request
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.elements.up_converted_input import UpconvertedInputNewApi
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
+from qm.program._fill_defaults_in_config_v1 import fill_defaults_in_config_v1
 from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, transfer_statuses_to_enum
+from qm.type_hinting.config_types import FullQuaConfig, LogicalQuaConfig, ControllerQuaConfig
 from qm.octave.qm_octave import QmOctaveForNewApi, create_mixer_correction, create_dc_offset_octave_update
-from qm.exceptions import QopResponseError, CompilationException, JobNotFoundException, FailedToExecuteJobException
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params, get_request_compiler_options
 from qm.octave.octave_mixer_calibration import (
     AutoCalibrationParams,
     MixerCalibrationResults,
     NewApiOctaveMixerCalibration,
 )
+from qm.exceptions import (
+    QopResponseError,
+    CompilationException,
+    JobNotFoundException,
+    QopConfigValidationError,
+    OctaveUnsupportedOnUpdate,
+    FailedToExecuteJobException,
+    UnsupportedCapabilitiesError,
+)
 from qm.grpc.v2 import (
     QmServiceStub,
     JobsQueryParams,
-    SimulationError,
     RemoveJobsRequest,
     UpdateConfigRequest,
     QmServiceCloseRequest,
@@ -40,9 +65,8 @@ from qm.grpc.v2 import (
     QmServiceSimulateRequest,
     QmServiceGetConfigRequest,
     QmServiceAddToQueueRequest,
-    CompileResponseCompilationError,
+    ResetDigitalFiltersRequest,
     QmServiceAddCompiledToQueueRequest,
-    AddToQueueResponseAddToQueueResponseError,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,6 +77,60 @@ def _log_messages(messages: List[CompilerMessage]) -> None:
         logger.log(LOG_LEVEL_MAP[message.level], message.message)
 
 
+class ErrorResponseWithConfigValidationErrors(Protocol):
+    config_validation_errors: List[ConfigValidationMessage]
+    messages: List[CompilerMessage]
+
+
+def get_formatted_errors(error: ErrorResponseWithConfigValidationErrors) -> str:
+    # Check if the exception is due to config validation errors
+    if error.config_validation_errors:
+        formatted_errors = str(QopConfigValidationError(error.config_validation_errors))
+        logger.error(formatted_errors)
+        return formatted_errors
+    else:
+        # Check if the exception is due to some other reason
+        error_messages = []
+        for msg in error.messages:
+            lvl = LOG_LEVEL_MAP[msg.level]
+            if lvl == logging.ERROR:
+                error_messages.append(msg.message)
+            logger.log(lvl, msg.message)
+
+        return "\n".join(error_messages)
+
+
+E = TypeVar("E", bound=Exception)
+
+
+@contextlib.contextmanager
+def handle_qop_error(custom_error: E) -> Generator[None, None, None]:
+    """
+    A context manager that catches QopResponseError exceptions and enriches the `custom_error` with additional details
+    about the cause.
+    """
+    try:
+        yield
+    except QopResponseError as qop_error:
+        logger.error(str(custom_error))
+
+        try:
+            formatted_errors = get_formatted_errors(qop_error.error)
+            raise type(custom_error)(
+                f"{str(custom_error)}. See the following errors:\n{formatted_errors}"
+            ) from qop_error
+        # In case the error doesn't have the expected fields (defined in the  ErrorResponseWithConfigValidationErrors
+        # protocol)
+        except AttributeError:
+            raise custom_error
+
+
+@contextlib.contextmanager
+def handle_simulation_error() -> Generator[None, None, None]:
+    with handle_qop_error(FailedToExecuteJobException("Job failed. Failed to execute program")):
+        yield
+
+
 class QmApi(BaseApiV2[QmServiceStub]):
     SIMULATED_JOB_CLASS = SimulatedJobApi
 
@@ -60,7 +138,6 @@ class QmApi(BaseApiV2[QmServiceStub]):
         self,
         connection_details: ConnectionDetails,
         qm_id: str,
-        store: BaseStore,
         capabilities: ServerCapabilities,
         octave_config: Optional[QmOctaveConfig],
         octave_manager: OctaveManager,
@@ -70,11 +147,11 @@ class QmApi(BaseApiV2[QmServiceStub]):
         super().__init__(connection_details)
         self._caps = capabilities
         self._id = qm_id
-        self._store = store
         pb_config = pb_config or self._get_pb_config()
         self._elements = init_octave_elements(pb_config, octave_config)
         self._octave_manager = octave_manager
         self._octave = QmOctaveForNewApi(self, octave_manager)
+        self._octave_already_configured = get_controller_pb_config(pb_config).octaves != {}
 
     @property
     def octave(self) -> QmOctaveForNewApi:
@@ -89,16 +166,48 @@ class QmApi(BaseApiV2[QmServiceStub]):
     def _stub_class(self) -> Type[QmServiceStub]:
         return QmServiceStub
 
-    def update_config(self, config: DictQuaConfig) -> None:
-        """Updates the physical config in the QM.
-        The physical config includes the "controllers", "octaves" & "mixers" sections.
+    def _convert_config_param_to_pb(
+        self, config: Optional[Union[FullQuaConfig, LogicalQuaConfig]], function_name: str
+    ) -> Optional[QuaConfig]:
+        """
+        Validates the config_v2 capability and converts the config to proto format.
+        """
+        if config:
+            self._validate_capability_for_config_param(function_name)
+            return self._load_config_with_exception_handling(config, function_name)
+        return None
+
+    def _validate_capability_for_config_param(self, function_name: str) -> None:
+        """
+        Validates that there is a config_v2 capability, since only from config_v2 (QOP 3.5) it is possible to pass a
+        config to the api functions (which use this function for validation).
+        """
+        if not self._caps.supports(QopCaps.config_v2):
+            raise UnsupportedCapabilitiesError(
+                f"Passing a config to qm.{function_name}() is supported from QOP {QopCaps.config_v2.from_qop_version} and above."
+            )
+
+    def _load_config_with_exception_handling(
+        self, config: Union[FullQuaConfig, ControllerQuaConfig, LogicalQuaConfig], function_name: str
+    ) -> QuaConfig:
+        try:
+            return load_config(config, init_mode=False, octave_already_configured=self._octave_already_configured)
+        except OctaveUnsupportedOnUpdate as e:
+            raise OctaveUnsupportedOnUpdate(
+                "Changing the octave parameters in an open QM is currently not "
+                f"supported for qm.{function_name}. Please use the qm.octave functions instead."
+            ) from e
+
+    def update_config(self, config: ControllerQuaConfig) -> None:
+        """Updates the controller config in the `QuantumMachine`.
+        The controller config includes the "controllers", "octaves" & "mixers" sections.
         Updating the config will only update future jobs that were not executed or compiled yet.
         It will also update the idle values (e.g. DC Offset) which will be active between programs.
 
         Args:
             config: The physical config
         """
-        config_pb = load_config(config)
+        config_pb = self._load_config_with_exception_handling(config, self.update_config.__name__)
         request = UpdateConfigRequest(quantum_machine_id=self._id, config=config_pb)
         self._run(self._stub.update_config(request, timeout=self._timeout))
 
@@ -134,9 +243,11 @@ class QmApi(BaseApiV2[QmServiceStub]):
     def _get_pb_config(self) -> QuaConfig:
         request = QmServiceGetConfigRequest(quantum_machine_id=self._id)
         response = self._run(self._stub.get_config(request, timeout=self._timeout))
-        return response.config
+        config = response.config
+        fill_defaults_in_config_v1(config)
+        return config
 
-    def get_config(self) -> DictQuaConfig:
+    def get_config(self) -> FullQuaConfig:
         """Gets the current config of the qm
 
         Returns:
@@ -144,7 +255,13 @@ class QmApi(BaseApiV2[QmServiceStub]):
         """
         return convert_msg_to_config(self._get_pb_config())
 
-    def compile(self, program: Program, compiler_options: Optional[CompilerOptionArguments] = None) -> str:
+    def compile(
+        self,
+        program: Program,
+        compiler_options: Optional[CompilerOptionArguments] = None,
+        *,
+        config: Optional[Union[FullQuaConfig, LogicalQuaConfig]] = None,
+    ) -> str:
         """Compiles a QUA program to be executed later. The returned `program_id`
         can then be directly added to the queue. For a detailed explanation
         see [Precompile Jobs](../Guides/features.md#precompile-jobs).
@@ -152,6 +269,9 @@ class QmApi(BaseApiV2[QmServiceStub]):
         Args:
             program: A QUA program
             compiler_options: Optional arguments for compilation
+            config: -- Available from QOP 3.5 --
+                The configuration used with the program. The logical config is required if it was not supplied to the `QuantumMachine`.
+                A full configuration (containing both logical and controller configs), can be used to override the default `QuantumMachine` settings.
 
         Returns:
             a program_id str
@@ -165,21 +285,16 @@ class QmApi(BaseApiV2[QmServiceStub]):
         """
         self._caps.validate(program.used_capabilities)
 
+        pb_config = self._convert_config_param_to_pb(config, self.compile.__name__)
+
         if compiler_options is None:
             compiler_options = CompilerOptionArguments()
         program.qua_program.compiler_options = get_request_compiler_options(compiler_options)
-        request = QmServiceCompileRequest(quantum_machine_id=self._id, high_level_program=program.qua_program)
-        try:
+        request = QmServiceCompileRequest(
+            quantum_machine_id=self._id, high_level_program=program.qua_program, config=pb_config
+        )
+        with handle_qop_error(CompilationException("Compilation failed")):
             response = self._run(self._stub.compile(request, timeout=self._timeout))
-        except QopResponseError as e:
-            error: CompileResponseCompilationError = e.error
-            error_messages = []
-            logger.error("Compilation failed")
-            for msg in error.messages:
-                logger.error(msg)
-                error_messages.append(msg.message)
-            formatted_errors = "\n".join(error_messages)
-            raise CompilationException("Compilation failed, see the following errors:\n" + formatted_errors)
 
         _log_messages(response.messages)
         return response.program_id
@@ -187,38 +302,38 @@ class QmApi(BaseApiV2[QmServiceStub]):
     def _add_compiled(self, program_id: str) -> JobApi:
         request = QmServiceAddCompiledToQueueRequest(quantum_machine_id=self._id, program_id=program_id)
         response = self._run(self._stub.add_compiled_to_queue(request, timeout=self._timeout))
-        return self._get_job(response.job_id, store=self._store)
+        return self._get_job(response.job_id)
 
-    def _add_program(self, program: Program) -> JobApi:
-        request = QmServiceAddToQueueRequest(quantum_machine_id=self._id, high_level_program=program.qua_program)
-        try:
+    def _add_program(self, program: Program, config: Optional[QuaConfig]) -> JobApi:
+        request = QmServiceAddToQueueRequest(
+            quantum_machine_id=self._id, high_level_program=program.qua_program, config=config
+        )
+        with handle_qop_error(FailedToExecuteJobException("Failed to execute program")):
             response = self._run(self._stub.add_to_queue(request, timeout=self._timeout))
-        except QopResponseError as e:
-            error: AddToQueueResponseAddToQueueResponseError = e.error
-            error_messages = []
-            logger.error(f"Execution failed - {error.details}")
-            for msg in error.messages:
-                logger.error(msg)
-                error_messages.append(msg.message)
-            formatted_errors = "\n".join(error_messages)
 
-            _log_messages(e.error.messages)
-            raise FailedToExecuteJobException(
-                f"Failed to execute program. See the following errors:\n{formatted_errors}"
-            )
         _log_messages(response.messages)
-        return self._get_job(response.job_id, store=self._store)
+        return self._get_job(response.job_id)
 
     @overload
     def add_to_queue(self, program: str) -> JobApi:
         pass
 
     @overload
-    def add_to_queue(self, program: Program, *, compiler_options: Optional[CompilerOptionArguments] = None) -> JobApi:
+    def add_to_queue(
+        self,
+        program: Program,
+        *,
+        config: Optional[Union[FullQuaConfig, LogicalQuaConfig]] = None,
+        compiler_options: Optional[CompilerOptionArguments] = None,
+    ) -> JobApi:
         pass
 
     def add_to_queue(
-        self, program: Union[Program, str], *, compiler_options: Optional[CompilerOptionArguments] = None
+        self,
+        program: Union[Program, str],
+        *,
+        config: Optional[Union[FullQuaConfig, LogicalQuaConfig]] = None,
+        compiler_options: Optional[CompilerOptionArguments] = None,
     ) -> JobApi:
         """
         Adds a QmJob to the queue.
@@ -226,20 +341,29 @@ class QmApi(BaseApiV2[QmServiceStub]):
 
         Args:
             program: A QUA program or a compiled program id
+            config: -- Available from QOP 3.5 --
+                The configuration used with the program. The logical config is required if it was not supplied to the `QuantumMachine`.
+                A full configuration (containing both logical and controller configs), can be used to override the default `QuantumMachine` settings.
             compiler_options: Optional arguments for compilation
         Returns:
             A job object
         """
         logger.info("Adding program to queue.")
+
         if isinstance(program, str):
             if compiler_options:
-                logger.warning("Cannot add compiler options to a compiled program. Ignoring.")
+                raise ValueError("Cannot add compiler options to a compiled program.")
+            if config is not None:
+                raise ValueError("Cannot add a config to a compiled program.")
             return self._add_compiled(program)
         else:
+            self._caps.validate(program.used_capabilities)
+            pb_config = self._convert_config_param_to_pb(config, self.add_to_queue.__name__)
+
             if compiler_options is None:
                 compiler_options = CompilerOptionArguments()
             program.qua_program.compiler_options = get_request_compiler_options(compiler_options)
-            return self._add_program(program)
+            return self._add_program(program, pb_config)
 
     def get_job(self, job_id: str) -> JobApi:
         """
@@ -258,14 +382,14 @@ class QmApi(BaseApiV2[QmServiceStub]):
             if self._caps.supports(QopCaps.waveform_report_endpoint) and job_data.is_simulation:
                 return self._get_simulated_job(job_id)
 
-            return self._get_job(job_id, self._store)
+            return self._get_job(job_id)
 
-    def _get_job(self, job_id: str, store: BaseStore) -> JobApi:
-        return JobApi(self.connection_details, job_id, store, self._caps)
+    def _get_job(self, job_id: str) -> JobApi:
+        return JobApi(self.connection_details, job_id, self._caps)
 
     def _get_simulated_job(self, job_id: str, simulated: Union[SimulatedResponsePart, None] = None) -> SimulatedJobApi:
         return self.SIMULATED_JOB_CLASS(
-            self.connection_details, job_id, store=self._store, simulated_response=simulated, capabilities=self._caps
+            self.connection_details, job_id, simulated_response=simulated, capabilities=self._caps
         )
 
     def simulate(
@@ -274,6 +398,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
         simulate: SimulationConfig,
         compiler_options: Optional[CompilerOptionArguments] = None,
         *,
+        config: Optional[Union[FullQuaConfig, LogicalQuaConfig]] = None,
         strict: Optional[bool] = None,
         flags: Optional[List[str]] = None,
     ) -> SimulatedJobApi:
@@ -288,6 +413,9 @@ class QmApi(BaseApiV2[QmServiceStub]):
             program: A QUA ``program()`` object to execute
             simulate: If given, will be simulated instead of executed.
             compiler_options: Optional arguments for compilation.
+            config: -- Available from QOP 3.5 --
+                The configuration used with the program. The logical config is required if it was not supplied to the `QuantumMachine`.
+                A full configuration (containing both logical and controller configs), can be used to override the default `QuantumMachine` settings.
             strict: This parameter is deprecated, please use `compiler_options`
             flags: This parameter is deprecated, please use `compiler_options`
         Returns:
@@ -296,6 +424,12 @@ class QmApi(BaseApiV2[QmServiceStub]):
         self._caps.validate(program.used_capabilities)
 
         standardized_compiler_options = standardize_compiler_params(compiler_options, strict, flags)
+        pb_config = self._convert_config_param_to_pb(config, self.simulate.__name__)
+
+        # We put self._get_pb_config() as the value for the config argument of create_simulation_request(), just
+        # because we had to fill in something so it would work. We are not going to use that value, since in the new
+        # request the config could be None. This is why when building the request we use the "pb_config" variable
+        # instead of the "standard_request.config".
         standard_request = create_simulation_request(
             self._get_pb_config(), program, simulate, standardized_compiler_options
         )
@@ -304,18 +438,24 @@ class QmApi(BaseApiV2[QmServiceStub]):
             high_level_program=standard_request.high_level_program,
             simulate=standard_request.simulate,
             controller_connections=standard_request.controller_connections,
+            config=pb_config,
         )
         logger.info("Simulating program.")
-        try:
+
+        with handle_simulation_error():
             response = self._run(self._stub.simulate(request, timeout=self._timeout))
-        except QopResponseError as e:
-            raise handle_simulation_error(e)
 
         _log_messages(response.messages)
 
         return self._get_simulated_job(response.job_id, response.simulated)
 
-    def execute(self, program: Program, *, compiler_options: Optional[CompilerOptionArguments] = None) -> JobApi:
+    def execute(
+        self,
+        program: Program,
+        config: Optional[Union[FullQuaConfig, LogicalQuaConfig]] = None,
+        *,
+        compiler_options: Optional[CompilerOptionArguments] = None,
+    ) -> JobApi:
         """Closes all running jobs in the QM, clears the queue, executes a program, wait for it to start,
         and returns a job object.
 
@@ -326,6 +466,9 @@ class QmApi(BaseApiV2[QmServiceStub]):
 
         Args:
             program: A QUA ``program()`` object to execute
+            config: -- Available from QOP 3.5 --
+                The configuration used with the program. The logical config is required if it was not supplied to the `QuantumMachine`.
+                A full configuration (containing both logical and controller configs), can be used to override the default `QuantumMachine` settings.
             compiler_options: Optional arguments for compilation.
         Returns:
             A ``QmJob`` object (see Job API).
@@ -427,10 +570,9 @@ class QmApi(BaseApiV2[QmServiceStub]):
         key = (inst_input.lo_frequency, cast(float, inst_input.gain))
         if key in res:
             qe_cal = res[key]
+            update: ControllerQuaConfig = {}
             if inst.intermediate_frequency in qe_cal.image:
                 update = create_dc_offset_octave_update(inst_input, i_offset=qe_cal.i0, q_offset=qe_cal.q0)
-            else:
-                update = {"version": 1}
             mixers = [
                 create_mixer_correction(if_freq, inst_input.lo_frequency, if_cal.fine.correction)
                 for if_freq, if_cal in qe_cal.image.items()
@@ -439,23 +581,22 @@ class QmApi(BaseApiV2[QmServiceStub]):
             self.update_config(update)
         return res
 
+    def reset_digital_filters(self) -> None:
+        """
+        Reset the digital filters' state, specifically to remove the “memory” of the high-pass filter.
+        See [High-Pass Compensation Filter](../Guides/output_filter.md#high-pass-compensation-filter)
+        for more information.
+        """
+        if not self._caps.supports(QopCaps.exponential_dc_gain_filter):
+            raise UnsupportedCapabilitiesError(
+                f"qm.reset_digital_filters() is supported from QOP {QopCaps.exponential_dc_gain_filter.from_qop_version} and above."
+            )
 
-def handle_simulation_error(e: QopResponseError[SimulationError]) -> FailedToExecuteJobException:
-    error = e.error
-    logger.error("Job failed. Failed to execute program.")
-
-    error_messages = []
-    for msg in error.messages:
-        lvl = LOG_LEVEL_MAP[msg.level]
-        if lvl == logging.ERROR:
-            error_messages.append(msg.message)
-        logger.log(lvl, msg.message)
-
-    formatted_errors = "\n".join(error_messages)
-
-    return FailedToExecuteJobException(
-        f"Job failed. Failed to execute program. see the following errors:\n{formatted_errors}"
-    )
+        self._run(
+            self._stub.reset_digital_filters(
+                ResetDigitalFiltersRequest(quantum_machine_id=self._id), timeout=self._timeout
+            )
+        )
 
 
 class NoRunningQmJob(Exception):

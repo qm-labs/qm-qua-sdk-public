@@ -5,9 +5,10 @@ from typing import Tuple
 from qm.jobs.base_job import QmBaseJob
 from qm.utils import deprecation_message
 from qm.grpc.general_messages import Matrix
-from qm.results import StreamingResultFetcher
 from qm.api.job_result_api import JobResultServiceApi
 from qm._report import ExecutionError, ExecutionReport
+
+from .._stream_results import StreamsManager
 
 
 class AcquiringStatus(Enum):
@@ -35,17 +36,14 @@ class RunningQmJob(QmBaseJob):
         return None
 
     @property
-    def result_handles(self) -> StreamingResultFetcher:
+    def result_handles(self) -> StreamsManager:
         """
 
         Returns:
             The handles that this job generated
         """
-        return StreamingResultFetcher(
-            self._id,
-            JobResultServiceApi(self._frontend.connection_details, self._id),
-            self._store,
-            self._capabilities,
+        return StreamsManager(
+            JobResultServiceApi(self._frontend.connection_details, self._id), self._capabilities, wait_until_func=None
         )
 
     def cancel(self) -> bool:
@@ -66,7 +64,7 @@ class RunningQmJob(QmBaseJob):
         return self._job_manager.halt(self._id)
 
     def resume(self) -> bool:
-        """Resumes a program that was halted using the [pause][qm.qua._dsl.pause] statement"""
+        """Resumes a program that was halted using the [pause][qm.qua.pause] statement"""
         return self._job_manager.resume(self._id)
 
     def is_paused(self) -> bool:

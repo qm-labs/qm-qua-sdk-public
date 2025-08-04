@@ -5,6 +5,7 @@ import betterproto
 from qm.api.frontend_api import FrontendApi
 from qm._octaves_container import OctavesContainer
 from qm.octave.octave_config import QmOctaveConfig
+from qm.utils.config_utils import get_logical_pb_config
 from qm.elements.element import Element, AllElements, NewApiUpconvertedElement
 from qm.elements.element_outputs import NoOutput, ElementOutput, DownconvertedOutput
 from qm.elements.element_inputs import (
@@ -53,7 +54,8 @@ def init_elements(
 ) -> ElementsDB:
     elements = {}
     _octave_container = OctavesContainer(pb_config, octave_config)
-    for name, element_config in pb_config.v1_beta.elements.items():
+    logical_config = get_logical_pb_config(pb_config)
+    for name, element_config in logical_config.elements.items():
         _, element_inputs = betterproto.which_one_of(element_config, "element_inputs_one_of")
         input_inst = _get_element_input(
             element_config, element_inputs, name, frontend_api, machine_id, _octave_container
@@ -183,7 +185,8 @@ class UpconvertedElementsDB(Dict[str, NewApiUpconvertedElement]):
 def init_octave_elements(pb_config: QuaConfig, octave_config: Optional[QmOctaveConfig]) -> UpconvertedElementsDB:
     elements = {}
     _octave_container = OctavesContainer(pb_config, octave_config)
-    for name, element_config in pb_config.v1_beta.elements.items():
+
+    for name, element_config in get_logical_pb_config(pb_config).elements.items():
         _, element_inputs = betterproto.which_one_of(element_config, "element_inputs_one_of")
         if isinstance(element_inputs, QuaConfigMixInputs):
             input_inst = _octave_container.create_new_api_upconverted_input(element_config, name)

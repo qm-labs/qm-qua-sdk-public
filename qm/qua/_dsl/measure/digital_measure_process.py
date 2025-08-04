@@ -3,7 +3,7 @@ from typing import Union, Optional, Sequence
 
 from qm.type_hinting import Number
 from qm.qua._expressions import QuaVariable, QuaArrayVariable
-from qm.qua.AnalogMeasureProcess import MeasureProcessAbstract, _add_target_len
+from qm.qua._dsl.measure.analog_measure_process import MeasureProcessAbstract, _add_target_len
 from qm.grpc.qua import (
     QuaProgramMeasureProcess,
     QuaProgramDigitalMeasureProcess,

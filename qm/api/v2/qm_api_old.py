@@ -1,11 +1,10 @@
 import json
 import logging
 import warnings
-from typing import List, Tuple, Union, Literal, Optional, Sequence, cast, overload
+from typing import Dict, List, Tuple, Union, Literal, Optional, Sequence, cast, overload
 
 from qm.api.v2.job_api import JobApi
 from qm.octave import QmOctaveConfig
-from qm.persistence import BaseStore
 from qm.program.program import Program
 from qm.utils import deprecation_message
 from qm.exceptions import FunctionInputError
@@ -16,13 +15,25 @@ from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.qm_api import QmApi, IoValue, NoRunningQmJob
 from qm.api.v2.job_api.job_api import JobApiWithDeprecations
 from qm.type_hinting import Value, Number, NumpySupportedValue
-from qm.type_hinting.config_types import FEM_IDX, DictQuaConfig
 from qm.type_hinting.general import PathLike, NumpySupportedFloat
 from qm.jobs.job_queue_with_deprecations import QmQueueWithDeprecations
-from qm.utils.config_utils import get_fem_config, element_has_mix_inputs
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApiWithDeprecations
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
-from qm.grpc.qua_config import QuaConfig, QuaConfigMicrowaveFemDec, QuaConfigAdcPortReference, QuaConfigDacPortReference
+from qm.type_hinting.config_types import FEM_IDX, FullQuaConfig, LogicalQuaConfig, ControllerQuaConfig
+from qm.utils.config_utils import (
+    get_fem_config,
+    get_logical_pb_config,
+    element_has_mix_inputs,
+    get_controller_pb_config,
+)
+from qm.grpc.qua_config import (
+    QuaConfig,
+    QuaConfigElementDec,
+    QuaConfigQuaConfigV1,
+    QuaConfigMicrowaveFemDec,
+    QuaConfigAdcPortReference,
+    QuaConfigDacPortReference,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +45,16 @@ class QmApiWithDeprecations(QmApi):
         self,
         connection_details: ConnectionDetails,
         qm_id: str,
-        store: BaseStore,
         capabilities: ServerCapabilities,
         octave_config: Optional[QmOctaveConfig],
         octave_manager: OctaveManager,
         pb_config: Optional[QuaConfig] = None,
     ):
-        super().__init__(connection_details, qm_id, store, capabilities, octave_config, octave_manager, pb_config)
-        self._queue = QmQueueWithDeprecations(store=store, api=self, capabilities=self._caps)
+        super().__init__(connection_details, qm_id, capabilities, octave_config, octave_manager, pb_config)
+        self._queue = QmQueueWithDeprecations(api=self, capabilities=self._caps)
 
-    def _get_job(self, job_id: str, store: BaseStore) -> JobApiWithDeprecations:
-        return JobApiWithDeprecations(self.connection_details, job_id, store, capabilities=self._caps)
+    def _get_job(self, job_id: str) -> JobApiWithDeprecations:
+        return JobApiWithDeprecations(self.connection_details, job_id, capabilities=self._caps)
 
     def get_job_by_id(self, job_id: str) -> JobApiWithDeprecations:
         """
@@ -96,7 +106,7 @@ class QmApiWithDeprecations(QmApi):
         super().close()
         return True
 
-    def execute(
+    def execute(  # type: ignore[override]
         self,
         program: Program,
         duration_limit: None = None,
@@ -105,6 +115,7 @@ class QmApiWithDeprecations(QmApi):
         dry_run: None = None,
         simulate: Optional[SimulationConfig] = None,
         *,
+        config: Optional[Union[FullQuaConfig, LogicalQuaConfig]] = None,
         compiler_options: Optional[CompilerOptionArguments] = None,
         strict: Optional[bool] = None,
         flags: Optional[List[str]] = None,
@@ -124,6 +135,9 @@ class QmApiWithDeprecations(QmApi):
             force_execution: This parameter is ignored and will be removed in future versions
             dry_run: This parameter is ignored and will be removed in future versions
             simulate: If given, will be simulated instead of executed.
+            config:  -- Available from QOP 3.5 --
+                The configuration used with the program. The logical config is required if it was not supplied to the `QuantumMachine`.
+                A full configuration (containing both logical and controller configs), can be used to override the default `QuantumMachine` settings.
             compiler_options: Optional arguments for compilation.
             strict: This parameter is deprecated, please use `compiler_options`
             flags: This parameter is deprecated, please use `compiler_options`
@@ -134,6 +148,9 @@ class QmApiWithDeprecations(QmApi):
             raise Exception("program argument must be of type qm.program.Program")
 
         self._caps.validate(program.used_capabilities)
+
+        if config:
+            self._validate_capability_for_config_param(self.execute.__name__)
 
         for x, name in [
             (duration_limit, "`duration_limit'"),
@@ -170,7 +187,7 @@ class QmApiWithDeprecations(QmApi):
             logger.info(f"Cancelling currently running job - {current_running_job.id}")
             current_running_job.cancel()
 
-        new_job_api = self.add_to_queue(program, compiler_options=compiler_options)
+        new_job_api = self.add_to_queue(program, config=config, compiler_options=compiler_options)
         new_job_api.wait_until({"Running"}, timeout=5 * 60)
         # The timeout here is just for the backwards compatibility behaviour.
         # See that in the father function there is no `wait_until`
@@ -195,8 +212,14 @@ class QmApiWithDeprecations(QmApi):
             DeprecationWarning,
             stacklevel=1,
         )
-        config = self._get_pb_config()
-        return tuple(config.v1_beta.control_devices) or tuple(config.v1_beta.controllers)
+        controller_config = get_controller_pb_config(self._get_pb_config())
+        # This if statement is not necessary, but helps mypy understand that we are trying to access the controllers
+        # attribute only if the controller_config is of type QuaConfigQuaConfigV1 (which still has the deprecated
+        # controllers attribute).
+        if isinstance(controller_config, QuaConfigQuaConfigV1):
+            return tuple(controller_config.control_devices) or tuple(controller_config.controllers)
+
+        return tuple(controller_config.control_devices)
 
     def set_mixer_correction(
         self,
@@ -245,8 +268,7 @@ class QmApiWithDeprecations(QmApi):
             DeprecationWarning,
             stacklevel=1,
         )
-        config: DictQuaConfig = {
-            "version": 1,
+        config: ControllerQuaConfig = {
             "mixers": {
                 mixer: [
                     {
@@ -260,8 +282,7 @@ class QmApiWithDeprecations(QmApi):
         self.update_config(config)
         job = self._get_running_job()
         if job is not None:
-            pb_config = self._get_pb_config()
-            for name, element_config in pb_config.v1_beta.elements.items():
+            for name, element_config in self._get_elements_pb_config().items():
                 if not element_has_mix_inputs(element_config):
                     continue
                 mixer_cond = element_config.mix_inputs.mixer == mixer
@@ -524,7 +545,10 @@ class QmApiWithDeprecations(QmApi):
         fem_config = get_fem_config(config, port)
         if isinstance(fem_config, QuaConfigMicrowaveFemDec):
             raise ValueError(f"Element {element} does not support dc offset.")
-        return fem_config.analog_inputs[port.number].offset
+
+        offset = fem_config.analog_inputs[port.number].offset
+        assert offset is not None  # Mypy thinks it can be None, but it can't really (offset has a default value)
+        return offset
 
     def get_digital_delay(self, element: str, digital_input: str) -> int:
         """Deprecated - This method is going to be moved to the job API, please use `job.get_output_digital_delay()`.
@@ -655,8 +679,7 @@ class QmApiWithDeprecations(QmApi):
             DeprecationWarning,
             stacklevel=1,
         )
-        config = self._get_pb_config()
-        tof = config.v1_beta.elements[element].time_of_flight
+        tof = self._get_elements_pb_config()[element].time_of_flight
         if tof is None:
             raise ValueError(f"Time of flight for element {element} is not set")
         return tof
@@ -686,8 +709,7 @@ class QmApiWithDeprecations(QmApi):
             DeprecationWarning,
             stacklevel=1,
         )
-        config = self._get_pb_config()
-        smearing = config.v1_beta.elements[element].smearing
+        smearing = self._get_elements_pb_config()[element].smearing
         if smearing is None:
             raise ValueError(f"Smearing for element {element} is not set")
         return smearing
@@ -966,7 +988,7 @@ class QmApiWithDeprecations(QmApi):
     def _get_running_job(self) -> Optional[JobApiWithDeprecations]:
         jobs = self.get_jobs(status=["Running"])
         if jobs:
-            return self._get_job(jobs[0].id, store=self._store)
+            return self._get_job(jobs[0].id)
         return None
 
     def _strict_get_running_job(self) -> JobApiWithDeprecations:
@@ -976,23 +998,25 @@ class QmApiWithDeprecations(QmApi):
         return job
 
     def _get_output_port_from_element(self, element_name: str, port_name: str) -> QuaConfigAdcPortReference:
-        element = self._get_pb_config().v1_beta.elements[element_name]
+        element = self._get_elements_pb_config()[element_name]
         return element.multiple_outputs.port_references[port_name]
 
     def _get_input_ports_from_mixed_input_element(
         self, element_name: str
     ) -> Tuple[QuaConfigDacPortReference, QuaConfigDacPortReference]:
-        element = self._get_pb_config().v1_beta.elements[element_name]
+        element = self._get_elements_pb_config()[element_name]
         return element.mix_inputs.i, element.mix_inputs.q
 
     def _get_input_port_from_single_input_element(self, element_name: str) -> QuaConfigDacPortReference:
-        element = self._get_pb_config().v1_beta.elements[element_name]
+        element = self._get_elements_pb_config()[element_name]
         return element.single_input.port
 
+    def _get_elements_pb_config(self) -> Dict[str, QuaConfigElementDec]:
+        return get_logical_pb_config(self._get_pb_config()).elements
+
     @staticmethod
-    def _create_config_for_input_dc_offset_setting(port: QuaConfigAdcPortReference, value: Number) -> DictQuaConfig:
+    def _create_config_for_input_dc_offset_setting(port: QuaConfigAdcPortReference, value: Number) -> FullQuaConfig:
         return {
-            "version": 1,
             "controllers": {
                 port.controller: {
                     "fems": {cast(FEM_IDX, port.fem): {"type": "LF", "analog_inputs": {port.number: {"offset": value}}}}
@@ -1001,9 +1025,8 @@ class QmApiWithDeprecations(QmApi):
         }
 
     @staticmethod
-    def _create_config_for_output_dc_offset_setting(port: QuaConfigDacPortReference, value: Number) -> DictQuaConfig:
+    def _create_config_for_output_dc_offset_setting(port: QuaConfigDacPortReference, value: Number) -> FullQuaConfig:
         return {
-            "version": 1,
             "controllers": {
                 port.controller: {
                     "fems": {

@@ -1,4 +1,4 @@
-from typing import Union
+from typing import TYPE_CHECKING, Union, Optional
 
 import betterproto
 
@@ -40,10 +40,14 @@ from qm.grpc.qua import (
     QuaProgramFunctionExpressionScalarOrVectorArgument,
 )
 
+if TYPE_CHECKING:
+    from qm.serialization.qua_serializing_visitor import QuaSerializingVisitor
+
 
 class ExpressionSerializingVisitor(QuaNodeVisitor):
-    def __init__(self) -> None:
+    def __init__(self, visitor: Optional["QuaSerializingVisitor"]) -> None:
         self._out = ""
+        self._visitor = visitor
         super().__init__()
 
     def _default_visit(self, node: Node) -> None:
@@ -52,7 +56,7 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
         super()._default_visit(node)
 
     def visit_qm_grpc_qua_QuaProgramLibFunctionExpression(self, node: QuaProgramLibFunctionExpression) -> None:
-        args = [ExpressionSerializingVisitor.serialize(arg) for arg in node.arguments]
+        args = [ExpressionSerializingVisitor(self._visitor).serialize(arg) for arg in node.arguments]
         if node.library_name == "random":
             seed = args.pop(0)
             self._out = f"Random({seed}).{node.function_name}({', '.join(args)})"
@@ -118,18 +122,24 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
     ) -> None:
         _, value = betterproto.which_one_of(node, "argument_oneof")
         if value is not None:
-            self._out = ExpressionSerializingVisitor.serialize(value)
+            self._out = ExpressionSerializingVisitor(self._visitor).serialize(value)
 
     def visit_qm_grpc_qua_QuaProgramVarRefExpression(self, node: QuaProgramVarRefExpression) -> None:
         var_ref = betterproto.which_one_of(node, "var_oneof")[1]
         self._out = node.name if isinstance(var_ref, str) else f"IO{var_ref}"
 
     def visit_qm_grpc_qua_QuaProgramArrayVarRefExpression(self, node: QuaProgramArrayVarRefExpression) -> None:
-        self._out = node.name
+        if self._visitor:
+            for struct in self._visitor.structs:
+                if node.name in struct.variables():
+                    self._out = f"{struct.variable_name}.{node.name}"
+
+        if self._out == "":
+            self._out = node.name
 
     def visit_qm_grpc_qua_QuaProgramArrayCellRefExpression(self, node: QuaProgramArrayCellRefExpression) -> None:
-        var = ExpressionSerializingVisitor.serialize(node.array_var)
-        index = ExpressionSerializingVisitor.serialize(node.index)
+        var = ExpressionSerializingVisitor(self._visitor).serialize(node.array_var)
+        index = ExpressionSerializingVisitor(self._visitor).serialize(node.index)
         self._out = f"{var}[{index}]"
 
     def visit_qm_grpc_qua_QuaProgramArrayLengthExpression(self, node: QuaProgramArrayLengthExpression) -> None:
@@ -140,7 +150,7 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
 
     def visit_qm_grpc_qua_QuaProgramBroadcastExpression(self, node: QuaProgramBroadcastExpression) -> None:
         value = node.value
-        serialized_value = ExpressionSerializingVisitor.serialize(value)
+        serialized_value = ExpressionSerializingVisitor(self._visitor).serialize(value)
         self._out = f"broadcast.{serialized_value}"
 
     def visit_qm_grpc_qua_QuaProgramFunctionExpression(self, node: QuaProgramFunctionExpression) -> None:
@@ -153,7 +163,9 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
 
         # For mypy
         assert function_expression is not None
-        function_arguments = [ExpressionSerializingVisitor.serialize(arg) for arg in function_expression.values]
+        function_arguments = [
+            ExpressionSerializingVisitor(self._visitor).serialize(arg) for arg in function_expression.values
+        ]
 
         self._out = f"{function_name}({', '.join(function_arguments)})"
 
@@ -162,7 +174,7 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
     ) -> None:
         _, value = betterproto.which_one_of(node, "argument_oneof")
         if value is not None:
-            self._out = ExpressionSerializingVisitor.serialize(value)
+            self._out = ExpressionSerializingVisitor(self._visitor).serialize(value)
 
     def visit_qm_grpc_qua_QuaProgramAssignmentStatementTarget(self, node: QuaProgramAssignmentStatementTarget) -> None:
         super()._default_visit(node)
@@ -184,10 +196,10 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
         target_name, target_value = betterproto.which_one_of(node.target, "processTarget")
 
         if isinstance(target_value, QuaProgramAnalogProcessTargetScalarProcessTarget):
-            target = ExpressionSerializingVisitor.serialize(target_value)
+            target = ExpressionSerializingVisitor(self._visitor).serialize(target_value)
             self._out = f'demod.full("{name}", {target}, "{output}")'
         elif isinstance(target_value, QuaProgramAnalogProcessTargetVectorProcessTarget):
-            target = ExpressionSerializingVisitor.serialize(target_value.array)
+            target = ExpressionSerializingVisitor(self._visitor).serialize(target_value.array)
 
             time_name, time_value = betterproto.which_one_of(target_value.time_division, "timeDivision")
             if isinstance(time_value, QuaProgramAnalogTimeDivisionSliced):
@@ -209,10 +221,10 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
         target_name, target_value = betterproto.which_one_of(node.target, "processTarget")
 
         if isinstance(target_value, QuaProgramAnalogProcessTargetScalarProcessTarget):
-            target = ExpressionSerializingVisitor.serialize(target_value)
+            target = ExpressionSerializingVisitor(self._visitor).serialize(target_value)
             self._out = f'integration.full("{name}", {target}, "{output}")'
         elif isinstance(target_value, QuaProgramAnalogProcessTargetVectorProcessTarget):
-            target = ExpressionSerializingVisitor.serialize(target_value.array)
+            target = ExpressionSerializingVisitor(self._visitor).serialize(target_value.array)
 
             time_name, time_value = betterproto.which_one_of(target_value.time_division, "timeDivision")
             if isinstance(time_value, QuaProgramAnalogTimeDivisionSliced):
@@ -245,10 +257,10 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
         else:
             common_args = f'"{name1}", "{output1}", "{name2}", "{output2}"'
         if isinstance(target_value, QuaProgramAnalogProcessTargetScalarProcessTarget):
-            target = ExpressionSerializingVisitor.serialize(target_value)
+            target = ExpressionSerializingVisitor(self._visitor).serialize(target_value)
             self._out = f"{demod_name}.full({common_args}, {target})"
         elif isinstance(target_value, QuaProgramAnalogProcessTargetVectorProcessTarget):
-            target = ExpressionSerializingVisitor.serialize(target_value.array)
+            target = ExpressionSerializingVisitor(self._visitor).serialize(target_value.array)
 
             time_name, time_value = betterproto.which_one_of(target_value.time_division, "timeDivision")
             if isinstance(time_value, QuaProgramAnalogTimeDivisionSliced):
@@ -281,8 +293,8 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
         ],
         demod_name: str,
     ) -> None:
-        target = ExpressionSerializingVisitor.serialize(node.target)
-        target_len = ExpressionSerializingVisitor.serialize(node.target_len)
+        target = ExpressionSerializingVisitor(self._visitor).serialize(node.target)
+        target_len = ExpressionSerializingVisitor(self._visitor).serialize(node.target_len)
         max_time = node.max_time
         element_output = node.element_output
         self._out = f'time_tagging.{demod_name}({target}, {max_time}, {target_len}, "{element_output}")'
@@ -307,7 +319,7 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
         for element_output in node.element_outputs:
             element_outputs.append(f'"{element_output}"')
         element_outputs_str = ",".join(element_outputs)
-        target = ExpressionSerializingVisitor.serialize(node.target)
+        target = ExpressionSerializingVisitor(self._visitor).serialize(node.target)
         max_time = node.max_time
         self._out = f"counting.digital({target}, {max_time}, ({element_outputs_str}))"
 
@@ -333,8 +345,8 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
         super()._default_visit(node)
 
     def visit_qm_grpc_qua_QuaProgramBinaryExpression(self, node: QuaProgramBinaryExpression) -> None:
-        left = ExpressionSerializingVisitor.serialize(node.left)
-        right = ExpressionSerializingVisitor.serialize(node.right)
+        left = ExpressionSerializingVisitor(self._visitor).serialize(node.left)
+        right = ExpressionSerializingVisitor(self._visitor).serialize(node.right)
         sop = node.op
         mapping = {
             QuaProgramBinaryExpressionBinaryOperator.ADD: "+",
@@ -358,8 +370,6 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
             raise Exception(f"Unsupported operator {sop}")
         self._out = f"({left}{op}{right})"
 
-    @staticmethod
-    def serialize(node: Node) -> str:
-        visitor = ExpressionSerializingVisitor()
-        visitor.visit(node)
-        return visitor._out
+    def serialize(self, node: Node) -> str:
+        self.visit(node)
+        return self._out

@@ -10,6 +10,7 @@ class SavedVariablesNames:
     g_scan = "g_scan"
     p_scan = "p_scan"
     image = "image"
+    signal = "signal"
 
 
 class CalibrationElementsNames:

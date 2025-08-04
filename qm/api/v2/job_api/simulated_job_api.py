@@ -5,7 +5,6 @@ import betterproto
 from betterproto.lib.std.google.protobuf import Struct
 
 from qm.api.v2.job_api import JobApi
-from qm.persistence import BaseStore
 from qm.utils.async_utils import run_async
 from qm.waveform_report import WaveformReport
 from qm.utils.config_utils import get_fem_config
@@ -15,7 +14,7 @@ from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.job_api.job_api import JobApiWithDeprecations
 from qm.exceptions import QopResponseError, QMSimulationError
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
-from qm.results.simulator_samples import SimulatorSamples, SimulatorControllerSamples
+from qm._stream_results import SimulatorSamples, SimulatorControllerSamples
 from qm.grpc.qua_config import (
     QuaConfigControllerDec,
     QuaConfigOctoDacFemDec,
@@ -37,11 +36,10 @@ class SimulatedJobApi(JobApi):
         self,
         connection_details: ConnectionDetails,
         job_id: str,
-        store: BaseStore,
         simulated_response: Optional[SimulatedResponsePart],
         capabilities: ServerCapabilities,
     ) -> None:
-        super().__init__(connection_details, job_id, store, capabilities)
+        super().__init__(connection_details, job_id, capabilities)
         self._waveform_report = None
 
         # In QOP 3.2 and earlier, the waveform_report is included inside the simulated_response, which is provided
@@ -103,8 +101,12 @@ class SimulatedJobApi(JobApi):
                     elif isinstance(fem_config, QuaConfigOctoDacFemDec):
                         analog_sampling_rate[key] = 2e9
                     elif isinstance(fem_config, QuaConfigMicrowaveFemDec):
-                        analog_sampling_rate[key + "-1"] = fem_config.analog_outputs[response.port_id].sampling_rate
-                        analog_sampling_rate[key + "-2"] = fem_config.analog_outputs[response.port_id].sampling_rate
+                        sampling_rate = fem_config.analog_outputs[response.port_id].sampling_rate
+                        assert (
+                            sampling_rate is not None
+                        )  # Mypy thinks it can be None, but it can't really (sampling_rate has a default value)
+                        analog_sampling_rate[key + "-1"] = sampling_rate
+                        analog_sampling_rate[key + "-2"] = sampling_rate
                     else:
                         raise QMSimulationError(f"Unknown FEM type: {fem_config}")
 

@@ -1,9 +1,9 @@
 import abc
 import time
 import logging
-from enum import Enum, auto
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Mapping, Optional, Sequence, cast
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Union, Literal, Optional, cast
 
 import numpy as np
 from octave_sdk import Octave, RFInputLOSource
@@ -82,10 +82,34 @@ CALIBRATION_INPUT = 2
 OTHER_INPUT = 1
 
 
-class DConvQuadrature(Enum):
-    I = auto()
-    Q = auto()
-    IQ = auto()
+IntegrationWeightsNames = Literal["integW_cos", "integW_sin", "integW_minus_sin", "integW_zero"]
+
+
+@dataclass(frozen=True)
+class IntegrationWeights:
+    out1: IntegrationWeightsNames
+    out2: IntegrationWeightsNames
+
+
+@dataclass(frozen=True)
+class DemodWeightsData:
+    i: IntegrationWeights
+    q: IntegrationWeights
+
+
+class DConvQuadrature:
+    I = DemodWeightsData(
+        i=IntegrationWeights(out1="integW_cos", out2="integW_zero"),
+        q=IntegrationWeights(out1="integW_minus_sin", out2="integW_zero"),
+    )
+    Q = DemodWeightsData(
+        i=IntegrationWeights(out1="integW_zero", out2="integW_sin"),
+        q=IntegrationWeights(out1="integW_zero", out2="integW_cos"),
+    )
+    IQ = DemodWeightsData(
+        i=IntegrationWeights(out1="integW_cos", out2="integW_sin"),
+        q=IntegrationWeights(out1="integW_minus_sin", out2="integW_cos"),
+    )
 
 
 @dataclass
@@ -98,10 +122,10 @@ class LOFrequencyDebugData:
     fine: The debug data for the fine scan.
     """
 
-    prev_result: Optional[Tuple[float, ...]]
+    prev_result: Optional[tuple[float, ...]]
     power_amp_attn: Optional[int]
-    coarse: List[LOAnalysisDebugData]
-    fine: List[LOAnalysisDebugData]
+    coarse: list[LOAnalysisDebugData]
+    fine: list[LOAnalysisDebugData]
 
 
 @dataclass
@@ -113,7 +137,7 @@ class ImageResult:
     fine: The fine scan result.
     """
 
-    prev_result: Optional[Tuple[float, float]]
+    prev_result: Optional[tuple[float, float]]
     coarse: ImageDataAnalysisResult
     fine: ImageDataAnalysisResult
 
@@ -137,27 +161,27 @@ class LOFrequencyCalibrationResult:
     dc_gain: float
     dc_phase: float
     temperature: float
-    image: Dict[FreqType, ImageResult]
+    image: dict[FreqType, ImageResult]
     debug: LOFrequencyDebugData
     plugin_data: Any = None
 
 
-MixerCalibrationResults = Dict[Tuple[FreqType, GainType], LOFrequencyCalibrationResult]
+MixerCalibrationResults = dict[tuple[FreqType, GainType], LOFrequencyCalibrationResult]
 
 
 @dataclass
 class DeprecatedCalibrationResult:
-    correction: List[float]
+    correction: list[float]
     i_offset: float
     q_offset: float
     lo_frequency: float
     if_frequency: float
     temperature: float
     mixer_id: str
-    optimizer_parameters: Dict[str, Any]
+    optimizer_parameters: dict[str, Any]
 
 
-DeprecatedMixerCalibrationResults = Dict[Tuple[int, int], DeprecatedCalibrationResult]
+DeprecatedMixerCalibrationResults = dict[tuple[int, int], DeprecatedCalibrationResult]
 
 
 class CalibrationCallback(metaclass=abc.ABCMeta):
@@ -171,7 +195,7 @@ class AutoCalibrationParams:
     use_main_lo: bool = False
     external_loopback: bool = False
     offset_frequency: float = 7e6
-    dconv_quadrature: DConvQuadrature = DConvQuadrature.IQ
+    dconv_quadrature: DemodWeightsData = DConvQuadrature.IQ
     if_amplitude: float = 0.125
     calibrate_lo_with_if: bool = True
     callback: Optional[CalibrationCallback] = None
@@ -183,7 +207,7 @@ class NoCalibrationElements(QmQuaException):
 
 @dataclass
 class _StateRestoreParams:
-    octave_updates: List[SingleUpdate]
+    octave_updates: list[SingleUpdate]
     lo_frequency: float
     i_offset: float
     q_offset: float
@@ -249,48 +273,27 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
             play("DC_offset" * amp(q0_curr), elements_names.q_offset)
             play("calibration" * amp(scale_cal), elements_names.iq_mixer)
 
-            if params.dconv_quadrature == DConvQuadrature.I:
-                measure(
-                    "Analyze",
-                    elements_names.lo_analyzer,
-                    dual_demod.full("integW_cos", "out1", "integW_zero", "out2", I2),
-                    dual_demod.full("integW_minus_sin", "out1", "integW_zero", "out2", Q2),
-                )
-                measure(
-                    "Analyze",
-                    elements_names.image_analyzer,
-                    dual_demod.full("integW_cos", "out1", "integW_zero", "out2", I3),
-                    dual_demod.full("integW_minus_sin", "out1", "integW_zero", "out2", Q3),
-                )
-            elif params.dconv_quadrature == DConvQuadrature.Q:
-                measure(
-                    "Analyze",
-                    elements_names.lo_analyzer,
-                    dual_demod.full("integW_zero", "out1", "integW_sin", "out2", I2),
-                    dual_demod.full("integW_zero", "out1", "integW_cos", "out2", Q2),
-                )
-                measure(
-                    "Analyze",
-                    elements_names.image_analyzer,
-                    dual_demod.full("integW_zero", "out1", "integW_sin", "out2", I3),
-                    dual_demod.full("integW_zero", "out1", "integW_cos", "out2", Q3),
-                )
-            else:
-                measure(
-                    "Analyze",
-                    elements_names.lo_analyzer,
-                    dual_demod.full("integW_cos", "out1", "integW_sin", "out2", I2),
-                    dual_demod.full("integW_minus_sin", "out1", "integW_cos", "out2", Q2),
-                )
-                measure(
-                    "Analyze",
-                    elements_names.image_analyzer,
-                    dual_demod.full("integW_cos", "out1", "integW_sin", "out2", I3),
-                    dual_demod.full("integW_minus_sin", "out1", "integW_cos", "out2", Q3),
-                )
-
-            assign(lo_power, (I2 * I2 + Q2 * Q2))
-            assign(image_power, (I3 * I3 + Q3 * Q3))
+            measure(
+                "Analyze",
+                elements_names.signal_analyzer,
+                dual_demod.full(params.dconv_quadrature.i.out1, "out1", params.dconv_quadrature.i.out2, "out2", I1),
+                dual_demod.full(params.dconv_quadrature.q.out1, "out1", params.dconv_quadrature.q.out2, "out2", Q1),
+            )
+            measure(
+                "Analyze",
+                elements_names.lo_analyzer,
+                dual_demod.full(params.dconv_quadrature.i.out1, "out1", params.dconv_quadrature.i.out2, "out2", I2),
+                dual_demod.full(params.dconv_quadrature.q.out1, "out1", params.dconv_quadrature.q.out2, "out2", Q2),
+            )
+            measure(
+                "Analyze",
+                elements_names.image_analyzer,
+                dual_demod.full(params.dconv_quadrature.i.out1, "out1", params.dconv_quadrature.i.out2, "out2", I3),
+                dual_demod.full(params.dconv_quadrature.q.out1, "out1", params.dconv_quadrature.q.out2, "out2", Q3),
+            )
+            assign(signal_power, I1 * I1 + Q1 * Q1)
+            assign(lo_power, I2 * I2 + Q2 * Q2)
+            assign(image_power, I3 * I3 + Q3 * Q3)
 
         def update_correction_g_phi() -> None:
             assign(s_mat, p_curr)
@@ -307,11 +310,14 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         with program() as prog:
 
             # variables for getting IQ data
+            Q1 = declare(float)
             Q2 = declare(float)
             Q3 = declare(float)
+            I1 = declare(float)
             I2 = declare(float)
             I3 = declare(float)
 
+            signal_power = declare(float)
             lo_power = declare(float)
             image_power = declare(float)
 
@@ -386,6 +392,10 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                             save(q0_curr, SavedVariablesNames.q_scan)
 
                             save(lo_power, SavedVariablesNames.lo)
+                            save(signal_power, SavedVariablesNames.signal)
+                            # This line saves the power of the returned RF signal, it is here only for debug purposes.
+                            # We could put it out of the for loop, and save only once, but the compiler got stuck,
+                            # so we put it as part of the loop.
 
                     assign(i0_center, Util.cond(task == 1, i0_best, 0.0))
                     assign(q0_center, Util.cond(task == 1, q0_best, 0.0))
@@ -429,7 +439,6 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                                 save(p_curr, SavedVariablesNames.p_scan)
 
                                 save(image_power, SavedVariablesNames.image)
-
                     with else_():
                         assign(go_on, False)
 
@@ -614,7 +623,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
 
     def _perform_coarse_iq_scan(
         self, job: Union[RunningQmJob, JobApi], n_lo: int, lo_offset: int
-    ) -> Tuple[Array, Array, List[LOAnalysisDebugData], Array]:
+    ) -> tuple[Array, Array, list[LOAnalysisDebugData], Array]:
         self._set_io_values(io1=0)
 
         job.resume()
@@ -640,7 +649,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         job: Union[RunningQmJob, JobApi],
         n_lo: int,
         lo_offset: int,
-    ) -> Tuple[Array, Array, List[LOAnalysisDebugData]]:
+    ) -> tuple[Array, Array, list[LOAnalysisDebugData]]:
         self._set_io_values(io1=1)
 
         for _ in range(2):
@@ -841,7 +850,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         pass
 
     @abc.abstractmethod
-    def _get_element_idle_offsets(self, element: str) -> Tuple[float, float, float, float]:
+    def _get_element_idle_offsets(self, element: str) -> tuple[float, float, float, float]:
         pass
 
 
@@ -880,7 +889,7 @@ class OctaveMixerCalibration(OctaveMixerCalibrationBase):
     def _compile_program(self, _program: Program) -> str:
         return self._qm.compile(_program)
 
-    def _get_element_idle_offsets(self, element: str) -> Tuple[float, float, float, float]:
+    def _get_element_idle_offsets(self, element: str) -> tuple[float, float, float, float]:
         i_offset = self._qm.get_output_dc_offset_by_element(element, "I")
         q_offset = self._qm.get_output_dc_offset_by_element(element, "Q")
         input1_offset = self._qm.get_input_dc_offset_by_element(self.names.lo_analyzer, "out1")
@@ -935,6 +944,6 @@ class NewApiOctaveMixerCalibration(OctaveMixerCalibrationBase):
     def _compile_program(self, _program: Program) -> str:
         return self._qm_api.compile(_program)
 
-    def _get_element_idle_offsets(self, element: str) -> Tuple[float, float, float, float]:
+    def _get_element_idle_offsets(self, element: str) -> tuple[float, float, float, float]:
         """This is not necessary as the offsets are set through the job"""
         return 0, 0, 0, 0

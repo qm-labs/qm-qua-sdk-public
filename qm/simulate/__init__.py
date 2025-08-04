@@ -1,4 +1,5 @@
 from qm.simulate.loopback import LoopbackInterface  # noqa
+from qm.simulate._simulator_samples import SimulatorSamples, SimulatorControllerSamples
 from qm.simulate.interface import (  # noqa
     InterOpxAddress,
     InterOpxChannel,
@@ -14,4 +15,6 @@ __all__ = [
     "ControllerConnection",
     "InterOpxPairing",
     "LoopbackInterface",
+    "SimulatorSamples",
+    "SimulatorControllerSamples",
 ]

@@ -4,18 +4,16 @@ from dataclasses import field, dataclass
 from typing import Dict, List, Type, Union, Literal, Mapping, Iterable, Optional
 
 from qm.grpc.qua import QuaProgram
-from qm.utils import LOG_LEVEL_MAP
 from qm.octave import QmOctaveConfig
-from qm.persistence import BaseStore
 from qm.grpc.qua_config import QuaConfig
 from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.octave.octave_manager import OctaveManager
 from qm.api.v2.qm_api_old import QmApiWithDeprecations
-from qm.type_hinting.config_types import DictQuaConfig
+from qm.type_hinting.config_types import FullQuaConfig
 from qm.api.models.server_details import ConnectionDetails
-from qm.api.v2.qm_api import QmApi, handle_simulation_error
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
+from qm.api.v2.qm_api import QmApi, _log_messages, handle_simulation_error
 from qm.exceptions import OpenQmException, QopResponseError, JobNotFoundException
 from qm.grpc.frontend import InterOpxConnection, SimulatedResponsePart, ExecutionRequestSimulate
 from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, JobApiWithDeprecations, transfer_statuses_to_enum
@@ -102,13 +100,11 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
     def __init__(
         self,
         connection_details: ConnectionDetails,
-        store: BaseStore,
         capabilities: ServerCapabilities,
         octave_config: Optional[QmOctaveConfig],
         octave_manager: OctaveManager,
     ) -> None:
         super().__init__(connection_details)
-        self._store = store
         self._caps = capabilities
         self._octave_config = octave_config
         self._octave_manager = octave_manager
@@ -122,7 +118,6 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         return self.QM_CLASS(
             connection_details=self.connection_details,
             qm_id=qm_id,
-            store=self._store,
             capabilities=self._caps,
             octave_config=self._octave_config,
             octave_manager=self._octave_manager,
@@ -138,7 +133,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
             if self._caps.supports(QopCaps.waveform_report_endpoint) and job_data.is_simulation:
                 return self._get_simulated_job(job_id)
 
-            return self.JOB_CLASS(self.connection_details, job_id, store=self._store, capabilities=self._caps)
+            return self.JOB_CLASS(self.connection_details, job_id, capabilities=self._caps)
 
     def get_jobs(
         self,
@@ -162,7 +157,8 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
     def open_qm(self, config: QuaConfig, close_other_machines: Optional[bool] = None) -> QmApi:
         if close_other_machines is None:
             warnings.warn(
-                "close_other_machines is not set, future default will be False, now setting to True", DeprecationWarning
+                "close_other_machines is not set, as from 1.3.0 default will be False, now setting to True. Please set it explicitly to remove this message and keep the wanted behavior in future versions.",
+                DeprecationWarning,
             )
             close_other_machines = True
         request = OpenQuantumMachineRequest(
@@ -177,27 +173,15 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
 
         except QopResponseError as e:
             error = e.error
-            error_messages = []
-            for sub_error in error.config_validation_errors:
-                error_messages.append(
-                    f'CONFIG ERROR in key "{sub_error.path}" [{sub_error.group}] : {sub_error.message}'
-                )
+            open_qm_exception = OpenQmException(error.config_validation_errors, error.physical_validation_errors)
 
-            for physical_error in error.physical_validation_errors:
-                error_messages.append(
-                    f'PHYSICAL CONFIG ERROR in key "{physical_error.path}" [{physical_error.group}] : {physical_error.message}'
-                )
+            for formatted_error in (
+                open_qm_exception.physical_validation_formatted_errors
+                + open_qm_exception.config_validation_formatted_errors
+            ):
+                logger.error(formatted_error)
 
-            for msg in error_messages:
-                logger.error(msg)
-
-            error_details = [(item.group, item.path, item.message) for item in error.config_validation_errors] + [
-                (item.group, item.path, item.message) for item in error.physical_validation_errors
-            ]
-            formatted_errors = "\n".join(error_messages)
-            raise OpenQmException(
-                f"Can not open QM, see the following errors:\n{formatted_errors}", errors=error_details
-            )
+            raise open_qm_exception
 
         for warning in response.open_qm_warnings:
             logger.warning(f"Open QM ended with warning {warning.code}: {warning.message}")
@@ -244,12 +228,12 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         request = QmmServiceResetDataProcessingRequest()
         self._run(self._stub.reset_data_processing(request, timeout=self._timeout))
 
-    def validate_qua_config(self, config: DictQuaConfig) -> None:
+    def validate_qua_config(self, config: FullQuaConfig) -> None:
         pass
 
     def _get_simulated_job(self, job_id: str, simulated: Union[SimulatedResponsePart, None] = None) -> SimulatedJobApi:
         return self.QM_CLASS.SIMULATED_JOB_CLASS(
-            self.connection_details, job_id, store=self._store, simulated_response=simulated, capabilities=self._caps
+            self.connection_details, job_id, simulated_response=simulated, capabilities=self._caps
         )
 
     def simulate(
@@ -266,14 +250,11 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
             controller_connections=controller_connections,
         )
         logger.info("Simulating program.")
-        try:
-            response = self._run(self._stub.simulate(request, timeout=self._timeout))
-        except QopResponseError as e:
-            raise handle_simulation_error(e)
 
-        for msg in response.messages:
-            lvl = LOG_LEVEL_MAP[msg.level]
-            logger.log(lvl, msg.message)
+        with handle_simulation_error():
+            response = self._run(self._stub.simulate(request, timeout=self._timeout))
+
+        _log_messages(response.messages)
 
         return self._get_simulated_job(response.job_id, response.simulated)
 

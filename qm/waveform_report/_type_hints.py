@@ -1,15 +1,15 @@
-from typing import Set, Dict, List, Optional, TypedDict
+from typing import Any, Set, Dict, List, Optional, TypedDict
 
 
 class PulserLocationType(TypedDict, total=False):
     controllerName: str
-    pulserIndex: int
-    femId: int
+    pulserIndex: float
+    femId: float
 
 
 class IqInfoType(TypedDict, total=False):
     isPartOfIq: bool
-    iqGroupId: int
+    iqGroupId: float
     isI: bool
     isQ: bool
 
@@ -39,6 +39,11 @@ class PortToDucMap(TypedDict):
     ducs: List[float]
 
 
+class EventLocationDescriptor(TypedDict, total=False):
+    index: float
+    location: str
+
+
 class PlayedAnalogWaveformType(PlayedWaveformType, total=False):
     currentFrame: List[float]
     currentCorrectionElements: List[float]
@@ -59,10 +64,24 @@ class AdcAcquisitionType(TypedDict, total=False):
     adc: List[int]
 
 
+class EventType(TypedDict, total=False):
+    eventLatency: float
+    eventLocationDescriptor: EventLocationDescriptor
+    eventMessage: str
+    eventValues: List[
+        Any
+    ]  # Type is unclear—only encountered empty lists so far, so couldn't determine the actual contents
+    quantumElement: str
+    sourcePulser: PulserLocationType
+    sourcePulserIqInfo: IqInfoType
+    timestamp: float
+
+
 class WaveformReportType(TypedDict, total=False):
     analogWaveforms: List[PlayedAnalogWaveformType]
     digitalWaveforms: List[PlayedWaveformType]
     adcAcquisitions: List[AdcAcquisitionType]
+    events: List[EventType]
 
 
 class WaveformPlayingType(TypedDict, total=False):

@@ -47,7 +47,7 @@ class QuaNodeVisitor:
 
     def visit(self, node: Node) -> None:
         if isinstance(node, Program):
-            return self.visit(node._program)
+            return self.visit(node.qua_program)
 
         if isinstance(node, betterproto.Message):
             self.__visit(node)

@@ -9,7 +9,6 @@ import numpy.typing
 from numpy.lib import format as _format
 from betterproto.lib.google.protobuf import Value, Struct
 
-from qm.persistence import BaseStore
 from qm.utils import deprecation_message
 from qm.utils.async_utils import run_async
 from qm.api.frontend_api import FrontendApi
@@ -19,9 +18,9 @@ from qm.api.simulation_api import SimulationApi
 from qm.jobs.running_qm_job import RunningQmJob
 from qm.grpc.frontend import SimulatedResponsePart
 from qm.api.models.capabilities import ServerCapabilities
-from qm.results.simulator_samples import SimulatorSamples
+from qm.simulate._simulator_samples import SimulatorSamples
 from qm.grpc.v2 import PullSamplesResponsePullSamplesResponseSuccess
-from qm.type_hinting.simulator_types import AnalogOutputsType, DigitalOutputsType, WaveformInPortsType
+from qm.waveform_report._type_hints import AnalogOutputsType, DigitalOutputsType, WaveformInPortsType
 from qm.grpc.results_analyser import (
     SimulatorSamplesResponse,
     SimulatorSamplesResponseData,
@@ -65,10 +64,9 @@ class SimulatedJob(RunningQmJob):
         job_id: str,
         frontend_api: FrontendApi,
         capabilities: ServerCapabilities,
-        store: BaseStore,
         simulated_response: SimulatedResponsePart,
     ):
-        super().__init__(job_id, "", frontend_api, capabilities, store)
+        super().__init__(job_id, "", frontend_api, capabilities)
         self._waveform_report: Optional[WaveformReport] = None
 
         self._simulated_analog_outputs: AnalogOutputsType = {"waveforms": None}

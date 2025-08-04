@@ -21,24 +21,23 @@ from typing import (
 import numpy as np
 
 from qm.qua import fixed
-from qm import DictQuaConfig
-from qm.persistence import BaseStore
 from qm.grpc.qua_config import QuaConfig
 from qm.utils import deprecation_message
 from qm.utils.async_utils import run_async
-from qm.results import StreamingResultFetcher
 from qm.api.v2.job_result_api import JobResultApi
 from qm._report import ExecutionError, ExecutionReport
 from qm.type_hinting import Value, NumpySupportedValue
+from qm.type_hinting.config_types import FullQuaConfig
+from qm.utils.config_utils import get_logical_pb_config
 from qm.api.v2.job_api.generic_apis import JobGenericApi
 from qm.api.models.server_details import ConnectionDetails
 from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.api.v2.job_api.job_elements_db import JobElementsDB
 from qm.utils.general_utils import create_input_stream_name
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
-from qm.exceptions import QmValueError, QMTimeoutError, FunctionInputError
 from qm.grpc.job_manager import IntStreamData, BoolStreamData, FixedStreamData
 from qm.api.v2.job_api.element_input_api import MwInputApi, MixInputsApi, SingleInputApi
+from qm.exceptions import QmValueError, JobFailedError, QMTimeoutError, FunctionInputError
 from qm.grpc.v2 import (
     JobMetadata,
     CancelRequest,
@@ -55,6 +54,8 @@ from qm.grpc.v2 import (
     JobServicePushToInputStreamRequest,
     GetIoValuesResponseGetIoValuesResponseSuccessIoValuesData,
 )
+
+from ...._stream_results import StreamsManager
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +79,6 @@ for k, v in JOB_STATUS_MAPPING.items():
 _INVERSE_JOB_STATUS_MAPPING = dict(_inverse_job_status_mapping_tmp)
 
 IoValueTypes = Union[Type[bool], Type[int], Type[float], Type[fixed]]
-
-
-class JobFailedError(ValueError):
-    pass
 
 
 def transfer_statuses_to_enum(status: Union[JobStatus, Iterable[JobStatus]]) -> List[JobExecutionStatus]:
@@ -155,12 +152,9 @@ class JobData:
 
 
 class JobApi(JobGenericApi):
-    def __init__(
-        self, connection_details: ConnectionDetails, job_id: str, store: BaseStore, capabilities: ServerCapabilities
-    ) -> None:
+    def __init__(self, connection_details: ConnectionDetails, job_id: str, capabilities: ServerCapabilities) -> None:
         super().__init__(connection_details, job_id)
         self._elements: Optional[JobElementsDB] = None
-        self._store = store
         self._caps = capabilities
 
     def __repr__(self) -> str:
@@ -187,15 +181,14 @@ class JobApi(JobGenericApi):
         return self.id
 
     def _create_elements(self) -> JobElementsDB:
-        config = self._get_pb_config()
-        elements_config = config.v1_beta.elements
-        return JobElementsDB.init_from_data(elements_config, self._connection_details, self._id)
+        elements_pb_config = get_logical_pb_config(self._get_pb_config()).elements
+        return JobElementsDB.init_from_data(elements_pb_config, self._connection_details, self._id)
 
     def _get_pb_config(self) -> QuaConfig:
         request = JobServiceGetConfigRequest(job_id=self._id)
         return self._run(self._stub.get_config(request, timeout=self._timeout)).config
 
-    def get_compilation_config(self) -> DictQuaConfig:
+    def get_compilation_config(self) -> FullQuaConfig:
         """
         Returns:
              The config with which this job was compiled
@@ -231,7 +224,7 @@ class JobApi(JobGenericApi):
         else:
             raise QmValueError(
                 f"Invalid type in data, type is '{set(type(el) for el in data)}', "
-                f"excepted types are bool | int | float"
+                f"expected types are bool | int | float"
             )
 
     def _typed_push_to_input_stream(
@@ -341,7 +334,7 @@ class JobApi(JobGenericApi):
         return response.is_paused
 
     def resume(self) -> None:
-        """Resumes a program that was halted using the [pause][qm.qua._dsl.pause] statement"""
+        """Resumes a program that was halted using the [pause][qm.qua.pause] statement"""
         request = ResumeRequest(job_id=self._id)
         self._run(self._stub.resume(request, timeout=self._timeout))
 
@@ -600,13 +593,9 @@ class JobApi(JobGenericApi):
         return response.io1, response.io2
 
     @property
-    def result_handles(self) -> StreamingResultFetcher:
-        return StreamingResultFetcher(
-            self._id,
-            JobResultApi(self.connection_details, self._id, self._caps.supports(QopCaps.chunk_streaming)),
-            self._store,
-            self._caps,
-        )
+    def result_handles(self) -> StreamsManager:
+        results_api = JobResultApi(self.connection_details, self._id, self._caps.supports(QopCaps.chunk_streaming))
+        return StreamsManager(results_api, self._caps, self.wait_until)
 
     def get_errors(self) -> List[ExecutionError]:
         """

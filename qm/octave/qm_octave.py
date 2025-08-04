@@ -13,7 +13,7 @@ from qm.elements.element_outputs import DownconvertedOutput
 from qm.elements.up_converted_input import UpconvertedInput
 from qm.octave.octave_manager import ClockMode, OctaveManager
 from qm.octave.abstract_calibration_db import AbstractIFCalibration, AbstractLOCalibration
-from qm.type_hinting.config_types import DictQuaConfig, MixerConfigType, OPX1000ControllerConfigType
+from qm.type_hinting.config_types import MixerConfigType, ControllerQuaConfig, OPX1000ControllerConfigType
 from qm.octave.octave_mixer_calibration import DeprecatedCalibrationResult, convert_to_old_calibration_result
 
 if TYPE_CHECKING:
@@ -384,7 +384,7 @@ class QmOctaveForNewApi(QmOctaveBase["QmApi", "JobApi"]):
         job.set_element_correction(element, if_cal.get_correction())
 
 
-def create_dc_offset_octave_update(qe_input: UpconvertedInput, i_offset: float, q_offset: float) -> DictQuaConfig:
+def create_dc_offset_octave_update(qe_input: UpconvertedInput, i_offset: float, q_offset: float) -> ControllerQuaConfig:
     con_i, fem_i, port_i = qe_input.i_port.controller, qe_input.i_port.fem, qe_input.i_port.number
     con_q, fem_q, port_q = qe_input.q_port.controller, qe_input.q_port.fem, qe_input.q_port.number
     controllers: Dict[str, OPX1000ControllerConfigType] = {con_i: {"fems": {}}, con_q: {"fems": {}}}
@@ -392,7 +392,7 @@ def create_dc_offset_octave_update(qe_input: UpconvertedInput, i_offset: float, 
     controllers[con_q]["fems"][fem_q] = {"analog_outputs": {}, "type": "LF"}  # type: ignore[index]
     controllers[con_i]["fems"][fem_i]["analog_outputs"][port_i] = {"offset": i_offset}  # type: ignore[index]
     controllers[con_q]["fems"][fem_q]["analog_outputs"][port_q] = {"offset": q_offset}  # type: ignore[index]
-    update: DictQuaConfig = {"version": 1, "controllers": controllers}
+    update: ControllerQuaConfig = {"controllers": controllers}
     return update
 
 

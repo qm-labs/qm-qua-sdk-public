@@ -1,7 +1,6 @@
 import logging
 from typing import List, Tuple, Optional
 
-from qm.persistence import BaseStore
 from qm.program.program import Program
 from qm.grpc.qua_config import QuaConfig
 from qm.api.frontend_api import FrontendApi
@@ -24,9 +23,8 @@ class QmQueue(QmQueueBase[QmPendingJob]):
         quantum_machine_id: str,
         frontend_api: FrontendApi,
         capabilities: ServerCapabilities,
-        store: BaseStore,
     ):
-        super().__init__(store, capabilities)
+        super().__init__(capabilities)
         self.machine_id = quantum_machine_id
         self._config = config
         self._frontend: FrontendApi = frontend_api
@@ -43,7 +41,6 @@ class QmQueue(QmQueueBase[QmPendingJob]):
                 machine_id=self.machine_id,
                 frontend_api=self._frontend,
                 capabilities=self._capabilities,
-                store=self._store,
             )
             for job in jobs
         )
@@ -109,7 +106,6 @@ class QmQueue(QmQueueBase[QmPendingJob]):
             machine_id=self.machine_id,
             frontend_api=self._frontend,
             capabilities=self._capabilities,
-            store=self._store,
         )
 
     def add_to_start(
@@ -149,7 +145,6 @@ class QmQueue(QmQueueBase[QmPendingJob]):
             machine_id=self.machine_id,
             frontend_api=self._frontend,
             capabilities=self._capabilities,
-            store=self._store,
         )
 
     def get_at(self, position: int) -> QmPendingJob:

@@ -4,8 +4,8 @@ from typing_extensions import ParamSpec
 from typing import List, Type, Tuple, Union, TypeVar, Callable, Optional, Sequence, overload
 
 from qm._loc import _get_loc
-from qm.type_hinting import NumberT
-from qm.qua._dsl import assign, declare
+from qm.type_hinting.general import NumberT
+from qm.qua._dsl.variable_handling import assign, declare
 from qm.utils import deprecation_message, get_iterable_elements_datatype
 from qm.grpc.qua import (
     QuaProgramAnyScalarExpression,

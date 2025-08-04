@@ -3,8 +3,8 @@ from collections.abc import Iterable
 from typing import Union, Optional, Sequence
 
 from qm.type_hinting import Number
-from qm.qua._dsl_specific_type_hints import OneOrMore, ConvolutionMode
-from qm.qua._stream_processing_function_classes import (
+from qm.qua._dsl._type_hints import OneOrMore
+from qm.qua._dsl.stream_processing.map_functions.map_function_classes import (
     FFT,
     Demod,
     Average,
@@ -12,6 +12,7 @@ from qm.qua._stream_processing_function_classes import (
     Convolution,
     BooleanToInt,
     TupleMultiply,
+    ConvolutionMode,
     TupleDotProduct,
     MultiplyByScalar,
     MultiplyByVector,
@@ -203,3 +204,6 @@ class MapFunctions:
 
         """
         return Demod(frequency, iw_cos, iw_sin, integrate)
+
+
+FUNCTIONS = MapFunctions()

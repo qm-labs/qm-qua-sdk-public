@@ -32,7 +32,6 @@ from octave_sdk import (
 )
 
 from qm.type_hinting import Number
-from qm.utils.config_utils import get_fem_config
 from qm.octave.octave_config import QmOctaveConfig
 from qm.type_hinting.config_types import StandardPort
 from qm.octave._calibration_config import _prep_config
@@ -41,6 +40,7 @@ from qm.api.models.server_details import ConnectionDetails
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.exceptions import OpenQmException, OctaveLoopbackError, NoOutputPortDeclared
 from qm.octave._calibration_names import COMMON_OCTAVE_PREFIX, CalibrationElementsNames
+from qm.utils.config_utils import get_fem_config, get_logical_pb_config, get_controller_pb_config
 from qm.octave.octave_mixer_calibration import (
     AutoCalibrationParams,
     DeprecatedCalibrationResult,
@@ -694,7 +694,8 @@ def _add_octave_connections_from_octave_config(octave_config: QmOctaveConfig) ->
 
 def _add_octave_connections_from_pb_config(pb_config: QuaConfig) -> OctaveConnectionsType:
     all_octave_connections: OctaveConnectionsType = defaultdict(dict)
-    for octave_name, octave_pb_config in pb_config.v1_beta.octaves.items():
+    octaves_pb_config = get_controller_pb_config(pb_config).octaves
+    for octave_name, octave_pb_config in octaves_pb_config.items():
         if betterproto.serialized_on_wire(octave_pb_config.if_outputs):
             adc_ports = _ControllerADCPorts(
                 I=octave_pb_config.if_outputs.if_out1.port,
@@ -721,18 +722,15 @@ def _filter_only_valid_connections(
     return dict(filtered_connections)
 
 
-def _get_octave_channels_to_opx_ports(
-    pb_config: QuaConfig, octave_config: QmOctaveConfig
-) -> Dict[str, Dict[int, OctaveConnection]]:
-    all_octave_connections = _add_octave_connections_from_octave_config(octave_config)
-    all_octave_connections.update(_add_octave_connections_from_pb_config(pb_config))
-    return _filter_only_valid_connections(all_octave_connections, pb_config)
-
-
 def prep_config_for_calibration(
     pb_config: QuaConfig, octave_config: QmOctaveConfig, capabilities: ServerCapabilities
 ) -> QuaConfig:
-    all_octave_connections = _get_octave_channels_to_opx_ports(pb_config, octave_config)
+    all_octave_connections = _add_octave_connections_from_octave_config(octave_config)
+    all_octave_connections.update(_add_octave_connections_from_pb_config(pb_config))
+    if not all_octave_connections:
+        logger.debug("No octave configuration found.")
+        return pb_config
+    all_octave_connections = _filter_only_valid_connections(all_octave_connections, pb_config)
     if not all_octave_connections:
         logger.warning(
             "No valid channels found for calibration, make sure you connect I and Q to the same device, "
@@ -776,6 +774,8 @@ def _find_dummy_controller_outputs(
 def _add_calibration_entries_to_config(
     pb_config: QuaConfig, capabilities: ServerCapabilities, all_octave_connections: OctaveConnectionsType
 ) -> QuaConfig:
+    controller_pb_config = get_controller_pb_config(pb_config)
+    logical_pb_config = get_logical_pb_config(pb_config)
 
     dummy_lo_frequency = int(6e9)
     dummy_if_frequency: float = 50e6
@@ -838,7 +838,7 @@ def _add_calibration_entries_to_config(
                 single_input=QuaConfigSingleInput(port=channel_connections.dacs.Q),
                 operations={"DC_offset": f"{COMMON_OCTAVE_PREFIX}DC_offset_pulse"},
             )
-            pb_config.v1_beta.elements.update(
+            logical_pb_config.elements.update(
                 {
                     names.iq_mixer: QuaConfigElementDec(
                         mix_inputs=_create_mix_inputs(False),
@@ -855,7 +855,7 @@ def _add_calibration_entries_to_config(
                 }
             )
 
-    pb_config.v1_beta.pulses.update(
+    logical_pb_config.pulses.update(
         {
             f"{COMMON_OCTAVE_PREFIX}calibration_pulse": QuaConfigPulseDec(
                 operation=QuaConfigPulseDecOperation.CONTROL,
@@ -888,7 +888,7 @@ def _add_calibration_entries_to_config(
             ),
         }
     )
-    pb_config.v1_beta.waveforms.update(
+    logical_pb_config.waveforms.update(
         {
             f"{COMMON_OCTAVE_PREFIX}readout_wf": QuaConfigWaveformDec(
                 constant=QuaConfigConstantWaveformDec(sample=calibration_amp)
@@ -899,7 +899,7 @@ def _add_calibration_entries_to_config(
             ),
         }
     )
-    pb_config.v1_beta.digital_waveforms.update(
+    logical_pb_config.digital_waveforms.update(
         {
             f"{COMMON_OCTAVE_PREFIX}ON": QuaConfigDigitalWaveformDec(
                 samples=[QuaConfigDigitalWaveformSample(value=True, length=0)]
@@ -910,7 +910,7 @@ def _add_calibration_entries_to_config(
         }
     )
     n_samples = integration_length // 4
-    pb_config.v1_beta.integration_weights.update(
+    logical_pb_config.integration_weights.update(
         {
             f"{COMMON_OCTAVE_PREFIX}integW_cosine": QuaConfigIntegrationWeightDec(
                 cosine=build_iw_sample([weight_amplitude] * n_samples),
@@ -930,7 +930,7 @@ def _add_calibration_entries_to_config(
             ),
         }
     )
-    pb_config.v1_beta.mixers.update(
+    controller_pb_config.mixers.update(
         {
             f"{COMMON_OCTAVE_PREFIX}dummy_mixer": QuaConfigMixerDec(
                 correction=[

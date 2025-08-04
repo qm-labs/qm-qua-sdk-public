@@ -3,7 +3,6 @@ import warnings
 from typing import TYPE_CHECKING, Tuple, Optional
 
 from qm.api.v2.job_api import JobApi
-from qm.persistence import BaseStore
 from qm.program.program import Program
 from qm.utils import deprecation_message
 from qm.jobs.job_queue_base import QmQueueBase
@@ -19,8 +18,8 @@ if TYPE_CHECKING:
 
 
 class QmQueueWithDeprecations(QmQueueBase[JobApi]):
-    def __init__(self, store: BaseStore, api: "QmApiWithDeprecations", capabilities: ServerCapabilities):
-        super().__init__(store, capabilities)
+    def __init__(self, api: "QmApiWithDeprecations", capabilities: ServerCapabilities):
+        super().__init__(capabilities)
         self._api = api
 
     @property

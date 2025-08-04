@@ -1,16 +1,17 @@
 import abc
 import warnings
-from typing import Any, Type, Union, Generic, Literal, TypeVar, Optional, Sequence, overload
+from typing import TYPE_CHECKING, Any, Type, Union, Generic, Literal, TypeVar, Optional, Sequence, overload
 
 import numpy as np
 
 from qm._loc import _get_loc
-from qm.type_hinting import NumberT
 from qm.exceptions import QmQuaException
 from qm.utils import deprecation_message
+from qm.type_hinting.general import NumberT
 from qm.serialization.expression_serializing_visitor import ExpressionSerializingVisitor
 from qm.grpc.qua import (
     QuaProgramType,
+    QuaProgramDirection,
     QuaProgramAnyStatement,
     QuaProgramVarDeclaration,
     QuaProgramBinaryExpression,
@@ -24,12 +25,20 @@ from qm.grpc.qua import (
     QuaProgramArrayVarRefExpression,
     QuaProgramLibFunctionExpression,
     QuaProgramArrayCellRefExpression,
+    QuaProgramStructVarRefExpression,
     QuaProgramAssignmentStatementTarget,
+    QuaProgramExternalStreamDeclaration,
+    QuaProgramVarDeclarationStructMember,
     QuaProgramAdvanceInputStreamStatement,
+    QuaProgramExternalStreamRefExpression,
     QuaProgramBinaryExpressionBinaryOperator,
 )
 
 _ScalarExpressionType = QuaProgramAnyScalarExpression
+
+
+if TYPE_CHECKING:
+    from qm.qua._qua_struct import _QuaStruct
 
 
 def to_literal(value: Union[bool, int, float], dtype: QuaProgramType) -> QuaProgramLiteralExpression:
@@ -73,12 +82,41 @@ ScalarMessageType = TypeVar(
 )
 
 
-S = TypeVar("S", bound=Union[QuaProgramArrayVarRefExpression, QuaProgramAnyScalarExpression])
+S = TypeVar(
+    "S",
+    bound=Union[
+        QuaProgramArrayVarRefExpression,
+        QuaProgramAnyScalarExpression,
+        QuaProgramStructVarRefExpression,
+        QuaProgramExternalStreamRefExpression,
+    ],
+)
 
 
-class QuaExpression(Generic[S, NumberT], metaclass=abc.ABCMeta):
-    def __init__(self, expression: S, t: Type[NumberT]):
+class QuaExpression(Generic[S], metaclass=abc.ABCMeta):
+    def __init__(self, expression: S):
         self._expression = expression
+
+    def unwrap(self) -> S:
+        return self._expression
+
+    @property
+    def unwrapped(self) -> S:
+        return self.unwrap()
+
+    def __str__(self) -> str:
+        return ExpressionSerializingVisitor(None).serialize(self._expression)
+
+    def __bool__(self) -> bool:
+        raise QmQuaException(
+            "Attempted to use a Python logical operator on a QUA variable. If you are unsure why you got this message,"
+            " please see https://qm-docs.qualang.io/guides/qua_ref#boolean-operations"
+        )
+
+
+class QuaNumericExpression(Generic[S, NumberT], QuaExpression[S], metaclass=abc.ABCMeta):
+    def __init__(self, expression: S, t: Type[NumberT]):
+        super().__init__(expression)
         self._type: Type[NumberT] = t
 
     @property
@@ -99,13 +137,6 @@ class QuaExpression(Generic[S, NumberT], metaclass=abc.ABCMeta):
     def _is_input_stream(self) -> bool:
         return isinstance(self, InputStreamInterface)
 
-    def unwrap(self) -> S:
-        return self._expression
-
-    @property
-    def unwrapped(self) -> S:
-        return self.unwrap()
-
     def empty(self) -> bool:
         warnings.warn(
             deprecation_message(
@@ -117,15 +148,6 @@ class QuaExpression(Generic[S, NumberT], metaclass=abc.ABCMeta):
             DeprecationWarning,
         )
         return self._expression is None
-
-    def __str__(self) -> str:
-        return ExpressionSerializingVisitor.serialize(self._expression)
-
-    def __bool__(self) -> bool:
-        raise QmQuaException(
-            "Attempted to use a Python logical operator on a QUA variable. If you are unsure why you got this message,"
-            " please see https://docs.quantum-machines.co/latest/docs/Guides/qua_ref/#boolean-operations"
-        )
 
     def isFixed(self) -> bool:
         warnings.warn(
@@ -181,7 +203,7 @@ class ScalarMessageInterface(Generic[ScalarMessageType], metaclass=abc.ABCMeta):
 
 
 class QuaScalarExpression(
-    QuaExpression[QuaProgramAnyScalarExpression, NumberT],
+    QuaNumericExpression[QuaProgramAnyScalarExpression, NumberT],
     ScalarMessageInterface[ScalarMessageType],
     metaclass=abc.ABCMeta,
 ):
@@ -306,7 +328,7 @@ class QuaScalarExpression(
         raise QmQuaException("saving is not allowed for this kind of qua expression")
 
 
-class QuaArrayVariable(QuaExpression[QuaProgramArrayVarRefExpression, NumberT]):
+class QuaArrayVariable(QuaNumericExpression[QuaProgramArrayVarRefExpression, NumberT]):
     def __init__(self, name: str, t: Type[NumberT], init_value: Sequence[Union[int, bool, float]], size: int):
         super(QuaArrayVariable, self).__init__(QuaProgramArrayVarRefExpression(name=name), t)
         self._size = size
@@ -338,6 +360,40 @@ class QuaArrayVariable(QuaExpression[QuaProgramArrayVarRefExpression, NumberT]):
         array_exp = QuaProgramArrayLengthExpression(array=unwrapped_element)
         result = QuaProgramAnyScalarExpression(array_length=array_exp)
         return QuaArrayLength(result, int)
+
+
+class QuaStructReference(QuaExpression[QuaProgramStructVarRefExpression]):
+    def __init__(self, name: str):
+        super().__init__(QuaProgramStructVarRefExpression(name=name, loc=_get_loc()))
+        self.name = name
+
+
+NSize = TypeVar("NSize", bound=int)
+
+
+class QuaStructArrayVariable(QuaArrayVariable[NumberT], Generic[NumberT, NSize]):
+    def __init__(
+        self,
+        name: str,
+        t: Type[NumberT],
+        size: int,
+        position: int,
+        struct: QuaStructReference,
+    ):
+        super(QuaArrayVariable, self).__init__(
+            QuaProgramArrayVarRefExpression(name=name, struct_var=struct.unwrapped), t
+        )
+        self._size = size
+        self._init_value = []
+        self._position = position
+        self._struct: QuaStructReference = struct
+
+    @property
+    def declaration_statement(self) -> QuaProgramVarDeclaration:
+        declaration_statement = super().declaration_statement
+        struct_member = QuaProgramVarDeclarationStructMember(name=self._struct.name, position=self._position)
+        declaration_statement.struct_member = struct_member
+        return declaration_statement
 
 
 class AssignmentTargetInterface(metaclass=abc.ABCMeta):
@@ -446,6 +502,57 @@ class QuaBroadcast(QuaScalarExpression[NumberT, QuaProgramBroadcastExpression]):
     @property
     def unwrapped_scalar(self) -> QuaProgramBroadcastExpression:
         return self.unwrapped.broadcast
+
+
+StructT = TypeVar("StructT", bound="_QuaStruct")
+
+
+class QuaExternalStream(Generic[StructT], QuaExpression[QuaProgramExternalStreamRefExpression], metaclass=abc.ABCMeta):
+    def __init__(self, stream_id: int, struct_t: Type[StructT]):
+        super(QuaExternalStream, self).__init__(
+            QuaProgramExternalStreamRefExpression(stream_id=stream_id, loc=_get_loc())
+        )
+        self._stream_id = stream_id
+        self._struct_t = struct_t
+
+    @property
+    @abc.abstractmethod
+    def _direction(self) -> QuaProgramDirection:
+        pass
+
+    @property
+    def declaration_statement(self) -> QuaProgramExternalStreamDeclaration:
+        return QuaProgramExternalStreamDeclaration(
+            stream_id=self._stream_id,
+            expected_types=self._struct_t.__underlying_declarations__,
+            direction=self._direction,
+        )
+
+
+class QuaExternalIncomingStream(QuaExternalStream[StructT]):
+    @property
+    def _direction(self) -> QuaProgramDirection:
+        return QuaProgramDirection.INCOMING  # type: ignore[return-value]
+
+    def receive(self, struct: StructT) -> None:
+        # Alternative API to directly call `receive_from_external_stream`.
+        # Importing `receive_from_external_stream` here to avoid circular imports
+        from qm.qua._dsl.external_stream import receive_from_external_stream
+
+        receive_from_external_stream(self, struct)
+
+
+class QuaExternalOutgoingStream(QuaExternalStream[StructT]):
+    @property
+    def _direction(self) -> QuaProgramDirection:
+        return QuaProgramDirection.OUTGOING  # type: ignore[return-value]
+
+    def send(self, struct: StructT) -> None:
+        # Alternative API to directly call `send_to_external_stream`.
+        # Importing `send_to_external_stream` here to avoid circular imports
+        from qm.qua._dsl.external_stream import send_to_external_stream
+
+        send_to_external_stream(self, struct)
 
 
 class InputStreamInterface(metaclass=abc.ABCMeta):

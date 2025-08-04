@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, Literal, Mapping, Optional, TypedDict
+from typing import List, Tuple, Union, Literal, Mapping, Optional, Sequence, TypedDict
 
 from qm.type_hinting.general import Number
 
@@ -10,9 +10,10 @@ PortReferenceType = Union[Tuple[str, int], StandardPort]
 #  inheritance of the classes handled here and add a more robust validation to the types
 
 
-class AnalogOutputFilterConfigType(TypedDict, total=False):
+class AnalogOutputFilterConfigTypeQop35(TypedDict, total=False):
     feedforward: List[float]
-    feedback: List[float]
+    exponential: List[Tuple[float, float]]
+    exponential_dc_gain: Optional[float]
 
 
 class AnalogOutputFilterConfigTypeQop33(TypedDict, total=False):
@@ -21,9 +22,14 @@ class AnalogOutputFilterConfigTypeQop33(TypedDict, total=False):
     high_pass: Optional[float]
 
 
+class AnalogOutputFilterConfigType(TypedDict, total=False):
+    feedforward: List[float]
+    feedback: List[float]
+
+
 class AnalogOutputPortConfigType(TypedDict, total=False):
     offset: Number
-    filter: Union[AnalogOutputFilterConfigType, AnalogOutputFilterConfigTypeQop33]
+    filter: Union[AnalogOutputFilterConfigType, AnalogOutputFilterConfigTypeQop33, AnalogOutputFilterConfigTypeQop35]
     delay: int
     crosstalk: Mapping[int, Number]
     shareable: bool
@@ -39,7 +45,6 @@ class AnalogInputPortConfigType(TypedDict, total=False):
 class DigitalOutputPortConfigType(TypedDict, total=False):
     shareable: bool
     inverted: bool
-    level: Literal["TTL", "LVTTL"]
 
 
 class DigitalInputPortConfigType(TypedDict, total=False):
@@ -51,7 +56,7 @@ class DigitalInputPortConfigType(TypedDict, total=False):
 
 class AnalogOutputPortConfigTypeOctoDac(TypedDict, total=False):
     offset: Number
-    filter: Union[AnalogOutputFilterConfigType, AnalogOutputFilterConfigTypeQop33]
+    filter: Union[AnalogOutputFilterConfigType, AnalogOutputFilterConfigTypeQop33, AnalogOutputFilterConfigTypeQop35]
     delay: int
     crosstalk: Mapping[int, Number]
     shareable: bool
@@ -172,23 +177,22 @@ class IntegrationWeightConfigType(TypedDict, total=False):
     sine: Union[List[Tuple[float, int]], List[float]]
 
 
-class ConstantWaveFormConfigType(TypedDict, total=False):
+class ConstantWaveformConfigType(TypedDict, total=False):
     type: Literal["constant"]
     sample: float
 
 
-class CompressedWaveFormConfigType(TypedDict, total=False):
-    type: str
-    samples: List[float]
-    sample_rate: float
-
-
-class ArbitraryWaveFormConfigType(TypedDict, total=False):
+class ArbitraryWaveformConfigType(TypedDict, total=False):
     type: Literal["arbitrary"]
     samples: List[float]
     max_allowed_error: float
     sampling_rate: Number
     is_overridable: bool
+
+
+class WaveformArrayConfigType(TypedDict, total=False):
+    type: Literal["array"]
+    samples_array: Sequence[Sequence[float]]
 
 
 class DigitalWaveformConfigType(TypedDict, total=False):
@@ -294,16 +298,37 @@ class ElementConfigType(TypedDict, total=False):
     RF_outputs: Mapping[str, Tuple[str, int]]
 
 
-class DictQuaConfig(TypedDict, total=False):
-    version: Literal[1, "1"]
+class ControllerQuaConfig(TypedDict, total=False):
+    controllers: Mapping[str, Union[ControllerConfigType, OPX1000ControllerConfigType]]
+    octaves: Mapping[str, OctaveConfigType]
+    mixers: Mapping[str, Sequence[MixerConfigType]]
+
+
+class LogicalQuaConfig(TypedDict, total=False):
+    oscillators: Mapping[str, OscillatorConfigType]
+    elements: Mapping[str, ElementConfigType]
+    integration_weights: Mapping[str, IntegrationWeightConfigType]
+    waveforms: Mapping[str, Union[ArbitraryWaveformConfigType, ConstantWaveformConfigType, WaveformArrayConfigType]]
+    digital_waveforms: Mapping[str, DigitalWaveformConfigType]
+    pulses: Mapping[str, PulseConfigType]
+
+
+class FullQuaConfig(TypedDict, total=False):
+    """
+    The FullQuaConfig type represents the complete QUA configuration.
+    The QUA configuration is where we define our 'Quantum Machine' with its elements and their operations.
+    """
+
     oscillators: Mapping[str, OscillatorConfigType]
     elements: Mapping[str, ElementConfigType]
     controllers: Mapping[str, Union[ControllerConfigType, OPX1000ControllerConfigType]]
     octaves: Mapping[str, OctaveConfigType]
     integration_weights: Mapping[str, IntegrationWeightConfigType]
-    waveforms: Mapping[
-        str, Union[ArbitraryWaveFormConfigType, ConstantWaveFormConfigType, CompressedWaveFormConfigType]
-    ]
+    waveforms: Mapping[str, Union[ArbitraryWaveformConfigType, ConstantWaveformConfigType, WaveformArrayConfigType]]
     digital_waveforms: Mapping[str, DigitalWaveformConfigType]
     pulses: Mapping[str, PulseConfigType]
-    mixers: Mapping[str, List[MixerConfigType]]
+    mixers: Mapping[str, Sequence[MixerConfigType]]
+
+
+# The previous name for FullQuaConfig. It is kept for backwards compatibility.
+DictQuaConfig = FullQuaConfig

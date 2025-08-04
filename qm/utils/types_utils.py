@@ -18,7 +18,7 @@ import numpy as np
 import numpy.typing
 
 from qm.exceptions import QmValueError
-from qm.type_hinting import Value, NumberT
+from qm.type_hinting.general import Value, NumberT
 
 GeneralConversionType = Union[str, bytes, bytearray, memoryview]
 FloatConversionType = Union[SupportsFloat, SupportsIndex, GeneralConversionType]
@@ -67,8 +67,8 @@ def collection_has_type_float(collection: Collection[NumberType]) -> bool:
 
 
 def get_iterable_elements_datatype(
-    it: Union[numpy.typing.NDArray["NumberT"], Sequence["NumberT"], "NumberT"]  # type: ignore[type-var]
-) -> Type["NumberT"]:
+    it: Union[numpy.typing.NDArray[NumberT], Sequence[NumberT], NumberT]  # type: ignore[type-var]
+) -> Type[NumberT]:
     if isinstance(it, np.ndarray):
         item = cast("NumberT", it[0].item())
         return type(item)
@@ -78,7 +78,7 @@ def get_iterable_elements_datatype(
             raise ValueError("Multiple datatypes encountered in iterable object")
         item = next(iter(it))
         if isinstance(item, np.generic):
-            return type(item.item())  # type: ignore[attr-defined]
+            return type(item.item())
         else:
             return type(item)
     else:

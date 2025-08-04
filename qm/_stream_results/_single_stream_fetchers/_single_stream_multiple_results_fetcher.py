@@ -2,41 +2,42 @@ from typing import TYPE_CHECKING, List, Union, Optional, cast
 
 import numpy
 
-from qm.persistence import BaseStore
 from qm.api.v2.job_result_api import JobResultApi
+from qm.api.models.jobs import JobResultItemSchema
 from qm.api.job_result_api import JobResultServiceApi
 from qm.api.models.capabilities import ServerCapabilities
 from qm.exceptions import QmNoResultsError, QmInvalidSchemaError
 from qm.StreamMetadata import StreamMetadata, StreamMetadataError
-from qm.results.base_streaming_result_fetcher import JobResultItemSchema, BaseStreamingResultFetcher
+from qm._stream_results._multiple_streams_fetcher import MultipleStreamsFetcher
+from qm._stream_results._single_stream_fetchers._base_single_stream_fetcher import BaseSingleStreamFetcher
 
 TIMESTAMPS_LEGACY_EXT = "_timestamps"
 
 if TYPE_CHECKING:
-    from qm import StreamingResultFetcher
+    from qm import StreamsManager
 
 
-class MultipleStreamingResultFetcher(BaseStreamingResultFetcher):
+class SingleStreamMultipleResultFetcher(BaseSingleStreamFetcher):
     """A handle to a result of a pipeline terminating with ``save_all``"""
 
     def __init__(
         self,
-        job_results: "StreamingResultFetcher",
+        job_results: "StreamsManager",
         schema: JobResultItemSchema,
         service: Union[JobResultServiceApi, JobResultApi],
-        store: BaseStore,
         stream_metadata_errors: List[StreamMetadataError],
         stream_metadata: Optional[StreamMetadata],
         capabilities: ServerCapabilities,
+        multiple_streams_fetcher: Optional[MultipleStreamsFetcher],
     ) -> None:
         self.job_results = job_results
         super().__init__(
             schema=schema,
             service=service,
-            store=store,
             stream_metadata_errors=stream_metadata_errors,
             stream_metadata=stream_metadata,
             capabilities=capabilities,
+            multiple_results_fetcher=multiple_streams_fetcher,
         )
 
     def _validate_schema(self) -> None:
@@ -86,7 +87,8 @@ class MultipleStreamingResultFetcher(BaseStreamingResultFetcher):
 
                 fetched_length = len(values_result)
                 if isinstance(item, slice):
-                    item = slice(item.start, item.start + fetched_length, item.step)
+                    start = item.start if item.start is not None else 0
+                    item = slice(start, start + fetched_length, item.step)
                 else:
                     item = slice(0, fetched_length)
 

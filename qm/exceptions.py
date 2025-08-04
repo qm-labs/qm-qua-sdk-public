@@ -1,12 +1,14 @@
 from pprint import pformat
 from collections import defaultdict
 from collections.abc import Collection
-from typing import Any, List, Tuple, Generic, TypeVar
+from abc import ABCMeta, abstractmethod
+from typing import Any, List, Generic, TypeVar, Sequence
 
 import betterproto
 from marshmallow import ValidationError
 
 from qm.StreamMetadata import StreamMetadataError
+from qm.grpc.qm_manager import ConfigValidationMessage, PhysicalValidationMessage
 
 
 class QmQuaException(Exception):
@@ -27,15 +29,38 @@ class OctaveConfigDeprecationException(QmmException):
         )
 
 
+class ProgramScopeAccessError(QmQuaException):
+    def __init__(self) -> None:
+        super().__init__("Program cannot be accessed while still in scope.")
+
+
+class NoScopeFoundException(QmQuaException):
+    pass
+
+
 class JobNotFoundException(QmQuaException):
     def __init__(self, job_id: str) -> None:
         super().__init__(f"Job {job_id} not found.")
 
 
 class OpenQmException(QmQuaException):
-    def __init__(self, message: str, *args: Any, errors: List[Tuple[str, str, str]]):
-        super().__init__(message, *args)
-        self.errors = errors
+    def __init__(
+        self,
+        config_validation_errors: Sequence[ConfigValidationMessage],
+        physical_validation_errors: Sequence[PhysicalValidationMessage],
+    ):
+        self.config_validation_formatted_errors = QopConfigValidationError(
+            config_validation_errors
+        ).validation_formatted_errors
+        self.physical_validation_formatted_errors = QopPhysicalValidationError(
+            physical_validation_errors
+        ).validation_formatted_errors
+
+    def __str__(self) -> str:
+        config_validation_error_message = "\n".join(self.config_validation_formatted_errors)
+        physical_validation_error_message = "\n".join(self.physical_validation_formatted_errors)
+
+        return f"Can not open QM, see the following errors:\n{config_validation_error_message}\n{physical_validation_error_message}"
 
 
 class FailedToExecuteJobException(QmQuaException):
@@ -51,6 +76,10 @@ class CompilationException(QmQuaException):
 
 
 class JobCancelledError(QmQuaException):
+    pass
+
+
+class JobFailedError(QmQuaException):
     pass
 
 
@@ -252,6 +281,14 @@ class InvalidOctaveParameter(ConfigValidationException):
     pass
 
 
+class OctaveUnsupportedOnUpdate(ConfigValidationException):
+    pass
+
+
+class ConfigurationLockedByOctave(ConfigValidationException):
+    pass
+
+
 class ElementOutputConnectionAmbiguity(ConfigValidationException):
     pass
 
@@ -273,6 +310,58 @@ class StreamProcessingDataLossError(QmQuaException):
 
 
 class DataFetchingError(QmQuaException):
+    pass
+
+
+ValidationType = TypeVar("ValidationType", PhysicalValidationMessage, ConfigValidationMessage)
+
+
+class QopValidationError(QmQuaException, Generic[ValidationType], metaclass=ABCMeta):
+    def __init__(self, validation_errors: Sequence[ValidationType]):
+        self.validation_formatted_errors = self._format_validation_errors(validation_errors)
+
+    @property
+    @abstractmethod
+    def error_type(self) -> str:
+        pass
+
+    def _format_validation_errors(self, validation_errors: Sequence[ValidationType]) -> List[str]:
+        error_messages = []
+        for sub_error in validation_errors:
+            error_messages.append(
+                f'{self.error_type} in key "{sub_error.path}" [{sub_error.group}] : {sub_error.message}'
+            )
+        return error_messages
+
+    def __str__(self) -> str:
+        return "\n".join(self.validation_formatted_errors)
+
+
+class QopPhysicalValidationError(QopValidationError[PhysicalValidationMessage]):
+    """
+    An exception class for describing physical configuration errors arising from validation by the QOP server.
+    """
+
+    @property
+    def error_type(self) -> str:
+        return "PHYSICAL CONFIG ERROR"
+
+
+class QopConfigValidationError(QopValidationError[ConfigValidationMessage]):
+    """
+    An exception class for describing configuration errors arising from validation by the QOP server.
+    """
+
+    @property
+    def error_type(self) -> str:
+        return "CONFIG ERROR"
+
+
+class ReservedFieldNameError(QmQuaException):
+    pass
+
+
+class InvalidQuaArraySubclassError(QmQuaException):
     pass
 
 

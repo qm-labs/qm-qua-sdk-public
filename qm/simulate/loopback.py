@@ -32,7 +32,7 @@ class LoopbackInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInt
 
             2. Virtual connection between elements:
 
-                ``(fromQE: str, toQE: str, toQEInput: int)``
+                ``(fromElement: str, toElement: str, toElementInput: int)``
         latency: The latency between the OPX outputs and its input.
         noisePower: How much noise to add to the input.
 
@@ -108,7 +108,7 @@ class LoopbackInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInt
                 to_port=tuple_4[3],
             )
         if len(connection) == 3:
-            cls._validate_connection_type(connection, [str, str, int], "(from_QE, to_QE, to_QEInput)")
+            cls._validate_connection_type(connection, [str, str, int], "(from_Element, to_Element, to_ElementInput)")
             tuple_3 = cast(Tuple[str, str, int], connection)
             return ExecutionRequestSimulateSimulationInterfaceLoopbackConnections(
                 from_controller=tuple_3[0],

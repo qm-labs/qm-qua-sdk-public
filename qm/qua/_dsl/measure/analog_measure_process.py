@@ -27,7 +27,6 @@ from qm.grpc.qua import (
     QuaProgramAnalogMeasureProcessHighResTimeTagging,
     QuaProgramAnalogProcessTargetScalarProcessTarget,
     QuaProgramAnalogProcessTargetVectorProcessTarget,
-    QuaProgramAnalogMeasureProcessDualBareIntegration,
     QuaProgramAnalogMeasureProcessDualDemodIntegration,
 )
 
@@ -198,21 +197,6 @@ class DualMeasureProcess(AnalogMeasureProcess, metaclass=abc.ABCMeta):
         self.element_output2 = element_output2
         self.iw1 = iw1
         self.iw2 = iw2
-
-
-class DualBareIntegration(DualMeasureProcess):
-    @property
-    def _analog_unwrapped(self) -> QuaProgramAnalogMeasureProcess:
-        return QuaProgramAnalogMeasureProcess(
-            loc=self.loc,
-            dual_bare_integration=QuaProgramAnalogMeasureProcessDualBareIntegration(
-                integration1=QuaProgramIntegrationWeightReference(name=self.iw1),
-                integration2=QuaProgramIntegrationWeightReference(name=self.iw2),
-                element_output1=self.element_output1,
-                element_output2=self.element_output2,
-                target=self.target.unwrapped,
-            ),
-        )
 
 
 class DualDemodIntegration(DualMeasureProcess):

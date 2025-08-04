@@ -1,97 +1,48 @@
 import abc
-import json
 import logging
 from io import BytesIO
-from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple, Union, BinaryIO, Optional, Protocol, cast
+from typing import Union, BinaryIO, Optional
 
-import numpy
 import numpy.typing
-from numpy.lib import format as _format
 
-from qm.persistence import BaseStore
 from qm.utils.async_utils import run_async
-from qm.type_hinting.general import PathLike
 from qm.api.v2.job_result_api import JobResultApi
+from qm.exceptions import InvalidStreamMetadataError
 from qm.api.job_result_api import JobResultServiceApi
 from qm.utils.general_utils import run_until_with_timeout
 from qm.StreamMetadata import StreamMetadata, StreamMetadataError
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
-from qm.grpc.results_analyser import GetJobNamedResultHeaderResponse
-from qm.exceptions import InvalidStreamMetadataError, StreamProcessingDataLossError
+from qm._stream_results._multiple_streams_fetcher import MultipleStreamsFetcher
+from qm.api.models.jobs import DtypeType, JobStreamingState, JobResultItemSchema, JobNamedResultHeader
+from qm._stream_results._utils import (
+    _standardize_slice,
+    assert_no_dataloss,
+    log_execution_errors,
+    _create_results_array,
+)
 
 logger = logging.getLogger(__name__)
 
-DtypeType = List[List[str]]
+
+VERY_LONG_TIME = 1e8  # 3.17 years
 
 
-class JobStreamingStateProtocol(Protocol):
-    done: bool
-    closed: bool
-    has_dataloss: bool
-
-
-def _parse_dtype(simple_dtype: str) -> DtypeType:
-    def hinted_tuple_hook(obj: Any) -> Any:
-        if "__tuple__" in obj:
-            return tuple(obj["items"])
-        else:
-            return obj
-
-    dtype = json.loads(simple_dtype, object_hook=hinted_tuple_hook)
-    return cast(DtypeType, dtype)
-
-
-@dataclass
-class JobResultItemSchema:
-    name: str
-    dtype: DtypeType
-    shape: Tuple[int, ...]
-    is_single: bool
-    expected_count: int
-
-
-@dataclass
-class JobResultSchema:
-    items: Dict[str, JobResultItemSchema]
-
-
-@dataclass
-class NamedJobResultHeader:
-    count_so_far: int
-    is_single: bool
-    output_name: str
-    job_id: str
-    d_type: DtypeType
-    shape: Tuple[int, ...]
-    has_dataloss: bool
-
-
-@dataclass
-class JobStreamingState:
-    job_id: str
-    done: bool
-    closed: bool
-    has_dataloss: bool
-
-
-class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
+class BaseSingleStreamFetcher(metaclass=abc.ABCMeta):
     def __init__(
         self,
         schema: JobResultItemSchema,
         service: Union[JobResultServiceApi, JobResultApi],
-        store: BaseStore,
-        stream_metadata_errors: List[StreamMetadataError],
+        stream_metadata_errors: list[StreamMetadataError],
         stream_metadata: Optional[StreamMetadata],
         capabilities: ServerCapabilities,
+        multiple_results_fetcher: Optional[MultipleStreamsFetcher],
     ) -> None:
         self._schema = schema
         self._service = service
-        self._store = store
         self._stream_metadata_errors = stream_metadata_errors
         self._stream_metadata = stream_metadata
         self._has_job_streaming_state = capabilities.supports(QopCaps.job_streaming_state)
-
+        self._multiple_streams_fetcher = multiple_results_fetcher
         self._validate_schema()
 
     @property
@@ -104,7 +55,7 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
 
     @property
     def name(self) -> str:
-        """The name of result this handle is connected to"""
+        """The name of the result this handle is connected to"""
         return self._schema.name
 
     @property
@@ -135,13 +86,7 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
             raise InvalidStreamMetadataError(self._stream_metadata_errors)
         return self._stream_metadata
 
-    def _open_bytes_writer(self, path: Optional[PathLike]) -> BinaryIO:
-        if path is not None:
-            return open(path, "wb+")
-        else:
-            return self._store.job_named_result(self._job_id, self._schema.name).for_writing()
-
-    def wait_for_values(self, count: int = 1, timeout: float = float("infinity")) -> None:
+    def wait_for_values(self, count: int = 1, timeout: float = VERY_LONG_TIME) -> None:
         """Wait until we know at least `count` values were processed for this named result
 
         Args:
@@ -155,15 +100,15 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
             timeout_message=f"result {self.name} was not done in time",
         )
 
-    def wait_for_all_values(self, timeout: float = float("infinity")) -> bool:
+    def wait_for_all_values(self, timeout: float = VERY_LONG_TIME) -> bool:
         """Wait until we know all values were processed for this named result
 
         Args:
             timeout: Timeout for waiting in seconds
 
         Returns:
-            True if job finished successfully and False if job has
-            closed before done
+            True if the job finished successfully and False if the job was closed before it was done.
+            If the job is still running when reaching the timeout, a TimeoutError is raised.
         """
 
         def on_iteration() -> bool:
@@ -204,47 +149,17 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
         state = self.get_job_state()
         return state.has_dataloss
 
-    async def _add_results_to_writer(self, data_writer: BinaryIO, start: int, stop: int) -> int:
-        _count_data_written = 0
-        async for result in self._service.get_job_named_result(self._schema.name, start, stop - start):
-            data_writer.write(result.data)
-            _count_data_written += result.count_of_items
-
-        return _count_data_written
-
     def get_job_state(self) -> JobStreamingState:
-        response: JobStreamingStateProtocol
         if self._has_job_streaming_state:
-            response = self._service.get_job_state()
-        else:
-            # This is just for backward compatibility
-            response = cast(GetJobNamedResultHeaderResponse, self._service.get_named_header(self.name, False))
-        return JobStreamingState(
-            job_id=self._job_id,
-            done=response.done,
-            closed=response.closed,
-            has_dataloss=response.has_dataloss,
-        )
+            return self._service.get_job_state()
+        #  This is just for backward compatibility
+        assert isinstance(self._service, JobResultServiceApi)
+        return self._service.get_state_from_header(self.name, False)
 
-    def _get_named_header(self, check_for_errors: bool = True, flat_struct: bool = False) -> NamedJobResultHeader:
+    def _get_named_header(self, check_for_errors: bool = True, flat_struct: bool = False) -> JobNamedResultHeader:
         response = self._service.get_named_header(self.name, flat_struct)
-        dtype = _parse_dtype(response.simple_d_type)
-
-        if check_for_errors and response.has_execution_errors:
-            logger.error(
-                "Runtime errors were detected. Please fetch the execution report using job.execution_report() for "
-                "more information"
-            )
-
-        return NamedJobResultHeader(
-            count_so_far=response.count_so_far,
-            is_single=response.is_single,
-            output_name=self.name,
-            job_id=self.job_id,
-            d_type=dtype,
-            shape=tuple(response.shape),
-            has_dataloss=response.has_dataloss,
-        )
+        log_execution_errors(response, self.name, check_for_errors)
+        return response
 
     def fetch_all(
         self, *, check_for_errors: bool = True, flat_struct: bool = False
@@ -260,7 +175,7 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
             flat_struct: results will have a flat structure - dimensions will be part of the shape and not of the type
 
         Returns:
-            all result of current result stream
+            all results of current result stream
         """
         return self.fetch(
             slice(0, self.count_so_far()),
@@ -313,7 +228,7 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
             flat_struct: results will have a flat structure - dimensions will be part of the shape and not of the type
 
         Returns:
-            a single result if item is integer or multiple results if item is Python slice object.
+            a single result if item is integer or multiple results if item is a Python slice object.
 
         Raises:
             Exception: If item is not an integer or a slice object.
@@ -327,62 +242,31 @@ class BaseStreamingResultFetcher(metaclass=abc.ABCMeta):
                                  # same as res.fetch_all()[1:6]
             ```
         """
-        if type(item) is int:
-            start = item
-            stop = item + 1
-            step = None
-        elif type(item) is slice:
-            start = item.start
-            stop = item.stop
-            step = item.step
-        else:
-            raise Exception("fetch supports only int or slice")
-
-        if step != 1 and step is not None:
-            raise Exception("fetch supports step=1 or None in slices")
-
+        if self._multiple_streams_fetcher is not None:
+            flat_struct_items = {self.name} if flat_struct else frozenset()
+            return self._multiple_streams_fetcher.fetch({self.name: item}, flat_struct_items, check_for_errors)[
+                self.name
+            ]
+        # This class tries to use the newer API of fetching multiple stream at once.
+        # If the server does not have this capability, it resorts to the older API.
         header = self._get_named_header(check_for_errors=check_for_errors, flat_struct=flat_struct)
+        assert_no_dataloss(header, self._job_id)
+        slicer = _standardize_slice(self.name, item, header)
+        array = self._fetch_results(header, slicer.start, slicer.stop)
 
-        if header.has_dataloss:
-            raise StreamProcessingDataLossError(f"Data loss detected in data for job: {self._job_id}")
+        return array
 
-        if stop is None:
-            stop = header.count_so_far
-        if start is None:
-            start = 0
-
-        writer = self._fetch_all_job_results(header, start, stop)
-
-        return cast(numpy.typing.NDArray[numpy.generic], numpy.load(writer))
-
-    def _fetch_all_job_results(self, header: NamedJobResultHeader, start: int, stop: int) -> BinaryIO:
-        writer = BytesIO()
+    def _fetch_results(
+        self, header: JobNamedResultHeader, start: int, stop: int
+    ) -> numpy.typing.NDArray[numpy.generic]:
         data_writer = BytesIO()
-
         count_data_written = run_async(self._add_results_to_writer(data_writer, start, stop))
+        return _create_results_array(count_data_written, header, data_writer)
 
-        final_shape = _get_final_shape(count_data_written, header.shape)
+    async def _add_results_to_writer(self, data_writer: BinaryIO, start: int, stop: int) -> int:
+        _count_data_written = 0
+        async for result in self._service.get_job_named_result(self._schema.name, start, stop - start):
+            data_writer.write(result.data)
+            _count_data_written += result.count_of_items
 
-        _write_header(writer, final_shape, header.d_type)
-
-        data_writer.seek(0)
-        for d in data_writer:
-            writer.write(d)
-
-        writer.seek(0)
-        return writer
-
-
-def _write_header(writer: BinaryIO, shape: Tuple[int, ...], d_type: object) -> None:
-    _format.write_array_header_2_0(writer, {"descr": d_type, "fortran_order": False, "shape": shape})  # type: ignore[no-untyped-call]
-
-
-def _get_final_shape(count: int, shape: Tuple[int, ...]) -> Tuple[int, ...]:
-    if count == 1:
-        final_shape = shape
-    else:
-        if len(shape) == 1 and shape[0] == 1:
-            final_shape = (count,)
-        else:
-            final_shape = (count,) + shape
-    return final_shape
+        return _count_data_written

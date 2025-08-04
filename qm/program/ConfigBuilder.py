@@ -1,4 +1,3 @@
-import warnings
 from typing import Dict, List, Tuple, Union, Literal, Mapping, Optional, cast
 
 import betterproto
@@ -7,11 +6,12 @@ from dependency_injector.wiring import Provide, inject
 from qm.type_hinting import Number
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.containers.capabilities_container import CapabilitiesContainer
+from qm.utils.config_utils import get_logical_pb_config, get_controller_pb_config
 from qm.type_hinting.config_types import (
     FEM_IDX,
     Band,
     Upconverter,
-    DictQuaConfig,
+    FullQuaConfig,
     LfFemConfigType,
     MixerConfigType,
     MwFemConfigType,
@@ -28,23 +28,24 @@ from qm.type_hinting.config_types import (
     MixWaveformConfigType,
     SingleInputConfigType,
     DigitalInputConfigType,
+    WaveformArrayConfigType,
     SingleWaveformConfigType,
     AnalogInputPortConfigType,
     DigitalWaveformConfigType,
     InputCollectionConfigType,
     AnalogOutputPortConfigType,
-    ConstantWaveFormConfigType,
+    ConstantWaveformConfigType,
     DigitalInputPortConfigType,
-    ArbitraryWaveFormConfigType,
+    ArbitraryWaveformConfigType,
     DigitalOutputPortConfigType,
     IntegrationWeightConfigType,
     OPX1000ControllerConfigType,
     AnalogOutputFilterConfigType,
-    CompressedWaveFormConfigType,
     MwFemAnalogInputPortConfigType,
     MwFemAnalogOutputPortConfigType,
     TimeTaggingParametersConfigType,
     AnalogOutputFilterConfigTypeQop33,
+    AnalogOutputFilterConfigTypeQop35,
     AnalogOutputPortConfigTypeOctoDac,
 )
 from qm.grpc.qua_config import (
@@ -67,10 +68,12 @@ from qm.grpc.qua_config import (
     QuaConfigOctoDacFemDec,
     QuaConfigPortReference,
     QuaConfigMultipleInputs,
+    QuaConfigCorrectionEntry,
     QuaConfigMicrowaveFemDec,
     QuaConfigMultipleOutputs,
     QuaConfigAdcPortReference,
     QuaConfigDacPortReference,
+    QuaConfigWaveformArrayDec,
     QuaConfigPulseDecOperation,
     QuaConfigAnalogInputPortDec,
     QuaConfigDigitalWaveformDec,
@@ -80,7 +83,6 @@ from qm.grpc.qua_config import (
     QuaConfigArbitraryWaveformDec,
     QuaConfigDigitalOutputPortDec,
     QuaConfigIntegrationWeightDec,
-    QuaConfigCompressedWaveformDec,
     QuaConfigOutputPulseParameters,
     QuaConfigSingleInputCollection,
     QuaConfigAnalogOutputPortFilter,
@@ -98,8 +100,60 @@ from qm.grpc.qua_config import (
 )
 
 
-def convert_msg_to_config(config: QuaConfig) -> DictQuaConfig:
-    return _convert_v1_beta(config.v1_beta)
+def convert_msg_to_config(config: QuaConfig) -> FullQuaConfig:
+    controller_config = get_controller_pb_config(config)
+    logical_config = get_logical_pb_config(config)
+
+    if controller_config.control_devices:
+        controllers = _convert_controller_types(controller_config.control_devices)
+    elif isinstance(controller_config, QuaConfigQuaConfigV1) and controller_config.controllers:
+        controllers = {
+            name: _convert_controller(controller) for name, controller in controller_config.controllers.items()
+        }
+    else:
+        controllers = {}
+
+    result: FullQuaConfig = {
+        "controllers": controllers,
+        "oscillators": _convert_oscillators(logical_config.oscillators),
+        "elements": _convert_elements(logical_config.elements),
+        "pulses": _convert_pulses(logical_config.pulses),
+        "waveforms": _convert_wave_forms(logical_config.waveforms),
+        "digital_waveforms": _convert_digital_wave_forms(logical_config.digital_waveforms),
+        "integration_weights": _convert_integration_weights(logical_config.integration_weights),
+        "mixers": _convert_mixers(controller_config.mixers),
+    }
+
+    return result
+
+
+def _convert_single_correction_entry(correction: QuaConfigCorrectionEntry) -> MixerConfigType:
+    frequency: Optional[Union[int, float]]
+    lo_frequency: Optional[Union[int, float]]
+
+    if correction.frequency_double:
+        frequency = correction.frequency_double
+    else:
+        frequency = correction.frequency
+
+    if correction.frequency_negative is True:
+        assert frequency is not None  # Mypy thinks it can be None, but it can't really (frequency has a default value)
+        frequency = -frequency
+
+    if correction.lo_frequency_double:
+        lo_frequency = correction.lo_frequency_double
+    else:
+        lo_frequency = correction.lo_frequency
+
+    correction_as_dict = cast(
+        MixerConfigType,
+        {
+            "intermediate_frequency": frequency,
+            "lo_frequency": lo_frequency,
+            "correction": _convert_matrix(correction.correction),
+        },
+    )
+    return correction_as_dict
 
 
 def _convert_mixers(mixers: Dict[str, QuaConfigMixerDec]) -> Dict[str, List[MixerConfigType]]:
@@ -107,25 +161,8 @@ def _convert_mixers(mixers: Dict[str, QuaConfigMixerDec]) -> Dict[str, List[Mixe
     for name, data in mixers.items():
         temp_list: List[MixerConfigType] = []
         for correction in data.correction:
-            if correction.frequency_double:
-                frequency = correction.frequency_double
-            else:
-                frequency = correction.frequency
-
-            if correction.frequency_negative:
-                frequency = -frequency
-
-            if correction.lo_frequency_double:
-                lo_frequency = correction.lo_frequency_double
-            else:
-                lo_frequency = correction.lo_frequency
-
-            temp_dict: MixerConfigType = {
-                "intermediate_frequency": frequency,
-                "lo_frequency": lo_frequency,
-                "correction": _convert_matrix(correction.correction),
-            }
-            temp_list.append(temp_dict)
+            correction_as_dict = _convert_single_correction_entry(correction)
+            temp_list.append(correction_as_dict)
 
         ret[name] = temp_list
     return ret
@@ -164,13 +201,13 @@ def _convert_digital_wave_forms(
 
 def _convert_wave_forms(
     wave_forms: Dict[str, QuaConfigWaveformDec]
-) -> Dict[str, Union[ArbitraryWaveFormConfigType, ConstantWaveFormConfigType, CompressedWaveFormConfigType]]:
-    ret: Dict[str, Union[ArbitraryWaveFormConfigType, ConstantWaveFormConfigType, CompressedWaveFormConfigType]] = {}
+) -> Dict[str, Union[ArbitraryWaveformConfigType, ConstantWaveformConfigType, WaveformArrayConfigType]]:
+
+    ret: Dict[str, Union[ArbitraryWaveformConfigType, ConstantWaveformConfigType, WaveformArrayConfigType]] = {}
     for name, data in wave_forms.items():
         key_name, curr_waveform = betterproto.which_one_of(data, "waveform_oneof")
         if isinstance(curr_waveform, QuaConfigArbitraryWaveformDec):
-
-            arbitrary_waveform_dict: ArbitraryWaveFormConfigType = {
+            arbitrary_waveform_dict: ArbitraryWaveformConfigType = {
                 "type": "arbitrary",
                 "samples": curr_waveform.samples,
                 "is_overridable": curr_waveform.is_overridable,
@@ -182,19 +219,19 @@ def _convert_wave_forms(
             ret[name] = arbitrary_waveform_dict
 
         elif isinstance(curr_waveform, QuaConfigConstantWaveformDec):
-            constant_waveform_dict: ConstantWaveFormConfigType = {
+            constant_waveform_dict: ConstantWaveformConfigType = {
                 "type": "constant",
                 "sample": curr_waveform.sample,
             }
             ret[name] = constant_waveform_dict
-        elif isinstance(curr_waveform, QuaConfigCompressedWaveformDec):
-            warnings.warn("Compressed waveform is deprecated.", DeprecationWarning)
-            compressed_waveform_dict: CompressedWaveFormConfigType = {
-                "type": "compressed",
-                "samples": curr_waveform.samples,
-                "sample_rate": curr_waveform.sample_rate,
+
+        elif isinstance(curr_waveform, QuaConfigWaveformArrayDec):
+            waveform_array_dict: WaveformArrayConfigType = {
+                "type": "array",
+                "samples_array": [waveform_samples.samples for waveform_samples in curr_waveform.samples_array],
             }
-            ret[name] = compressed_waveform_dict
+            ret[name] = waveform_array_dict
+
         else:
             raise Exception(f"Unknown waveform type - {key_name}")
 
@@ -217,27 +254,6 @@ def _convert_pulses(pulses: Dict[str, QuaConfigPulseDec]) -> Dict[str, PulseConf
             temp_dict["digital_marker"] = data.digital_marker
         ret[name] = temp_dict
     return ret
-
-
-def _convert_v1_beta(config: QuaConfigQuaConfigV1) -> DictQuaConfig:
-    if config.control_devices:
-        controllers = _convert_controller_types(config.control_devices)
-    elif config.controllers:
-        controllers = {name: _convert_controller(controller) for name, controller in config.controllers.items()}
-    else:
-        controllers = {}
-    result: DictQuaConfig = {
-        "version": 1,
-        "controllers": controllers,
-        "oscillators": _convert_oscillators(config.oscillators),
-        "elements": _convert_elements(config.elements),
-        "pulses": _convert_pulses(config.pulses),
-        "waveforms": _convert_wave_forms(config.waveforms),
-        "digital_waveforms": _convert_digital_wave_forms(config.digital_waveforms),
-        "integration_weights": _convert_integration_weights(config.integration_weights),
-        "mixers": _convert_mixers(config.mixers),
-    }
-    return result
 
 
 def _convert_controller(data: QuaConfigControllerDec) -> ControllerConfigType:
@@ -293,35 +309,50 @@ def _convert_mw_fem(data: QuaConfigMicrowaveFemDec) -> MwFemConfigType:
     return ret
 
 
+def _convert_single_mw_analog_output(
+    data: QuaConfigMicrowaveAnalogOutputPortDec, capabilities: ServerCapabilities
+) -> MwFemAnalogOutputPortConfigType:
+    upconverters = data.upconverters_v2.value if capabilities.supports(QopCaps.config_v2) else data.upconverters
+
+    ret = cast(
+        MwFemAnalogOutputPortConfigType,
+        {
+            "sampling_rate": data.sampling_rate,
+            "full_scale_power_dbm": data.full_scale_power_dbm,
+            "band": cast(Band, data.band),
+            "delay": data.delay,
+            "shareable": data.shareable,
+            "upconverters": {cast(Upconverter, k): {"frequency": v.frequency} for k, v in upconverters.items()},
+        },
+    )
+    return ret
+
+
+@inject
 def _convert_mw_analog_outputs(
-    outputs: Dict[int, QuaConfigMicrowaveAnalogOutputPortDec]
+    outputs: Dict[int, QuaConfigMicrowaveAnalogOutputPortDec],
+    capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
 ) -> Mapping[Union[int, str], MwFemAnalogOutputPortConfigType]:
-    return {
-        idx: {
-            "sampling_rate": output.sampling_rate,
-            "full_scale_power_dbm": output.full_scale_power_dbm,
-            "band": cast(Band, output.band),
-            "delay": output.delay,
-            "shareable": output.shareable,
-            "upconverters": {cast(Upconverter, k): {"frequency": v.frequency} for k, v in output.upconverters.items()},
-        }
-        for idx, output in outputs.items()
-    }
+    return {idx: _convert_single_mw_analog_output(output, capabilities) for idx, output in outputs.items()}
+
+
+def _convert_single_mw_analog_input(data: QuaConfigMicrowaveAnalogInputPortDec) -> MwFemAnalogInputPortConfigType:
+    return cast(
+        MwFemAnalogInputPortConfigType,
+        {
+            "band": cast(Literal[1, 3, 3], data.band),
+            "shareable": data.shareable,
+            "gain_db": data.gain_db,
+            "sampling_rate": data.sampling_rate,
+            "downconverter_frequency": data.downconverter.frequency,
+        },
+    )
 
 
 def _convert_mw_analog_inputs(
     inputs: Dict[int, QuaConfigMicrowaveAnalogInputPortDec]
 ) -> Mapping[Union[int, str], MwFemAnalogInputPortConfigType]:
-    return {
-        idx: {
-            "band": cast(Literal[1, 3, 3], _input.band),
-            "shareable": _input.shareable,
-            "gain_db": _input.gain_db,
-            "sampling_rate": _input.sampling_rate,
-            "downconverter_frequency": _input.downconverter.frequency,
-        }
-        for idx, _input in inputs.items()
-    }
+    return {idx: _convert_single_mw_analog_input(_input) for idx, _input in inputs.items()}
 
 
 def _convert_octo_dac(data: QuaConfigOctoDacFemDec) -> LfFemConfigType:
@@ -523,13 +554,28 @@ def _convert_element_thread(element_thread: QuaConfigElementThread) -> str:
 def _convert_analog_output_filters(
     data: QuaConfigAnalogOutputPortFilter,
     capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
-) -> Union[AnalogOutputFilterConfigTypeQop33, AnalogOutputFilterConfigType]:
+) -> Union[AnalogOutputFilterConfigTypeQop35, AnalogOutputFilterConfigTypeQop33, AnalogOutputFilterConfigType]:
     if capabilities.supports(QopCaps.exponential_iir_filter):
-        ret33: AnalogOutputFilterConfigTypeQop33 = {
-            "feedforward": data.feedforward,
-            "exponential": [(exp_params.amplitude, exp_params.time_constant) for exp_params in data.iir.exponential],
-            "high_pass": data.iir.high_pass,
-        }
+        raw_exponential = (
+            data.iir.exponential_v2.value if capabilities.supports(QopCaps.config_v2) else data.iir.exponential
+        )
+        exponential = [(exp_params.amplitude, exp_params.time_constant) for exp_params in raw_exponential]
+        feedforward = data.feedforward_v2.value if capabilities.supports(QopCaps.config_v2) else data.feedforward
+
+        ret33: AnalogOutputFilterConfigTypeQop33 = {"feedforward": feedforward, "exponential": exponential}
+
+        if capabilities.supports(QopCaps.config_v2):
+            # We handle both cases: the container being None (as likely returned by the Gateway),
+            # and an initialized container with value=None.
+            ret33["high_pass"] = data.iir.high_pass_v2.value if data.iir.high_pass_v2 else None
+        else:
+            ret33["high_pass"] = data.iir.high_pass
+
+        if capabilities.supports(QopCaps.exponential_dc_gain_filter):
+            exponential_dc_gain = data.iir.exponential_dc_gain.value if data.iir.exponential_dc_gain else None
+            ret35 = cast(AnalogOutputFilterConfigTypeQop35, {**ret33, "exponential_dc_gain": exponential_dc_gain})
+            return ret35
+
         return ret33
     else:
         ret: AnalogOutputFilterConfigType = {"feedforward": data.feedforward, "feedback": data.feedback}
@@ -537,13 +583,16 @@ def _convert_analog_output_filters(
 
 
 def _convert_single_analog_output(data: QuaConfigAnalogOutputPortDec) -> AnalogOutputPortConfigType:
-    ret: AnalogOutputPortConfigType = {
-        "offset": data.offset,
-        "delay": data.delay,
-        "shareable": data.shareable,
-        "filter": _convert_analog_output_filters(data.filter),
-        "crosstalk": data.crosstalk,
-    }
+    ret = cast(
+        AnalogOutputPortConfigType,
+        {
+            "offset": data.offset,
+            "delay": data.delay,
+            "shareable": data.shareable,
+            "filter": _convert_analog_output_filters(data.filter),
+            "crosstalk": data.crosstalk,
+        },
+    )
     return ret
 
 
@@ -558,43 +607,52 @@ def _convert_controller_analog_outputs(
 
 def _convert_single_octo_dac_fem_analog_output(
     data: QuaConfigOctoDacAnalogOutputPortDec,
+    capabilities: ServerCapabilities,
 ) -> AnalogOutputPortConfigTypeOctoDac:
-    ret: AnalogOutputPortConfigTypeOctoDac = {
-        "offset": data.offset,
-        "delay": data.delay,
-        "shareable": data.shareable,
-        "filter": _convert_analog_output_filters(data.filter),
-        "crosstalk": data.crosstalk,
-        "output_mode": cast(
-            Literal["direct", "amplified"], QuaConfigOctoDacAnalogOutputPortDecOutputMode(data.output_mode).name
-        ),
-    }
+    ret = cast(
+        AnalogOutputPortConfigTypeOctoDac,
+        {
+            "offset": data.offset,
+            "delay": data.delay,
+            "shareable": data.shareable,
+            "filter": _convert_analog_output_filters(data.filter),
+            "crosstalk": data.crosstalk_v2.value if capabilities.supports(QopCaps.config_v2) else data.crosstalk,
+        },
+    )
     if data.sampling_rate:
         ret["sampling_rate"] = {1: 1e9, 2: 2e9}[data.sampling_rate]
     if data.upsampling_mode:
         ret["upsampling_mode"] = cast(
             Literal["mw", "pulse"], QuaConfigOctoDacAnalogOutputPortDecSamplingRateMode(data.upsampling_mode).name
         )
+    if data.output_mode is not None:  # We check for "is not None" because the 0 value is valid
+        ret["output_mode"] = cast(
+            Literal["direct", "amplified"], QuaConfigOctoDacAnalogOutputPortDecOutputMode(data.output_mode).name
+        )
     return ret
 
 
+@inject
 def _convert_octo_dac_fem_analog_outputs(
-    outputs: Dict[int, QuaConfigOctoDacAnalogOutputPortDec]
+    outputs: Dict[int, QuaConfigOctoDacAnalogOutputPortDec],
+    capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
 ) -> Mapping[Union[int, str], AnalogOutputPortConfigTypeOctoDac]:
     ret: Mapping[Union[int, str], AnalogOutputPortConfigTypeOctoDac] = {
-        int(name): _convert_single_octo_dac_fem_analog_output(data) for name, data in outputs.items()
+        int(name): _convert_single_octo_dac_fem_analog_output(data, capabilities) for name, data in outputs.items()
     }
     return ret
 
 
 def _convert_controller_analog_input(data: QuaConfigAnalogInputPortDec) -> AnalogInputPortConfigType:
-    ret: AnalogInputPortConfigType = {
-        "offset": data.offset,
-        "gain_db": data.gain_db if data.gain_db is not None else 0,
-        "shareable": data.shareable,
-    }
-    if data.sampling_rate is not None:
-        ret["sampling_rate"] = data.sampling_rate
+    ret = cast(
+        AnalogInputPortConfigType,
+        {
+            "offset": data.offset,
+            "gain_db": data.gain_db if data.gain_db is not None else 0,
+            "shareable": data.shareable,
+            "sampling_rate": 1e9,  # The only allowed value (the get_config always returns 0, but we know it is 1e9)
+        },
+    )
     return ret
 
 
@@ -614,22 +672,31 @@ def _convert_controller_digital_outputs(
 
 
 def _convert_controller_digital_output(data: QuaConfigDigitalOutputPortDec) -> DigitalOutputPortConfigType:
-    to_return: DigitalOutputPortConfigType = {
-        "shareable": data.shareable,
-        "inverted": data.inverted,
-    }
-    if data.level is not None:
-        to_return["level"] = "TTL" if data.level == 1 else "LVTTL"
+    to_return = cast(
+        DigitalOutputPortConfigType,
+        {
+            "shareable": data.shareable,
+            "inverted": data.inverted,
+        },
+    )
     return to_return
 
 
 def _convert_digital_input(data: QuaConfigDigitalInputPortDec) -> DigitalInputPortConfigType:
-    return {
-        "polarity": cast(Literal["RISING", "FALLING"], QuaConfigDigitalInputPortDecPolarity(data.polarity).name),
-        "deadtime": data.deadtime,
-        "threshold": data.threshold,
-        "shareable": data.shareable,
-    }
+    to_return = cast(
+        DigitalInputPortConfigType,
+        {
+            "deadtime": data.deadtime,
+            "threshold": data.threshold,
+            "shareable": data.shareable,
+        },
+    )
+    if data.polarity is not None:
+        to_return["polarity"] = cast(
+            Literal["RISING", "FALLING"], QuaConfigDigitalInputPortDecPolarity(data.polarity).name
+        )
+
+    return to_return
 
 
 def _convert_controller_digital_inputs(

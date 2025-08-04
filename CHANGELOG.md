@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
+## [1.2.3a2] - 2025-08-04
+
+- Requires Python >=3.9, <3.13
+- Tested against QOP 2.5.0
+
+
+### Added
+- Added support for NumPy 2.
+- Added support for Protobuf 5 and Protobuf 6.
+- Added two new configuration types: ControllerQuaConfig and LogicalQuaConfig. These are used to define the QUA configuration for the controller (physical) and logical parts of the QOP, respectively.
+- Added the ability to pass a logical config to the following methods:
+    - `qm.add_to_queue()`
+    - `qm.compile()`
+    - `qm.execute()`
+    - `qm.simulate()`
+- Added `load_waveform()` to the QUA DSL, supported from QOP 3.5.
+- Added new waveform type `array` to the waveforms config, supported from QOP 3.5.
+- Added a method `job.result_handles.fetch_results()` that allows fetching all results from a job at once. Fast fetching implementation exists only from QOP 3.5.
+- Added new IIR filter key `exponential_dc_gain`, which can be used instead of `high_pass` in the QUA configuration, supported from QOP 3.5.
+- Added `qm.reset_digital_filters()` function. Supported from QOP 3.5.
+- Signal power is now returned as part of the Octave calibration result (as part of the debug data).
+- Added support for declaring data structures in QUA.
+- Added support for declaring, reading from, and writing to external streams in QUA, supported from QOP 3.5.
+
+### Changed
+- `DictQuaConfig` has been renamed to `FullQuaConfig`.
+- The QUA configuration (`FullQuaConfig` / `DictQuaConfig`) should not contain a `version` anymore.
+- `qmm.open_qm()` now allows opening a qm only with a controller config (`ControllerQuaConfig`).
+- `qmm.open_qm()` default for `close_other_machines` is now `None`. The behavior is the same as `None` will set it true.
+- `result_handles.wait_for_all_values()` now returns False if the OPX1000 job fails or is canceled.
+
+### Deprecated
+- `qmm.open_qm()` without an explicitly set `close_other_machines` will raise a deprecation warning on the OPX1000, as the default will change to `False` in the next minor version.
+- `qmm.store` is deprecated and will be removed in the next minor version. The values `store` and `file_store_root` have no effect anymore.
+- The names of the classes of the stream result fetchers were changed. The old names will be deleted in the future.
+  - `qm.StreamingResultFetcher -> qm.StreamsManager`
+  - `qm.SingleStreamingResultFetcher -> qm.SingleStreamSingleResultFetcher`
+  - `qm.MultipleStreamingResultFetcher -> qm.SingleStreamMultipleResultFetcher`
+
+### Removed
+- Removed support for the "compressed" waveform type in `qm.get_config()`. With that, the `compressed` waveform type is no longer supported in the QUA configuration.
+- Removed support for Python 3.8
+- Removed support for Protobuf 3
+
+### Fixed
+- Fixed a bug that showed a warning of no octave connection when there was no configuration of octave.
+- Optimized `result_handles.wait_for_all_values()` in OPX1000 to improve performance.
+
+
 ## [1.2.3a1] - 2025-05-11
 
 - Requires Python >=3.8, <3.13
@@ -517,13 +566,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.0.2] - 2023-01-01
 ### Removed
 - Removed deprecated `math` library (use {class}`~qm.qua.lib.Math` instead).
-- Removed deprecated `qrun_` context manager (use {func}`~qm.qua._dsl.strict_timing_` instead).
+- Removed deprecated `qrun_` context manager (use {func}`~qm.qua.strict_timing_` instead).
 
 ### Added
 - Better exception error printing.
 - An api to add more information to error printing `activate_verbose_errors`
 - Add support for OPD (Please check [the OPD documentation](https://qm-docs.qualang.io/hardware/dib) for more details).
-- Added timestamps for {func}`~qm.qua._dsl.play` and {func}`~qm.qua._dsl.measure` statements.
+- Added timestamps for {func}`~qm.qua.play` and {func}`~qm.qua.measure` statements.
 - Support for numpy float128.
 - Added the function {func}`qm.user_config.create_new_user_config` to create a configuration file with the QOP host IP & Port to allow opening {func}`~qm.QuantumMachinesManager.QuantumMachinesManager` without inputs.
 - Added infrastructure for anonymous log sending (by default, no logs are sent).

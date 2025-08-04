@@ -1,6 +1,9 @@
 import abc
+import warnings
 from pathlib import Path
 from typing import BinaryIO, Optional
+
+from qm.utils import deprecation_message
 
 
 class BinaryAsset(metaclass=abc.ABCMeta):
@@ -17,6 +20,14 @@ class BaseStore(metaclass=abc.ABCMeta):
     """The interface to saving data from a running job"""
 
     def __init__(self) -> None:
+        warnings.warn(
+            deprecation_message(
+                method="BaseStore",
+                deprecated_in="1.2.3",
+                removed_in="1.3.0",
+                details="Base store is deprecated, and also everything that inherits from it. Please remove it from your code.",
+            )
+        )
         super().__init__()
 
     @abc.abstractmethod

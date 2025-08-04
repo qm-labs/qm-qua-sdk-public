@@ -84,7 +84,6 @@ class QmPendingJob(QmBaseJob):
                 machine_id=self._machine_id,
                 frontend_api=self._frontend,
                 capabilities=self._capabilities,
-                store=self._store,
             )
 
         return run_until_with_timeout(

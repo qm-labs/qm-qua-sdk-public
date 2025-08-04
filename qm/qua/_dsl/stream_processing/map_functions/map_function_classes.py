@@ -1,12 +1,12 @@
 import abc
-from typing import Optional, Sequence
 from collections.abc import Collection
+from typing import Literal, Optional, Sequence
 
 from betterproto.lib.google.protobuf import Value, ListValue
 
 from qm.type_hinting import Number
-from qm.qua._stream_processing_utils import create_array
-from qm.qua._dsl_specific_type_hints import OneOrMore, ConvolutionMode
+from qm.qua._dsl._type_hints import OneOrMore
+from qm.qua._dsl.stream_processing.stream_processing_utils import create_array
 
 
 class FunctionBase(metaclass=abc.ABCMeta):
@@ -100,6 +100,9 @@ class TupleMultiply(FunctionBase):
     @property
     def _args(self) -> Sequence[Value]:
         return []
+
+
+ConvolutionMode = Literal["", "valid", "same", "full"]
 
 
 class Convolution(FunctionBase):

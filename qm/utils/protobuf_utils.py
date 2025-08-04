@@ -1,11 +1,11 @@
 import logging
 import dataclasses
-from typing_extensions import runtime_checkable
-from typing import Dict, Union, Iterable, Protocol, cast
+from typing import Dict, Union, Iterable, cast
 
 import betterproto
 
 from qm.grpc.general_messages import MessageLevel
+from qm.type_hinting.general import DataclassProtocol
 
 LOG_LEVEL_MAP = {
     MessageLevel.Message_LEVEL_ERROR: logging.ERROR,
@@ -15,12 +15,6 @@ LOG_LEVEL_MAP = {
 
 
 Node = Union[betterproto.Message, Iterable["Node"]]
-
-
-@runtime_checkable
-@dataclasses.dataclass
-class DataclassProtocol(Protocol):
-    pass
 
 
 def list_fields(node: Node) -> Dict[str, Node]:

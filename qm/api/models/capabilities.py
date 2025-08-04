@@ -42,6 +42,7 @@ class QopCaps:
     octave_reset = Capability("qm.octave_reset")
     fast_frame_rotation = Capability("qm.fast_frame_rotation", "2.2")
     keeping_dc_offsets = Capability("qm.keep_dc_offsets_when_closing")
+    octave_management = Capability("support_octave_mgmnt", "2.5")
 
     # QOP3
     qop3 = Capability("__qop3", "3.0")
@@ -51,6 +52,11 @@ class QopCaps:
     broadcast = Capability("qm.broadcast", "3.3")
     chunk_streaming = Capability("qm.chunk_streaming", "3.3")
     fast_frame_rotation_deprecated = Capability("qm.fast_frame_rotation_deprecated", "3.3")
+    config_v2 = Capability("qm.config_v2", "3.5")
+    waveform_array = Capability("qm.waveform_array", "3.5")
+    exponential_dc_gain_filter = Capability("qm.exponential_dc_gain_filter", "3.5")
+    multiple_streams_fetching = Capability("qm.multiple_streams_fetching", "3.5")
+    external_stream = Capability("qm.external_stream", "3.5", name_in_exception="declaring an external stream")
 
     @staticmethod
     def get_all() -> Set[Capability]:

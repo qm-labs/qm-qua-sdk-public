@@ -7,14 +7,20 @@ from qm.api.frontend_api import FrontendApi
 from qm.elements.element_inputs import MixInputs
 from qm.api.models.capabilities import ServerCapabilities
 from qm.octave import QmOctaveConfig, AbstractCalibrationDB
-from qm.utils.config_utils import get_fem_config, element_has_mix_inputs
 from qm.octave.octave_manager import logger, get_device, get_loopbacks_from_pb
 from qm.elements.up_converted_input import UpconvertedInput, UpconvertedInputNewApi
 from qm.exceptions import OctaveCableSwapError, OctaveConnectionError, ElementUpconverterDeclarationError
+from qm.utils.config_utils import (
+    get_fem_config,
+    get_logical_pb_config,
+    element_has_mix_inputs,
+    get_controller_pb_config,
+)
 from qm.grpc.qua_config import (
     QuaConfig,
     QuaConfigMatrix,
     QuaConfigElementDec,
+    QuaConfigQuaConfigV1,
     QuaConfigCorrectionEntry,
     QuaConfigGeneralPortReference,
 )
@@ -24,12 +30,12 @@ OptionalOctaveInputPort = Optional[Tuple[str, int]]
 
 class OctavesContainer:
     def __init__(self, pb_config: QuaConfig, octave_config: Optional[QmOctaveConfig] = None):
-        self._pb_config = pb_config
-        self._octave_config = octave_config or QmOctaveConfig()
+        self._octaves_pb_config = get_controller_pb_config(pb_config).octaves
+        self._octave_qm_config = octave_config or QmOctaveConfig()
 
         _qua_config_opx_to_octave_i = {}
         _qua_config_opx_to_octave_q = {}
-        for octave_name, octave_qua_config in self._pb_config.v1_beta.octaves.items():
+        for octave_name, octave_qua_config in self._octaves_pb_config.items():
             for rf_idx, rf_config in octave_qua_config.rf_outputs.items():
                 i_connection, q_connection = rf_config.i_connection, rf_config.q_connection
                 _qua_config_opx_to_octave_i[(i_connection.controller, i_connection.fem, i_connection.number)] = (
@@ -63,7 +69,7 @@ class OctavesContainer:
             ):
                 raise OctaveCableSwapError()
 
-            return self._octave_config.get_octave_input_port(
+            return self._octave_qm_config.get_octave_input_port(
                 (element_i_port.controller, element_i_port.fem, element_i_port.number),
                 (element_q_port.controller, element_q_port.fem, element_q_port.number),
             )
@@ -75,16 +81,16 @@ class OctavesContainer:
         if not outputs:
             return None
         for _, port_ref in outputs.items():
-            if port_ref.device_name in self._pb_config.v1_beta.octaves:
+            if port_ref.device_name in self._octaves_pb_config:
                 client = self._get_octave_client(port_ref.device_name)
                 return client.rf_inputs[port_ref.port]
         raise OctaveConnectionError("No downconverter found for the given outputs.")
 
     def _get_loopbacks(self, octave_name: str) -> Dict[OctaveLOSource, OctaveOutput]:
-        if octave_name in self._pb_config.v1_beta.octaves:
-            pb_loopbacks = self._pb_config.v1_beta.octaves[octave_name].loopbacks
+        if octave_name in self._octaves_pb_config:
+            pb_loopbacks = self._octaves_pb_config[octave_name].loopbacks
             return get_loopbacks_from_pb(pb_loopbacks, octave_name)
-        return self._octave_config.get_lo_loopbacks_by_octave(octave_name)
+        return self._octave_qm_config.get_lo_loopbacks_by_octave(octave_name)
 
     def create_mix_inputs(
         self,
@@ -107,7 +113,7 @@ class OctavesContainer:
             machine_id,
             client=client.rf_outputs[octave_port],
             port=port,
-            calibration_db=self._octave_config.calibration_db,
+            calibration_db=self._octave_qm_config.calibration_db,
             gain=self._get_octave_gain(octave_name, octave_port),
             use_input_attenuators=self._get_octave_input_attenuators(octave_name, octave_port),
         )
@@ -130,14 +136,14 @@ class OctavesContainer:
             element_config.mix_inputs,
             client=client.rf_outputs[octave_port],
             port=port,
-            calibration_db=self._octave_config.calibration_db,
+            calibration_db=self._octave_qm_config.calibration_db,
             gain=gain,
             use_input_attenuators=self._get_octave_input_attenuators(octave_name, octave_port),
         )
 
     def _get_octave_gain(self, octave_name: str, port: int) -> Optional[float]:
         try:
-            return self._pb_config.v1_beta.octaves[octave_name].rf_outputs[port].gain
+            return self._octaves_pb_config[octave_name].rf_outputs[port].gain
         except KeyError:
             logger.warning(
                 "No gain was specified. Setting gain to None. "
@@ -147,7 +153,7 @@ class OctavesContainer:
 
     def _get_octave_input_attenuators(self, octave_name: str, port: int) -> bool:
         try:
-            return self._pb_config.v1_beta.octaves[octave_name].rf_outputs[port].input_attenuators
+            return self._octaves_pb_config[octave_name].rf_outputs[port].input_attenuators
         except KeyError:
             return False
 
@@ -155,13 +161,13 @@ class OctavesContainer:
         return self._get_downconverter_client(outputs)
 
     def _get_octave_client(self, device_name: str) -> Octave:
-        device_connection_info = self._octave_config.devices[device_name]
+        device_connection_info = self._octave_qm_config.devices[device_name]
         loopbacks = self._get_loopbacks(device_name)
         return get_device(
             device_connection_info,
             loop_backs=loopbacks,
             octave_name=device_name,
-            fan=self._octave_config.fan,
+            fan=self._octave_qm_config.fan,
         )
 
 
@@ -171,11 +177,14 @@ def load_config_from_calibration_db(
     octave_config: QmOctaveConfig,
     capabilities: ServerCapabilities,
 ) -> QuaConfig:
+    controller_pb_config = get_controller_pb_config(pb_config)
+    logical_pb_config = get_logical_pb_config(pb_config)
+
     octaves_container = OctavesContainer(pb_config, octave_config)
 
     logger.debug("Loading mixer calibration data onto the config")
 
-    for element_name, element in pb_config.v1_beta.elements.items():
+    for element_name, element in logical_pb_config.elements.items():
         if not element_has_mix_inputs(element):
             continue
 
@@ -191,7 +200,7 @@ def load_config_from_calibration_db(
             continue
 
         try:
-            output_gain = pb_config.v1_beta.octaves[octave_channel[0]].rf_outputs[octave_channel[1]].gain
+            output_gain = controller_pb_config.octaves[octave_channel[0]].rf_outputs[octave_channel[1]].gain
         except KeyError:
             logger.warning(
                 "No gain was specified. Setting gain to None. "
@@ -212,10 +221,17 @@ def load_config_from_calibration_db(
         q_controller_config = get_fem_config(pb_config, q_port)
         q_controller_config.analog_outputs[q_port.number].offset = lo_cal.get_q0()
 
-        if i_port.controller in pb_config.v1_beta.controllers:
-            pb_config.v1_beta.controllers[i_port.controller].analog_outputs[i_port.number].offset = lo_cal.get_i0()
-        if q_port.controller in pb_config.v1_beta.controllers:
-            pb_config.v1_beta.controllers[q_port.controller].analog_outputs[q_port.number].offset = lo_cal.get_q0()
+        # This section is applicable only to OPX devices. The `controllers` attribute, which contains only OPX devices,
+        # is not present in config v2. Therefore, this code is executed only for config v1.
+        if isinstance(controller_pb_config, QuaConfigQuaConfigV1):
+            if i_port.controller in controller_pb_config.controllers:
+                controller_pb_config.controllers[i_port.controller].analog_outputs[
+                    i_port.number
+                ].offset = lo_cal.get_i0()
+            if q_port.controller in controller_pb_config.controllers:
+                controller_pb_config.controllers[q_port.controller].analog_outputs[
+                    q_port.number
+                ].offset = lo_cal.get_q0()
 
         # Now we go over all the IF frequencies we find and set them. Not sure
         # when an IF frequency different from the element's 'intermediate_frequency'
@@ -226,11 +242,11 @@ def load_config_from_calibration_db(
         # We are expected to put all these calibrations in the element's mixer
         curr_mixer = mix_inputs.mixer
 
-        if curr_mixer not in pb_config.v1_beta.mixers:
+        if curr_mixer not in controller_pb_config.mixers:
             logger.debug(f"Element '{element_name}' is using mixer '{curr_mixer}' which is not found.")
             continue
 
-        old_if_cals = pb_config.v1_beta.mixers[curr_mixer]
+        old_if_cals = controller_pb_config.mixers[curr_mixer]
         new_if_cals: List[QuaConfigCorrectionEntry] = []
         frequency_idx = int(capabilities.supports_double_frequency)  # This is to shorten many if-else in the code using
         # a trinary expression
@@ -249,6 +265,9 @@ def load_config_from_calibration_db(
             if lo_freq not in {old_if_cal.lo_frequency, old_if_cal.lo_frequency_double}:
                 continue
 
+            assert (
+                old_if_cal.frequency_negative is not None
+            )  # Mypy thinks it can be None, but it can't really (frequency_negative has a default value)
             sign = (-1) ** old_if_cal.frequency_negative
             old_if_freq = (old_if_cal.frequency or old_if_cal.frequency_double) * sign
             if old_if_freq in if_calibrations_for_curr_lo:
@@ -259,5 +278,5 @@ def load_config_from_calibration_db(
                 f"Could not find calibration value for LO frequency {lo_freq} and intermediate_frequency {old_if_freq}"
             )
 
-        pb_config.v1_beta.mixers[curr_mixer].correction = new_if_cals
+        controller_pb_config.mixers[curr_mixer].correction = new_if_cals
     return pb_config

@@ -18,7 +18,6 @@ from qm.utils.general_utils import is_debug
 from qm.type_hinting.general import PathLike
 from qm.api.v2.job_api.job_api import JobData
 from qm.quantum_machine import QuantumMachine
-from qm.results import StreamingResultFetcher
 from qm.api.models.debug_data import DebugData
 from qm.jobs.simulated_job import SimulatedJob
 from qm.logging_utils import set_logging_level
@@ -28,20 +27,23 @@ from qm.simulate.interface import SimulationConfig
 from qm.api.job_result_api import JobResultServiceApi
 from qm.persistence import BaseStore, SimpleFileStore
 from qm.api.models.server_details import ServerDetails
-from qm.type_hinting.config_types import DictQuaConfig
 from qm.program._qua_config_to_pb import load_config_pb
+from qm.utils.config_utils import get_controller_pb_config
 from qm.octave import QmOctaveConfig, AbstractCalibrationDB
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm._octaves_container import load_config_from_calibration_db
 from qm.api.models.info import QuaMachineInfo, ImplementationInfo
 from qm.program._qua_config_schema import validate_config_capabilities
 from qm.api.simulation_api import SimulationApi, create_simulation_request
+from qm.type_hinting.config_types import FullQuaConfig, ControllerQuaConfig
 from qm.api.models.capabilities import QopCaps, Capability, ServerCapabilities
 from qm.containers.capabilities_container import create_capabilities_container
 from qm.octave.octave_manager import OctaveManager, prep_config_for_calibration
 from qm.api.v2.qmm_api import Controller, ControllerBase, QmmApiWithDeprecations
 from qm.exceptions import QmmException, ConfigSchemaError, ConfigValidationException
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
+
+from ._stream_results import StreamsManager
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +77,8 @@ SERVER_TO_QOP_VERSION_MAP = {
     "2.60-0b17cac": "2.2.2",
     "2.70-7abf0e0": "2.4.0",
     "2.70-ed75211": "2.4.2",
-    "2.70-0b3bd6b": "2.4.3",
+    "2.70-0b3bd6b": "2.4.4",
+    "2.70-cb7c3ee": "2.5.0",
     "a6f8bc5": "3.1.0",
     "fcdfb69": "3.1.1",
     "3.0-beta-78b5e00": "3.2.0",
@@ -83,7 +86,9 @@ SERVER_TO_QOP_VERSION_MAP = {
     "3.0-beta-ba2d179": "3.2.3",
     "3.0-beta-eddf92b": "3.2.4",
     "3.0-beta-a3d43d5": "3.3.0",
+    "3.0-beta-a59f2ea": "3.3.1",
     "3.0-beta-f47a556": "3.4.0",
+    "3.0-beta-c2dd405": "3.4.1",
 }
 
 
@@ -106,7 +111,7 @@ class QuantumMachinesManager:
         add_debug_data: bool = False,
         credentials: Optional[ssl.SSLContext] = None,
         store: Optional[BaseStore] = None,
-        file_store_root: str = ".",
+        file_store_root: Optional[str] = None,
         octave: Optional[QmOctaveConfig] = None,
         octave_calibration_db_path: Optional[Union[PathLike, AbstractCalibrationDB]] = None,
         follow_gateway_redirections: bool = True,
@@ -117,7 +122,7 @@ class QuantumMachinesManager:
         Args:
             host (string): Host where to find the QM orchestrator. If ``None``, local settings are used.
             port: Port where to find the QM orchestrator. If None, local settings are used.
-            cluster_name (string): The name of the cluster, requires redirection between devices.
+            cluster_name (string): The name of the cluster. Requires redirection between devices.
             timeout (float): The timeout, in seconds, for detecting the qmm and most other gateway API calls. Default is 60.
             log_level (string): The logging level for the connection instance. Defaults to `INFO`. Please check `logging` for available options.
             octave (QmOctaveConfig): The configuration for the Octave devices. Deprecated from QOP 2.4.0.
@@ -136,8 +141,34 @@ class QuantumMachinesManager:
             logger.error(message)
             raise QmmException(message)
 
+        if file_store_root is not None:
+            warnings.warn(
+                deprecation_message(
+                    "file_store_root",
+                    "1.2.3",
+                    "1.3.0",
+                    "This parameter is going to be removed, remove it from you initialization",
+                ),
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        else:
+            file_store_root = "."
+
+        if store is not None:
+            warnings.warn(
+                deprecation_message(
+                    "store",
+                    "1.2.3",
+                    "1.3.0",
+                    "This parameter is going to be removed, remove it from you initialization",
+                ),
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self._cluster_name = cluster_name
-        self._store = store if store else SimpleFileStore(file_store_root)
+        self._store = store if store else file_store_root
         self._server_details = self._initialize_connection(
             host=host,
             port=port,
@@ -171,19 +202,23 @@ class QuantumMachinesManager:
         self._frontend = FrontendApi(self._server_details.connection_details)
         self._simulation_api = SimulationApi(self._server_details.connection_details)
         self._octave_config = octave
-        self._octave_manager = OctaveManager(self._octave_config, self, self._caps)
+        self._octave_manager_cached: Optional[OctaveManager] = None
+
+        self._perform_octaves_healthcheck_if_needed()
+
         self._api = None
         if self._caps.supports(QopCaps.qop3):
             self._api = QmmApiWithDeprecations(
                 self._server_details.connection_details,
-                store=self._store,
                 capabilities=self._caps,
                 octave_config=self._octave_config,
                 octave_manager=self._octave_manager,
             )
+            self._api.perform_healthcheck()
+        else:
+            strict = self._user_config.strict_healthcheck is not False
+            self._frontend.healthcheck(strict)
 
-        raise_on_error = self._user_config.strict_healthcheck is not False
-        self.perform_healthcheck(raise_on_error)
         if octave_calibration_db_path is not None and self._octave_config:
             if self._octave_config.calibration_db is not None:
                 raise QmmException(
@@ -223,6 +258,13 @@ class QuantumMachinesManager:
 
     @property
     def store(self) -> BaseStore:
+        warnings.warn(
+            deprecation_message("qmm.store", "1.2.3", "1.3.0"),
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if isinstance(self._store, str):
+            return SimpleFileStore(self._store)
         return self._store
 
     @property
@@ -235,6 +277,19 @@ class QuantumMachinesManager:
         #     "Do not use OctaveManager, it will be removed in the next version", DeprecationWarning, stacklevel=2
         # )
         return self._octave_manager
+
+    @property
+    def _octave_manager(self) -> OctaveManager:
+        """
+        There are two flows of initialization:
+        1. (Healthcheck is supported in GW) - in this case, we first initialize the qmm and then, when we see that the
+           Octaves are healthy, we initialize the Octave manager (when needed).
+        2. (Healthcheck is not supported in GW) - in this case, we first initialize the qmm and create the
+           Octave manager, so we will be able to use it in the healthcheck.
+        """
+        if self._octave_manager_cached is None:
+            self._octave_manager_cached = OctaveManager(self._octave_config, self, self._caps)
+        return self._octave_manager_cached
 
     @property
     def cluster_name(self) -> str:
@@ -250,7 +305,10 @@ class QuantumMachinesManager:
             self._api.perform_healthcheck()
         else:
             self._frontend.healthcheck(strict)
-        if self._octave_config is not None:
+        self._perform_octaves_healthcheck_if_needed()
+
+    def _perform_octaves_healthcheck_if_needed(self) -> None:
+        if self._octave_config is not None and not self._caps.supports(QopCaps.octave_management):
             for octave in self._octave_config.get_devices():
                 octave_client = self._octave_manager.get_client(octave)
                 octave_client.perform_healthcheck()
@@ -309,8 +367,8 @@ class QuantumMachinesManager:
 
     def open_qm(
         self,
-        config: DictQuaConfig,
-        close_other_machines: bool = True,
+        config: Union[FullQuaConfig, ControllerQuaConfig],
+        close_other_machines: Optional[bool] = None,
         validate_with_protobuf: bool = False,
         add_calibration_elements_to_config: bool = True,
         use_calibration_data: bool = True,
@@ -321,17 +379,23 @@ class QuantumMachinesManager:
         single OPX can also be used by multiple quantum machines as long as they do not
         share the same physical resources (input/output ports) as defined in the config.
 
+        -- Available from QOP 3.5 --
+        The configuration is split into two: controller config and logical config.
+        When opening a QuantumMachine, the physical configuration defines the physical resources (e.g., ports), idle values (e.g., DC offsets), and port configurations.
+        A full configuration (containing both logical and controller configs) can also be supplied, which will be used as the program's default.
+        See the documentation website for more information.
         Args:
-            config: The config that will be used by the quantum machine
-            close_other_machines: When set to true (default) any open
+            config: The config that will be used by the Quantum Machine
+            close_other_machines: When set to true, any open
                 quantum machines will be closed. This simplifies the
-                workflow, but does not enable opening more than one
-                quantum machine.
+                workflow but does not enable opening more than one
+                quantum machine. The default `None` behavior is currently
+                the same as `True`.
             validate_with_protobuf (bool): Validates config with
                 protobuf instead of marshmallow. It is usually faster
                 when working with large configs. Defaults to False.
             add_calibration_elements_to_config: Automatically adds config entries to allow Octave calibration.
-            use_calibration_data: Automatically load updated calibration data from calibration database into the config.
+            use_calibration_data: Automatically load updated calibration data from the calibration database into the config.
             keep_dc_offsets_when_closing: Available in QOP 2.4.2 - When closing the QM, do not change the DC offsets.
 
         Returns:
@@ -353,11 +417,15 @@ class QuantumMachinesManager:
         if add_calibration_elements_to_config and self._octave_config is not None and self._octave_config.devices:
             loaded_config = prep_config_for_calibration(loaded_config, self._octave_config, self._caps)
 
-        self._octave_manager.set_octaves_from_qua_config(loaded_config.v1_beta.octaves)
+        octaves_config = get_controller_pb_config(loaded_config).octaves
+        self._octave_manager.set_octaves_from_qua_config(octaves_config)
+
         if self._api:
             if keep_dc_offsets_when_closing:
                 raise NotImplementedError("keep_dc_offsets_when_closing is not supported in the current QOP version")
             return self._api.open_qm(loaded_config, close_other_machines)
+
+        close_other_machines = True if close_other_machines is None else close_other_machines
 
         if not self._caps.supports(QopCaps.keeping_dc_offsets):
             if keep_dc_offsets_when_closing:
@@ -374,12 +442,13 @@ class QuantumMachinesManager:
             pb_config=loaded_config,
             frontend_api=self._frontend,
             capabilities=self._caps,
-            store=self.store,
             octave_config=self._octave_config,
             octave_manager=self._octave_manager,
         )
 
-    def _load_config(self, qua_config: DictQuaConfig, *, disable_marshmallow_validation: bool = False) -> QuaConfig:
+    def _load_config(
+        self, qua_config: Union[FullQuaConfig, ControllerQuaConfig], *, disable_marshmallow_validation: bool = False
+    ) -> QuaConfig:
         try:
             if disable_marshmallow_validation:
                 loaded_config = load_config_pb(qua_config)
@@ -392,11 +461,10 @@ class QuantumMachinesManager:
         except marshmallow.exceptions.ValidationError as validation_error:
             raise ConfigSchemaError(validation_error) from validation_error
 
-    def validate_qua_config(self, qua_config: DictQuaConfig) -> None:
+    def validate_qua_config(self, qua_config: Union[FullQuaConfig, ControllerQuaConfig]) -> None:
         """
         Validates a qua config based on the connected server's capabilities.
         Raises an exception if the config is invalid.
-
         Args:
             qua_config: A python dict containing the qua config to validate
         """
@@ -434,7 +502,7 @@ class QuantumMachinesManager:
 
     def simulate(
         self,
-        config: DictQuaConfig,
+        config: FullQuaConfig,
         program: Program,
         simulate: SimulationConfig,
         compiler_options: Optional[CompilerOptionArguments] = None,
@@ -460,7 +528,7 @@ class QuantumMachinesManager:
             job = qmm.simulate(config, prog, SimulationConfig(duration=100))
             ```
         Args:
-            config: A QM config
+            config: The full QUA configuration used to simulate the program, containing both the controller and logical configurations.
             program: A QUA ``program()`` object to execute
             simulate: A ``SimulationConfig`` configuration object
             compiler_options: additional parameters to pass to execute
@@ -489,7 +557,6 @@ class QuantumMachinesManager:
                 job_id=job_id,
                 frontend_api=self._frontend,
                 capabilities=self._server_details.capabilities,
-                store=self.store,
                 simulated_response=simulated_response_part,
             )
 
@@ -536,11 +603,10 @@ class QuantumMachinesManager:
             pb_config=pb_config,
             frontend_api=self._frontend,
             capabilities=self._caps,
-            store=self.store,
             octave_manager=self.octave_manager,
         )
 
-    def get_job_result_handles(self, job_id: str) -> StreamingResultFetcher:
+    def get_job_result_handles(self, job_id: str) -> StreamsManager:
         """
         -- Available in QOP 2.x --
 
@@ -555,11 +621,8 @@ class QuantumMachinesManager:
                 "This method is not available in the current QOP version, "
                 "please use `qmm.get_job(job_id).result_handles`"
             )
-        return StreamingResultFetcher(
-            job_id,
-            JobResultServiceApi(self._server_details.connection_details, job_id),
-            self._store,
-            self._caps,
+        return StreamsManager(
+            JobResultServiceApi(self._server_details.connection_details, job_id), self._caps, wait_until_func=None
         )
 
     def close_all_qms(self) -> None:
@@ -691,7 +754,7 @@ class QuantumMachinesManager:
         an alternative to connecting to a QOP server via QuantumMachinesManager, by setting the capabilities
         manually and globally.
 
-        It is possible to extract the capabilities of an existing QuantumMachinesManager object by checking the capabilities attribute.
+        It is possible to extract the capabilities of an existing QuantumMachinesManager object by checking the `capabilities` attribute,
         e.g. `qmm = QuantumMachinesManager(); capabilities = qmm.capabilities`.
 
         The QopCaps class (from `qm import QopCaps`) can be used to get and view all capabilities.

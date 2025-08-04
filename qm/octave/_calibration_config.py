@@ -1,7 +1,7 @@
 from typing import Dict, Tuple
 
 from qm.type_hinting import Number
-from qm.type_hinting.config_types import DictQuaConfig, PortReferenceType, ControllerConfigType
+from qm.type_hinting.config_types import FullQuaConfig, PortReferenceType, ControllerConfigType
 
 
 def _prep_config(
@@ -9,7 +9,7 @@ def _prep_config(
     adc_channels: Tuple[PortReferenceType, PortReferenceType],
     if_freq: Number,
     lo_freq: Number,
-) -> DictQuaConfig:
+) -> FullQuaConfig:
     i_port = iq_channels[0]
     q_port = iq_channels[1]
     controller_names = set([ch[0] for ch in iq_channels] + [ch[0] for ch in adc_channels])
@@ -26,8 +26,7 @@ def _prep_config(
     for port in adc_channels:
         controllers[port[0]]["analog_inputs"] = {port[1]: {"offset": 0.0}}
 
-    config: DictQuaConfig = {
-        "version": 1,
+    config: FullQuaConfig = {
         "controllers": controllers,
         "elements": {
             "to_calibrate": {

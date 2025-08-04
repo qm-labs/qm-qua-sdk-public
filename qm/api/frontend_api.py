@@ -84,6 +84,9 @@ class FrontendApi(BaseApi[FrontendStub]):
         for warning in response.warning_messages:
             logger.warning(f"Health check warning: {warning}")
 
+        for message in response.message:
+            logger.debug(message)
+
         if not response.ok:
             logger.error(f"Health check error: {response.message}")
 
@@ -110,26 +113,15 @@ class FrontendApi(BaseApi[FrontendStub]):
         response = self._run(self._stub.open_quantum_machine(request, timeout=self._timeout))
 
         if not response.success:
-            error_messages = []
-            for error in response.config_validation_errors:
-                error_messages.append(f'CONFIG ERROR in key "{error.path}" [{error.group}] : {error.message}')
+            open_qm_exception = OpenQmException(response.config_validation_errors, response.physical_validation_errors)
 
-            for physical_error in response.physical_validation_errors:
-                error_messages.append(
-                    f"PHYSICAL CONFIG ERROR in key "
-                    f'"{physical_error.path}" [{physical_error.group}] : {physical_error.message}'
-                )
+            for formatted_error in (
+                open_qm_exception.physical_validation_formatted_errors
+                + open_qm_exception.config_validation_formatted_errors
+            ):
+                logger.error(formatted_error)
 
-            for msg in error_messages:
-                logger.error(msg)
-
-            error_details = [(item.group, item.path, item.message) for item in response.config_validation_errors] + [
-                (item.group, item.path, item.message) for item in response.physical_validation_errors
-            ]
-            formatted_errors = "\n".join(error_messages)
-            raise OpenQmException(
-                f"Can not open QM, see the following errors:\n{formatted_errors}", errors=error_details
-            )
+            raise open_qm_exception
 
         for warning in response.open_qm_warnings:
             logger.warning(f"Open QM ended with warning {warning.code}: {warning.message}")
@@ -160,6 +152,7 @@ class FrontendApi(BaseApi[FrontendStub]):
     def get_quantum_machine_config(self, machine_id: str) -> QuaConfig:
         machine_data = self.get_quantum_machine(machine_id)
         config = machine_data.config
+
         # TODO - this is a patch to make the tests work, once we move to the new GRPC messages,
         #  we will need to check it for backwards compatibility.
         if not config.v1_beta.control_devices:
