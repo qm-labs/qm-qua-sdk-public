@@ -1,10 +1,24 @@
+[project]
+name = "qm-qua"
+description = "QUA language SDK to control a Quantum Computer"
+readme = "README.md"
+authors = [{ name = "Quantum Machines", email = "info@quantum-machines.co"}]
+license = "BSD-3-Clause"
+dynamic = [ "classifiers" ]
+
+[project.urls]
+Homepage = "https://www.quantum-machines.co/"
+Documentation = "https://docs.quantum-machines.co/"
+Repository = "https://github.com/qm-labs/qm-qua-sdk-public"
+Download = "https://pypi.org/project/qm-qua/#files"
+Changelog = "https://github.com/qm-labs/qm-qua-sdk-public/blob/main/CHANGELOG.md"
+
 [tool.poetry]
 name = "qm-qua"
 version = "0.0.0"
 description = "QUA language SDK to control a Quantum Computer"
-readme = "README.md"
 authors = ["Quantum Machines <info@quantum-machines.co>"]
-license = "BSD-3-Clause"
+classifiers = ["Topic :: Scientific/Engineering :: Quantum Computing", "Development Status :: 5 - Production/Stable"]
 
 packages = [
     { include = "qm" },
@@ -13,8 +27,9 @@ packages = [
 include = [
     "CHANGELOG.md",
     "LICENSE",
-    "qm/io/**/*",
-    "qm/grpc/**/*.py",
+    {path="qm/io/**/*", format=["sdist", "wheel"]},
+    {path="qm/grpc/**/*.py", format=["sdist", "wheel"]},
+    {path="qm/grpc/VERSION", format=["sdist", "wheel"]},
 ]
 
 [tool.poetry.dependencies]
@@ -31,6 +46,7 @@ datadog-api-client = "^2.6.0"
 dependency_injector = "^4.41.0"
 qm-octave = "2.1.6"
 typing-extensions = "^4.5"
+poetry ="<=2.1.3"
 
 grpclib = { version = "^0.4.5", python = ">=3.10", allow-prereleases = true }
 plotly = "^5.13.0"
@@ -52,10 +68,10 @@ poethepoet = "^0.16.0"
 pytest-order = "^1.0.0"
 
 apispec = "^5.1.1"
-poetry-dynamic-versioning = { extras = ["plugin"], version = "^0.21.2" }
+poetry-dynamic-versioning = { extras = ["plugin"], version = "^1.0.0" }
 mypy = "^1.14"
 isort = "^5.11.5"
-tox = "^4.0.0"
+boto3 = "^1.40.1"
 
 [tool.poetry.extras]
 simulation = ["certifi"]
@@ -78,23 +94,40 @@ skip_gitignore = true
 force_sort_within_sections = true
 extra_standard_library = ["typing_extensions"]
 
-
 [tool.poe.tasks]
+clean-proto.sequence = [
+    { "script" = "shutil:rmtree('qm/proto', ignore_errors=True)" },
+]
+
 clean-grpc.sequence = [
     { "script" = "shutil:rmtree('qm/grpc', ignore_errors=True)" },
     { "script" = "shutil:rmtree('qm/pb', ignore_errors=True)" },
-    { "script" = "shutil:rmtree('qm/io', ignore_errors=True)" }
+    { "script" = "shutil:rmtree('qm/io', ignore_errors=True)" },
+    { "script" = "os:mkdir('qm/grpc')" },
 ]
 move-generated-grpc.sequence = [
     { "script" = "shutil:move('io', 'qm/io')" },
     { "script" = "os:remove('__init__.py')" }
 ]
+
+download-proto = "python scripts/download_proto.py"
 create-grpc = "poetry run python -m grpc_tools.protoc -Iproto --python_betterproto_out=. proto/qm/pb/**/*.proto io/qualang/api/v1/info_service.proto proto/qm/grpc/v2/*.proto"
-generate-grpc.sequence = [
+copy-version-grpc = "cp proto/VERSION qm/grpc/VERSION"
+
+generate-grpc-local.sequence = [
     "clean-grpc",
     "create-grpc",
     "move-generated-grpc",
+    "copy-version-grpc"
 ]
+
+generate-grpc.sequence = [
+    "clean-proto",
+    "download-proto",
+    "generate-grpc-local",
+]
+
+
 check-grpc-breaking-changes = "buf breaking --against '.git#branch=main'"
 
 format-black = "poetry run black qm tests"
@@ -137,5 +170,5 @@ files = ["qm/version.py"]
 patterns = ["(^__version__\\s*(?::.*?)?=\\s*['\"])[^'\"]*(['\"])"]
 
 [build-system]
-requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning"]
+requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
 build-backend = "poetry_dynamic_versioning.backend"

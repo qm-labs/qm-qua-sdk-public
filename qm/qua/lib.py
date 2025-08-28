@@ -1,7 +1,6 @@
 import random
 import warnings
-from typing_extensions import ParamSpec
-from typing import List, Type, Tuple, Union, TypeVar, Callable, Optional, Sequence, overload
+from typing import Any, List, Type, Tuple, Union, TypeVar, Callable, Optional, Sequence, overload
 
 from qm._loc import _get_loc
 from qm.type_hinting.general import NumberT
@@ -24,12 +23,11 @@ from qm.qua._expressions import (
     create_qua_scalar_expression,
 )
 
-Ret = TypeVar("Ret")
-P = ParamSpec("P")
 S = TypeVar("S", bool, int, float)
+SomeCallable = Callable[..., Any]
 
 
-def _get_func_lib_and_name(function: Callable[P, Ret]) -> Tuple[str, str]:
+def _get_func_lib_and_name(function: SomeCallable) -> Tuple[str, str]:
     lib_name, func_name = function.__qualname__.split(".")
     return lib_name.lower(), func_name
 
@@ -58,7 +56,7 @@ def _standardize_args(*args: Union[ScalarOfAnyType, VectorOfAnyType]) -> List[Qu
 
 
 def __create_output_expression(
-    function: Callable[P, Ret],
+    function: SomeCallable,
     output_type: Type[NumberT],
     *args: Union[ScalarOfAnyType, VectorOfAnyType],
 ) -> QuaLibFunctionOutput[NumberT]:
@@ -73,19 +71,19 @@ def __create_output_expression(
 
 
 def _create_output_expression(
-    function: Callable[P, Ret], output_type: Type[NumberT], *args: ScalarOfAnyType
+    function: SomeCallable, output_type: Type[NumberT], *args: ScalarOfAnyType
 ) -> QuaLibFunctionOutput[NumberT]:
     return __create_output_expression(function, output_type, *args)
 
 
 def _create_vectors_output_expression(
-    function: Callable[P, Ret], output_type: Type[S], *args: VectorOfAnyType
+    function: SomeCallable, output_type: Type[S], *args: VectorOfAnyType
 ) -> QuaLibFunctionOutput[S]:
     return __create_output_expression(function, output_type, *args)
 
 
 def call_library_function(
-    function: Callable[P, Ret], output_type: Type[NumberT], *args: ScalarOfAnyType
+    function: SomeCallable, output_type: Type[NumberT], *args: ScalarOfAnyType
 ) -> QuaLibFunctionOutput[NumberT]:
     warnings.warn(
         deprecation_message(
@@ -101,7 +99,7 @@ For instance, instead of using call_library_function(Random.rand_int, int, x, y)
 
 
 def call_vectors_library_function(
-    function: Callable[P, Ret], output_type: Type[S], *args: Vector[NumberT]
+    function: SomeCallable, output_type: Type[S], *args: Vector[NumberT]
 ) -> QuaLibFunctionOutput[S]:
     warnings.warn(
         deprecation_message(

@@ -18,6 +18,25 @@ from qm.qua._dsl.proto_any_converter import (
 )
 
 
+def get_arbitrary_message(name: str, message: Union[betterproto.Message, PbMessage]) -> QuaProgramAnyStatement:
+    """
+    Create an arbitrary message statement to support non-qua messages.
+    Args:
+        name (str): message name, used to identify the message type.
+        message (betterproto.Message/pb message): the message needs to be encapsulated.
+    Returns:
+        QuaProgramAnyStatement: The arbitrary message statement.
+    """
+    loc = _get_loc()
+    betterproto_any = betterproto_to_any(message) if isinstance(message, betterproto.Message) else proto_to_any(message)
+    statement = QuaProgramArbitraryStatement(
+        loc=loc,
+        name=name,
+        data=betterproto_any,
+    )
+    return QuaProgramAnyStatement(arbitrary=statement)
+
+
 def arbitrary(name: str, message: Union[betterproto.Message, PbMessage]) -> None:
     """arbitrary message to support non-qua messages.
 
@@ -27,14 +46,23 @@ def arbitrary(name: str, message: Union[betterproto.Message, PbMessage]) -> None
         name (str): message name, used to identify the message type.
         message (betterproto.Message/pb message): the message needs to be encapsulated.
     """
-    loc = _get_loc()
-    betterproto_any = betterproto_to_any(message) if isinstance(message, betterproto.Message) else proto_to_any(message)
-    statement = QuaProgramArbitraryStatement(
-        loc=loc,
-        name=name,
-        data=betterproto_any,
-    )
-    scopes_manager.append_statement(QuaProgramAnyStatement(arbitrary=statement))
+    statement = get_arbitrary_message(name, message)
+    scopes_manager.append_statement(statement)
+
+
+def parse_arbitrary(b: bytes) -> QuaProgramArbitraryStatement:
+    """
+    Parse an arbitrary statement from bytes.
+
+    Args:
+        b (bytes): The bytes to parse.
+    Returns:
+        QuaProgramArbitraryStatement: The parsed arbitrary statement.
+    """
+    parsed_message = QuaProgramAnyStatement().parse(b)
+    if not parsed_message.is_set("arbitrary"):
+        raise QmQuaException("Failed to parse arbitrary statement, expected 'arbitrary' field not found.")
+    return parsed_message.arbitrary
 
 
 def arbitrary_context(name: str, data: Optional[Union[betterproto.Message, PbMessage]] = None) -> _ArbitraryScope:

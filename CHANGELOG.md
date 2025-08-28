@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
+## [1.2.3] - 2025-08-28
+
+- Requires Python >=3.9, <3.13
+- Tested against QOP 2.5.0, 3.5.0
+
+### Fixed
+- Fixed a bug where `job.is_finished()` incorrectly returned `False` for completed jobs.
+- Fixed a bug where the timeout parameter in `job.result_handles.fetch_results()` was only applied to a single internal API request.
+- Ensured `job.result_handles.fetch_results()` consistently raises `QMTimeoutError`, instead of raising regular `TimeoutError` in some scenarios.
+- Reduced max timeout value for `job.result_handles.wait_for_all_values` to 23 days, to fix Windows gRPC timeout format errors.
+
 ## [1.2.3a2] - 2025-08-04
 
 - Requires Python >=3.9, <3.13
@@ -16,24 +27,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Added support for NumPy 2.
 - Added support for Protobuf 5 and Protobuf 6.
 - Added two new configuration types: ControllerQuaConfig and LogicalQuaConfig. These are used to define the QUA configuration for the controller (physical) and logical parts of the QOP, respectively.
-- Added the ability to pass a logical config to the following methods:
+- QOP 3.5 - Added the ability to pass a logical config to the following methods:
     - `qm.add_to_queue()`
     - `qm.compile()`
     - `qm.execute()`
     - `qm.simulate()`
-- Added `load_waveform()` to the QUA DSL, supported from QOP 3.5.
-- Added new waveform type `array` to the waveforms config, supported from QOP 3.5.
+- QOP 3.5 - Added `load_waveform()` to the QUA DSL.
+- QOP 3.5 - Added new waveform type `array` to the waveforms config.
 - Added a method `job.result_handles.fetch_results()` that allows fetching all results from a job at once. Fast fetching implementation exists only from QOP 3.5.
-- Added new IIR filter key `exponential_dc_gain`, which can be used instead of `high_pass` in the QUA configuration, supported from QOP 3.5.
-- Added `qm.reset_digital_filters()` function. Supported from QOP 3.5.
+- QOP 3.5 - Added new IIR filter key `exponential_dc_gain`, which can be used instead of `high_pass` in the QUA configuration.
+- QOP 3.5 - Added `qm.reset_digital_filters()` function.
 - Signal power is now returned as part of the Octave calibration result (as part of the debug data).
 - Added support for declaring data structures in QUA.
-- Added support for declaring, reading from, and writing to external streams in QUA, supported from QOP 3.5.
+- QOP 3.5 - Added support for declaring, reading from, and writing to external streams in QUA.
 
 ### Changed
 - `DictQuaConfig` has been renamed to `FullQuaConfig`.
 - The QUA configuration (`FullQuaConfig` / `DictQuaConfig`) should not contain a `version` anymore.
-- `qmm.open_qm()` now allows opening a qm only with a controller config (`ControllerQuaConfig`).
+- QOP 3.5 - `qmm.open_qm()` now allows opening a qm only with a controller config (`ControllerQuaConfig`).
 - `qmm.open_qm()` default for `close_other_machines` is now `None`. The behavior is the same as `None` will set it true.
 - `result_handles.wait_for_all_values()` now returns False if the OPX1000 job fails or is canceled.
 

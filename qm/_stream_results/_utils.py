@@ -1,6 +1,6 @@
 import logging
 from io import BytesIO
-from typing import Tuple, Union, BinaryIO, cast
+from typing import Tuple, Union, BinaryIO, Optional, cast
 
 import numpy
 import numpy.typing
@@ -49,7 +49,7 @@ def _get_final_shape(count: int, shape: Tuple[int, ...]) -> Tuple[int, ...]:
 def _standardize_slice(name: str, item: Union[int, slice], header: JobNamedResultHeader) -> slice:
     if isinstance(item, int):
         return slice(item, item + 1)
-    if isinstance(item, slice):
+    elif isinstance(item, slice):
         step = item.step
         if step != 1 and step is not None:
             raise Exception(f"Got step={step} for item named '{name}', Fetch supports step=1 or None in slices.")
@@ -70,3 +70,22 @@ def log_execution_errors(header: JobNamedResultHeader, name: str, log_error: boo
             f"Runtime errors were detected for stream named '{name}'. "
             f"Please fetch the execution report using job.execution_report() for more information."
         )
+
+
+def postprocess_single_result(
+    fetched_data: numpy.typing.NDArray[numpy.generic], flat_struct: bool
+) -> Optional[numpy.typing.NDArray[numpy.generic]]:
+    # We assume here that we have at most a single value in array (or nothing)
+    if len(fetched_data) == 0:
+        logger.warning("Nothing to fetch: no results were found. Please wait until the results are ready.")
+        return None
+    if flat_struct:
+        data = fetched_data
+    else:
+        data = fetched_data[0]
+
+    if len(data) == 1:
+        to_return = data[0]
+    else:
+        to_return = data
+    return cast(numpy.typing.NDArray[numpy.generic], to_return)

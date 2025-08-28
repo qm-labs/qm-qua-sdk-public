@@ -2,8 +2,6 @@ import logging
 from abc import ABCMeta
 from typing import Any, List, Type, Tuple, Union, TypeVar, Optional, cast
 
-from dependency_injector.wiring import Provide, inject
-
 from qm.type_hinting import Value
 from qm.api.base_api import BaseApi
 from qm.exceptions import QmValueError
@@ -13,7 +11,6 @@ from qm.grpc.qm_manager import GetRunningJobRequest
 from qm.api.models.server_details import ConnectionDetails
 from qm.utils.general_utils import create_input_stream_name
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
-from qm.containers.capabilities_container import CapabilitiesContainer
 from qm.api.stubs.deprecated_job_manager_stub import DeprecatedJobManagerServiceStub
 from qm.grpc.job_manager import (
     IntStreamData,
@@ -225,9 +222,8 @@ class DeprecatedJobManagerApi(JobManagerBaseApi[DeprecatedJobManagerServiceStub]
         return DeprecatedJobManagerServiceStub
 
 
-@inject
 def create_job_manager_from_api(
-    api: BaseApi[Any], capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]
+    api: BaseApi[Any], capabilities: ServerCapabilities
 ) -> Union[JobManagerApi, DeprecatedJobManagerApi]:
     if capabilities.supports(QopCaps.new_grpc_structure):
         return JobManagerApi(api.connection_details)

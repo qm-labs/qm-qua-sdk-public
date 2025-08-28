@@ -1,5 +1,6 @@
 import sys
 import logging
+from typing import Union
 
 from qm.user_config import UserConfig
 
@@ -26,7 +27,7 @@ def config_loggers(user_config: UserConfig) -> None:
         )
 
 
-def set_logging_level(level: int) -> None:
+def set_logging_level(level: Union[int, str]) -> None:
     """Sets the logging level of the qm-qua module ("qm")
     See `Messages control <https://qm-docs.qualang.io/guides/error#messages-control>`__ for more information.
 

@@ -1,8 +1,7 @@
 import os
 import pathlib
 import dataclasses
-from typing import Any, Union, TypeVar
-from typing_extensions import Protocol, runtime_checkable
+from typing import Any, Union, TypeVar, Protocol, runtime_checkable
 
 import numpy
 

@@ -28,7 +28,7 @@ class QmQueue(QmQueueBase[QmPendingJob]):
         self.machine_id = quantum_machine_id
         self._config = config
         self._frontend: FrontendApi = frontend_api
-        self._job_manager = create_job_manager_from_api(self._frontend)
+        self._job_manager = create_job_manager_from_api(self._frontend, capabilities)
 
     def _get_pending_jobs(
         self, job_id: Optional[str] = None, position: Optional[int] = None, user_id: Optional[str] = None

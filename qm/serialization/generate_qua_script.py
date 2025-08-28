@@ -225,8 +225,8 @@ def _value_to_str(indent_level: int, value: Any) -> str:
         temp_str += "    " * indent_level + "],\n"
         return temp_str
     elif is_long_list:
-        # replace it with a compact list
-        is_single_value = len(set(value)) == 1
+        first_value = value[0]
+        is_single_value = all(v == first_value for v in value)
 
         if is_single_value:
             return f"[{value[0]}] * {len(value)}" + ",\n"

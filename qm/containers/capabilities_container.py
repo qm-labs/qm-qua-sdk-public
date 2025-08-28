@@ -20,9 +20,7 @@ def create_capabilities_container(
     container.wire(
         modules=[
             "qm.program._qua_config_schema",
-            "qm.program._qua_config_to_pb",
             "qm.program.ConfigBuilder",
-            "qm.api.job_manager_api",
             "qm.simulate.interface",
         ],
         packages=["qm.elements"],

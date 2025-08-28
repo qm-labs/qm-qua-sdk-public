@@ -1,9 +1,8 @@
 import abc
 from enum import Enum
 from dataclasses import dataclass
-from typing_extensions import Literal
-from collections.abc import Collection
-from typing import Type, Union, Optional, Sequence, overload
+from collections.abc import Sequence, Collection
+from typing import Union, Literal, Optional, overload
 
 import numpy as np
 
@@ -43,13 +42,13 @@ class DeclarationType(Enum):
 class _DeclarationParams(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def create_variable(
-        self, var_name: str, t: Type[NumberT]
+        self, var_name: str, t: type[NumberT]
     ) -> Union[QuaArrayVariable[NumberT], QuaVariable[NumberT]]:
         pass
 
     @abc.abstractmethod
     def create_input_stream(
-        self, var_name: str, t: Type[NumberT]
+        self, var_name: str, t: type[NumberT]
     ) -> Union[QuaArrayInputStream[NumberT], QuaVariableInputStream[NumberT]]:
         pass
 
@@ -59,10 +58,10 @@ class _ArrayDeclarationParams(_DeclarationParams):
     size: int
     values: Sequence[Union[bool, int, float]]
 
-    def create_variable(self, var_name: str, t: Type[NumberT]) -> QuaArrayVariable[NumberT]:
+    def create_variable(self, var_name: str, t: type[NumberT]) -> QuaArrayVariable[NumberT]:
         return QuaArrayVariable(var_name, t, size=self.size, init_value=self.values)
 
-    def create_input_stream(self, var_name: str, t: Type[NumberT]) -> QuaArrayInputStream[NumberT]:
+    def create_input_stream(self, var_name: str, t: type[NumberT]) -> QuaArrayInputStream[NumberT]:
         return QuaArrayInputStream(var_name, t, size=self.size, init_value=self.values)
 
 
@@ -72,10 +71,10 @@ class _StructArrayDeclarationParams(_DeclarationParams):
     position: int
     struct_ref: QuaStructReference
 
-    def create_variable(self, var_name: str, t: Type[NumberT]) -> QuaStructArrayVariable[NumberT, NSize]:
+    def create_variable(self, var_name: str, t: type[NumberT]) -> QuaStructArrayVariable[NumberT, NSize]:
         return QuaStructArrayVariable(var_name, t, size=self.size, position=self.position, struct=self.struct_ref)
 
-    def create_input_stream(self, var_name: str, t: Type[NumberT]) -> QuaArrayInputStream[NumberT]:
+    def create_input_stream(self, var_name: str, t: type[NumberT]) -> QuaArrayInputStream[NumberT]:
         raise NotImplementedError("Struct members cannot be used as input streams")
 
 
@@ -83,10 +82,10 @@ class _StructArrayDeclarationParams(_DeclarationParams):
 class _ScalarDeclarationParams(_DeclarationParams):
     value: Optional[Union[bool, int, float]]
 
-    def create_variable(self, var_name: str, t: Type[NumberT]) -> QuaVariable[NumberT]:
+    def create_variable(self, var_name: str, t: type[NumberT]) -> QuaVariable[NumberT]:
         return QuaVariable(var_name, t, init_value=self.value)
 
-    def create_input_stream(self, var_name: str, t: Type[NumberT]) -> QuaVariableInputStream[NumberT]:
+    def create_input_stream(self, var_name: str, t: type[NumberT]) -> QuaVariableInputStream[NumberT]:
         return QuaVariableInputStream(var_name, t, init_value=self.value)
 
 
@@ -110,32 +109,32 @@ def _standardize_value_and_size(
 
 
 @overload
-def declare(t: Type[NumberT]) -> QuaVariable[NumberT]:
+def declare(t: type[NumberT]) -> QuaVariable[NumberT]:
     ...
 
 
 @overload
-def declare(t: Type[NumberT], value: Literal[None], size: int) -> QuaArrayVariable[NumberT]:
+def declare(t: type[NumberT], value: Literal[None], size: int) -> QuaArrayVariable[NumberT]:
     ...
 
 
 @overload
-def declare(t: Type[NumberT], *, size: int) -> QuaArrayVariable[NumberT]:
+def declare(t: type[NumberT], *, size: int) -> QuaArrayVariable[NumberT]:
     ...
 
 
 @overload
-def declare(t: Type[NumberT], value: Union[int, bool, float]) -> QuaVariable[NumberT]:
+def declare(t: type[NumberT], value: Union[int, bool, float]) -> QuaVariable[NumberT]:
     ...
 
 
 @overload
-def declare(t: Type[NumberT], value: Sequence[Union[int, bool, float]]) -> QuaArrayVariable[NumberT]:
+def declare(t: type[NumberT], value: Sequence[Union[int, bool, float]]) -> QuaArrayVariable[NumberT]:
     ...
 
 
 def declare(
-    t: Type[NumberT],
+    t: type[NumberT],
     value: Optional[OneOrMore[Union[int, bool, float]]] = None,
     size: Optional[int] = None,
 ) -> Union[QuaVariable[NumberT], QuaArrayVariable[NumberT]]:
@@ -197,36 +196,36 @@ def declare(
 
 
 @overload
-def declare_input_stream(t: Type[NumberT], name: str) -> QuaVariableInputStream[NumberT]:
+def declare_input_stream(t: type[NumberT], name: str) -> QuaVariableInputStream[NumberT]:
     ...
 
 
 @overload
-def declare_input_stream(t: Type[NumberT], name: str, value: Literal[None], size: int) -> QuaArrayInputStream[NumberT]:
+def declare_input_stream(t: type[NumberT], name: str, value: Literal[None], size: int) -> QuaArrayInputStream[NumberT]:
     ...
 
 
 @overload
-def declare_input_stream(t: Type[NumberT], name: str, *, size: int) -> QuaArrayInputStream[NumberT]:
+def declare_input_stream(t: type[NumberT], name: str, *, size: int) -> QuaArrayInputStream[NumberT]:
     ...
 
 
 @overload
 def declare_input_stream(
-    t: Type[NumberT], name: str, value: Union[int, bool, float]
+    t: type[NumberT], name: str, value: Union[int, bool, float]
 ) -> QuaVariableInputStream[NumberT]:
     ...
 
 
 @overload
 def declare_input_stream(
-    t: Type[NumberT], name: str, value: Sequence[Union[int, bool, float]]
+    t: type[NumberT], name: str, value: Sequence[Union[int, bool, float]]
 ) -> QuaArrayInputStream[NumberT]:
     ...
 
 
 def declare_input_stream(
-    t: Type[NumberT],
+    t: type[NumberT],
     name: str,
     value: Optional[OneOrMore[Union[int, bool, float]]] = None,
     size: Optional[int] = None,
@@ -270,7 +269,7 @@ def declare_input_stream(
 
 
 def _declare_struct_array_variable(
-    t: Type[NumberT],
+    t: type[NumberT],
     size: int,
     position: int,
     struct_ref: QuaStructReference,
@@ -290,7 +289,7 @@ def _declare_struct_array_variable(
     return result
 
 
-def declare_struct(struct_t: Type[StructT]) -> StructT:
+def declare_struct(struct_t: type[StructT]) -> StructT:
     scope = scopes_manager.program_scope
     scope.struct_index += 1
     name = f"s{scope.struct_index}"

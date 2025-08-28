@@ -1,15 +1,15 @@
 from collections import defaultdict
-from typing import Dict, List, Type, Tuple, Mapping, Sequence, AsyncIterator
+from typing import Dict, List, Type, Tuple, Union, Mapping, Optional, Sequence, AsyncIterator
 
 import betterproto
 
-from qm.utils.async_utils import run_async
 from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.exceptions import DataFetchingError
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.models.jobs import JobNamedResult, JobStreamingState, JobResultItemSchema, JobNamedResultHeader
 from qm.StreamMetadata import StreamMetadata, StreamMetadataError, _get_stream_metadata_dict_from_proto_resp
 from qm.grpc.v2 import (
+    Range,
     JobServiceStub,
     JobExecutionStatus,
     GetNamedResultRequest,
@@ -18,15 +18,17 @@ from qm.grpc.v2 import (
     GetJobResultStateRequest,
     GetJobResultSchemaRequest,
     GetProgramMetadataRequest,
+    GetNamedResultsRequestOutput,
     JobServiceGetJobStatusRequest,
     GetJobNamedResultHeaderRequest,
     GetJobNamedResultsHeadersRequest,
+    GetJobNamedResultsHeadersRequestOutput,
     GetNamedResultResponseGetNamedResultResponseError,
     GetNamedResultResponseGetNamedResultResponseSuccess,
     GetNamedResultResponseGetNamedResultResponseSuccessDataChunk,
     GetNamedResultResponseGetNamedResultResponseSuccessDataSummary,
-    GetJobNamedResultHeaderResponseGetJobNamedResultHeaderResponseError,
     GetJobNamedResultHeaderResponseGetJobNamedResultHeaderResponseSuccess,
+    GetJobNamedResultsHeadersResponseGetJobNamedResultsHeadersResponseSuccessOutputHeader,
 )
 
 
@@ -45,32 +47,36 @@ class JobResultApi(BaseApiV2[JobServiceStub]):
         return self._id
 
     async def get_job_named_result(
-        self, output_name: str, long_offset: int, limit: int
+        self, output_name: str, long_offset: int, limit: int, timeout: Optional[float] = None
     ) -> AsyncIterator[JobNamedResult]:
+        timeout = timeout if timeout is not None else self._timeout
+
         request = GetNamedResultRequest(job_id=self._id, output_name=output_name, long_offset=long_offset, limit=limit)
         if self._supports_chunk_streaming:
-            results_iterator = self._run_async_iterator(self._stub.get_named_result, request, timeout=self._timeout)
+            results_iterator = self._run_async_iterator(self._stub.get_named_result, request, timeout=timeout)
             async for result in self._group_results(results_iterator):
                 yield result
         else:
-            async for response in self._stub.get_named_result(request, timeout=self._timeout):
+            async for response in self._stub.get_named_result(request, timeout=timeout):
                 yield JobNamedResult(
                     data=response.success.data, count_of_items=response.success.count_of_items, output_name=output_name
                 )
 
-    async def get_job_named_results(self, data_to_fetch: Mapping[str, slice]) -> AsyncIterator[JobNamedResult]:
+    async def get_job_named_results(
+        self, data_to_fetch: Mapping[str, slice], timeout: Optional[float]
+    ) -> AsyncIterator[JobNamedResult]:
         request = GetNamedResultsRequest(
-            requests=[
-                GetNamedResultRequest(
-                    job_id=self._id,
+            job_id=self._id,
+            outputs=[
+                GetNamedResultsRequestOutput(
                     output_name=output_name,
-                    long_offset=s.start,
-                    limit=s.stop - s.start,
+                    range=Range(from_=s.start, to=s.stop - 1),
                 )
                 for output_name, s in data_to_fetch.items()
-            ]
+            ],
         )
-        results_iterator = self._run_async_iterator(self._stub.get_named_results, request, timeout=self._timeout)
+        timeout = timeout if timeout is not None else self._timeout
+        results_iterator = self._run_async_iterator(self._stub.get_named_results, request, timeout=timeout)
         async for result in self._group_results(results_iterator):
             yield result
 
@@ -99,29 +105,20 @@ class JobResultApi(BaseApiV2[JobServiceStub]):
 
     def get_named_headers(self, name_to_flat_struct: Mapping[str, bool]) -> Mapping[str, JobNamedResultHeader]:
         request = GetJobNamedResultsHeadersRequest(
-            requests=[
-                GetJobNamedResultHeaderRequest(job_id=self._id, output_name=name, flat_format=flat_struct)
+            job_id=self._id,
+            outputs=[
+                GetJobNamedResultsHeadersRequestOutput(output_name=name, flat_format=flat_struct)
                 for name, flat_struct in name_to_flat_struct.items()
-            ]
+            ],
         )
-        headers = run_async(self._fetch_headers(request))
+        headers = self._fetch_headers(request)
         return {response.output_name: self._convert_header_response_to_model(response) for response in headers}
 
-    async def _fetch_headers(
+    def _fetch_headers(
         self, request: GetJobNamedResultsHeadersRequest
-    ) -> Sequence[GetJobNamedResultHeaderResponseGetJobNamedResultHeaderResponseSuccess]:
-        to_return = []
-        async for response in self._run_async_iterator(
-            self._stub.get_job_named_results_headers, request, timeout=self._timeout
-        ):
-            _, response_val = betterproto.which_one_of(response, "response_oneof")
-            if isinstance(response_val, GetJobNamedResultHeaderResponseGetJobNamedResultHeaderResponseError):
-                raise DataFetchingError(f"Error fetching headers: {response_val.details}")
-            elif isinstance(response_val, GetJobNamedResultHeaderResponseGetJobNamedResultHeaderResponseSuccess):
-                to_return.append(response_val)
-            else:
-                raise ValueError(f"Unexpected response: {response}")
-        return to_return
+    ) -> Sequence[GetJobNamedResultsHeadersResponseGetJobNamedResultsHeadersResponseSuccessOutputHeader]:
+        response = self._run(self._stub.get_job_named_results_headers(request, timeout=self._timeout))
+        return response.headers
 
     def get_named_header(self, output_name: str, flat_struct: bool) -> JobNamedResultHeader:
         request = GetJobNamedResultHeaderRequest(job_id=self._id, output_name=output_name, flat_format=flat_struct)
@@ -130,11 +127,13 @@ class JobResultApi(BaseApiV2[JobServiceStub]):
 
     @staticmethod
     def _convert_header_response_to_model(
-        response: GetJobNamedResultHeaderResponseGetJobNamedResultHeaderResponseSuccess,
+        response: Union[
+            GetJobNamedResultHeaderResponseGetJobNamedResultHeaderResponseSuccess,
+            GetJobNamedResultsHeadersResponseGetJobNamedResultsHeadersResponseSuccessOutputHeader,
+        ]
     ) -> JobNamedResultHeader:
         return JobNamedResultHeader(
             count_so_far=response.count_so_far,
-            is_single=response.is_single,
             bare_dtype=response.simple_dtype,
             shape=tuple(response.shape),
             has_dataloss=response.has_data_loss,

@@ -51,9 +51,8 @@ class JobStreamingState:
 @dataclass
 class JobNamedResultHeader:
     count_so_far: int
-    is_single: bool
     bare_dtype: str
-    shape: Tuple[int, ...]
+    shape: tuple[int, ...]
     has_dataloss: bool
     has_execution_errors: bool
 

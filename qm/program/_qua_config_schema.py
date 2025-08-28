@@ -26,13 +26,15 @@ from marshmallow import Schema, ValidationError, fields, validate, post_load, va
 from qm.utils import deprecation_message
 from qm.containers.capabilities_container import CapabilitiesContainer
 from qm.api.models.capabilities import OPX_FEM_IDX, QopCaps, ServerCapabilities
+from qm.program._dict_to_pb_converter.main_config_converter import DictToQuaConfigConverter
+from qm.program._dict_to_pb_converter.converters.integration_weights_converter import build_iw_sample
+from qm.program._dict_to_pb_converter.converters.element_converter import DEFAULT_DUC_IDX, element_thread_to_pb
 from qm.utils.config_utils import FemTypes, get_logical_pb_config, get_fem_config_instance, get_controller_pb_config
-from qm.exceptions import (
-    ConfigSchemaError,
-    InvalidOctaveParameter,
-    ConfigValidationException,
-    OctaveConnectionAmbiguity,
-    CapabilitiesNotInitializedError,
+from qm.program._dict_to_pb_converter.converters.octave_converter import (
+    IF_OUT1_DEFAULT,
+    IF_OUT2_DEFAULT,
+    dac_port_ref_to_pb,
+    _get_port_reference_with_fem,
 )
 from qm.program._validate_config_schema import (
     validate_oscillator,
@@ -41,35 +43,13 @@ from qm.program._validate_config_schema import (
     validate_output_smearing,
     validate_sticky_duration,
 )
-from qm.program._qua_config_to_pb import (
-    DEFAULT_DUC_IDX,
-    IF_OUT1_DEFAULT,
-    IF_OUT2_DEFAULT,
-    rf_input_to_pb,
-    build_iw_sample,
-    rf_module_to_pb,
-    dac_port_ref_to_pb,
-    element_thread_to_pb,
-    get_octave_loopbacks,
-    single_if_output_to_pb,
-    analog_input_port_to_pb,
-    apply_post_load_setters,
-    create_correction_entry,
-    run_preload_validations,
-    _all_controllers_are_opx,
-    analog_output_port_to_pb,
-    digital_input_port_to_pb,
-    digital_output_port_to_pb,
-    mw_fem_analog_output_to_pb,
-    waveform_array_to_protobuf,
-    _get_port_reference_with_fem,
-    upconverter_config_dec_to_pb,
-    constant_waveform_to_protobuf,
-    arbitrary_waveform_to_protobuf,
-    create_time_tagging_parameters,
-    mw_fem_analog_input_port_to_pb,
-    validate_inputs_or_outputs_exist,
-    opx_1000_analog_output_port_to_pb,
+from qm.exceptions import (
+    ConfigSchemaError,
+    InvalidOctaveParameter,
+    NoInputsOrOutputsError,
+    ConfigValidationException,
+    OctaveConnectionAmbiguity,
+    CapabilitiesNotInitializedError,
 )
 from qm.type_hinting.config_types import (
     LoopbackType,
@@ -120,12 +100,10 @@ from qm.grpc.qua_config import (
     QuaConfigHoldOffset,
     QuaConfigOscillator,
     QuaConfigQuaConfigV1,
-    QuaConfigQuaConfigV2,
     QuaConfigSingleInput,
     QuaConfigWaveformDec,
     QuaConfigOctaveConfig,
     QuaConfigControllerDec,
-    QuaConfigLogicalConfig,
     QuaConfigOctoDacFemDec,
     QuaConfigPortReference,
     QuaConfigMultipleInputs,
@@ -133,7 +111,6 @@ from qm.grpc.qua_config import (
     QuaConfigMicrowaveFemDec,
     QuaConfigMultipleOutputs,
     QuaConfigAdcPortReference,
-    QuaConfigControllerConfig,
     QuaConfigDacPortReference,
     QuaConfigPulseDecOperation,
     QuaConfigAnalogInputPortDec,
@@ -167,6 +144,8 @@ logger = logging.getLogger(__name__)
 INIT_MODE_KEY = "init_mode"
 OCTAVE_ALREADY_CONFIGURED_KEY = "octave_already_configured"
 FEM_NAME_ERROR = "FEM name error - "
+CAPABILITIES_KEY = "capabilities"
+CONVERTER_KEY = "converter"
 
 
 def _get_port_address(controller_name: str, fem_idx: Optional[int], port_id: int) -> str:
@@ -324,7 +303,12 @@ def load_config(
         return cast(
             QuaConfig,
             QuaConfigSchema(
-                context={INIT_MODE_KEY: init_mode, OCTAVE_ALREADY_CONFIGURED_KEY: octave_already_configured}
+                context={
+                    INIT_MODE_KEY: init_mode,
+                    OCTAVE_ALREADY_CONFIGURED_KEY: octave_already_configured,
+                    CAPABILITIES_KEY: capabilities,
+                    CONVERTER_KEY: DictToQuaConfigConverter(capabilities, init_mode),
+                }
             ).load(config),
         )
     except ValidationError as validation_error:
@@ -488,7 +472,8 @@ class AnalogOutputPortDefSchema(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: AnalogOutputPortConfigType, **kwargs: Any) -> QuaConfigAnalogOutputPortDec:
-        return analog_output_port_to_pb(data, output_type=self.grpc_class, init_mode=self.context[INIT_MODE_KEY])
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.control_device_converter.analog_output_port_to_pb(data, output_type=self.grpc_class)
 
 
 class MwUpconverterSchema(Schema):
@@ -496,7 +481,8 @@ class MwUpconverterSchema(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: MwUpconverterConfigType, **kwargs: Any) -> QuaConfigUpConverterConfigDec:
-        return upconverter_config_dec_to_pb(data)
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.control_device_converter.upconverter_config_dec_to_pb(data)
 
 
 class AnalogOutputPortDefSchemaMwFem(Schema):
@@ -532,7 +518,8 @@ class AnalogOutputPortDefSchemaMwFem(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: MwFemAnalogOutputPortConfigType, **kwargs: Any) -> QuaConfigMicrowaveAnalogOutputPortDec:
-        return mw_fem_analog_output_to_pb(data, init_mode=self.context[INIT_MODE_KEY])
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.control_device_converter.mw_fem_analog_output_to_pb(data)
 
 
 class AnalogInputPortDefSchemaMwFem(Schema):
@@ -560,7 +547,8 @@ class AnalogInputPortDefSchemaMwFem(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: MwFemAnalogInputPortConfigType, **kwargs: Any) -> QuaConfigMicrowaveAnalogInputPortDec:
-        return mw_fem_analog_input_port_to_pb(data, init_mode=self.context[INIT_MODE_KEY])
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.control_device_converter.mw_fem_analog_input_port_to_pb(data)
 
 
 class AnalogOutputPortDefSchemaOPX1000(AnalogOutputPortDefSchema):
@@ -580,7 +568,8 @@ class AnalogOutputPortDefSchemaOPX1000(AnalogOutputPortDefSchema):
 
     @post_load(pass_many=False)
     def build(self, data: AnalogOutputPortConfigTypeOctoDac, **kwargs: Any) -> QuaConfigOctoDacAnalogOutputPortDec:
-        return opx_1000_analog_output_port_to_pb(data, init_mode=self.context[INIT_MODE_KEY])
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.control_device_converter.opx_1000_analog_output_port_to_pb(data)
 
 
 class AnalogInputPortDefSchema(Schema):
@@ -608,7 +597,8 @@ class AnalogInputPortDefSchema(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: AnalogInputPortConfigType, **kwargs: Any) -> QuaConfigAnalogInputPortDec:
-        return analog_input_port_to_pb(data, init_mode=self.context[INIT_MODE_KEY])
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.control_device_converter.analog_input_port_to_pb(data)
 
 
 class DigitalOutputPortDefSchema(Schema):
@@ -633,7 +623,8 @@ class DigitalOutputPortDefSchema(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: DigitalOutputPortConfigType, **kwargs: Any) -> QuaConfigDigitalOutputPortDec:
-        return digital_output_port_to_pb(data, init_mode=self.context[INIT_MODE_KEY])
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.control_device_converter.digital_output_port_to_pb(data)
 
 
 class DigitalInputPortDefSchema(Schema):
@@ -652,7 +643,8 @@ class DigitalInputPortDefSchema(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: DigitalInputPortConfigType, **kwargs: Any) -> QuaConfigDigitalInputPortDec:
-        return digital_input_port_to_pb(data, init_mode=self.context[INIT_MODE_KEY])
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.control_device_converter.digital_input_port_to_pb(data)
 
 
 class OctaveRFOutputSchema(Schema):
@@ -675,7 +667,8 @@ class OctaveRFOutputSchema(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: OctaveRFOutputConfigType, **kwargs: Any) -> QuaConfigOctaveRfOutputConfig:
-        return rf_module_to_pb(data)
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.octave_converter.rf_module_to_pb(data)
 
 
 class OctaveRFInputSchema(Schema):
@@ -687,7 +680,8 @@ class OctaveRFInputSchema(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: OctaveRFInputConfigType, **kwargs: Any) -> QuaConfigOctaveRfInputConfig:
-        return rf_input_to_pb(data)
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.octave_converter.rf_input_to_pb(data)
 
 
 class SingleIFOutputSchema(Schema):
@@ -696,7 +690,8 @@ class SingleIFOutputSchema(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: OctaveSingleIfOutputConfigType, **kwargs: Any) -> QuaConfigOctaveSingleIfOutputConfig:
-        return single_if_output_to_pb(data)
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.octave_converter.single_if_output_to_pb(data)
 
 
 class _SemiBuiltIFOutputsConfig(TypedDict, total=False):
@@ -752,8 +747,10 @@ class OctaveSchema(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: _SemiBuiltOctaveConfig, **kwargs: Any) -> QuaConfigOctaveConfig:
+        converter: DictToQuaConfigConverter = self.context["converter"]
+
         to_return = QuaConfigOctaveConfig(
-            loopbacks=get_octave_loopbacks(data.get("loopbacks", [])),
+            loopbacks=converter.octave_converter.get_octave_loopbacks(data.get("loopbacks", [])),
             rf_outputs=data.get("RF_outputs", {}),
             rf_inputs=data.get("RF_inputs", {}),
         )
@@ -1146,7 +1143,8 @@ class ConstantWaveformSchema(WaveformSchema):
 
     @post_load(pass_many=False)
     def build(self, data: ConstantWaveformConfigType, **kwargs: Any) -> QuaConfigWaveformDec:
-        return constant_waveform_to_protobuf(data)
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.waveform_converter.constant_waveform_to_protobuf(data)
 
 
 class ArbitraryWaveformSchema(WaveformSchema):
@@ -1177,7 +1175,8 @@ class ArbitraryWaveformSchema(WaveformSchema):
 
     @post_load(pass_many=False)
     def build(self, data: ArbitraryWaveformConfigType, **kwargs: Any) -> QuaConfigWaveformDec:
-        return arbitrary_waveform_to_protobuf(data)
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.waveform_converter.arbitrary_waveform_to_protobuf(data)
 
 
 class WaveformArraySchema(WaveformSchema):
@@ -1194,7 +1193,8 @@ class WaveformArraySchema(WaveformSchema):
 
     @post_load(pass_many=False)
     def build(self, data: WaveformArrayConfigType, **kwargs: Any) -> QuaConfigWaveformDec:
-        return waveform_array_to_protobuf(data)
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.waveform_converter.waveform_array_to_protobuf(data)
 
 
 def _waveform_schema_deserialization_disambiguation(
@@ -1264,7 +1264,8 @@ class MixerSchema(Schema):
         data: MixerConfigType,
         **kwargs: Any,
     ) -> QuaConfigCorrectionEntry:
-        return create_correction_entry(data, init_mode=self.context[INIT_MODE_KEY])
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.mixer_correction_converter.convert(data)
 
 
 class PulseSchema(Schema):
@@ -1428,13 +1429,12 @@ class MixInputSchema(Schema):
         description = "The specification of the input of an element which is driven by an IQ mixer"
 
     @post_load(pass_many=False)
-    @inject
     def build(
         self,
         data: MixInputConfigType,
-        capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
         **kwargs: Any,
     ) -> QuaConfigMixInputs:
+        capabilities = self.context[CAPABILITIES_KEY]
         lo_frequency = data.get("lo_frequency", 0)
         cont_i, fem_i, num_i = _get_port_reference_with_fem(data["I"])
         cont_q, fem_q, num_q = _get_port_reference_with_fem(data["Q"])
@@ -1508,13 +1508,12 @@ class OscillatorSchema(Schema):
     )
 
     @post_load(pass_many=False)
-    @inject
     def build(
         self,
         data: OscillatorConfigType,
-        capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
         **kwargs: Any,
     ) -> QuaConfigOscillator:
+        capabilities = self.context[CAPABILITIES_KEY]
         osc = QuaConfigOscillator()
         if "intermediate_frequency" in data and data["intermediate_frequency"] is not None:
             osc.intermediate_frequency = int(data["intermediate_frequency"])
@@ -1554,7 +1553,8 @@ class TimeTaggingParametersSchema(Schema):
 
     @post_load(pass_many=False)
     def build(self, data: TimeTaggingParametersConfigType, **kwargs: Any) -> QuaConfigOutputPulseParameters:
-        return create_time_tagging_parameters(data)
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.element_converter.create_time_tagging_parameters(data)
 
 
 class _SemiBuiltElement(TypedDict, total=False):
@@ -1653,13 +1653,12 @@ class ElementSchema(Schema):
         description = "The specifications, parameters and connections of a single element."
 
     @post_load(pass_many=False)
-    @inject
     def build(
         self,
         data: _SemiBuiltElement,
-        capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
         **kwargs: Any,
     ) -> QuaConfigElementDec:
+        capabilities = self.context[CAPABILITIES_KEY]
         el = QuaConfigElementDec()
         if "intermediate_frequency" in data and data["intermediate_frequency"] is not None:
             el.intermediate_frequency = abs(int(data["intermediate_frequency"]))
@@ -1863,30 +1862,17 @@ class QuaConfigSchema(Schema):
         title = "QUA Config"
         description = "QUA program config root object"
 
-    def set_config_wrapper(self, capabilities: ServerCapabilities) -> QuaConfig:
-        pb_config = QuaConfig()
-
-        if capabilities.supports(QopCaps.config_v2):
-            pb_config.v2 = QuaConfigQuaConfigV2(
-                controller_config=QuaConfigControllerConfig(), logical_config=QuaConfigLogicalConfig()
-            )
-        else:
-            pb_config.v1_beta = QuaConfigQuaConfigV1()
-
-        return pb_config
-
     @post_load(pass_many=False)
     def build(
         self,
         data: _SemiBuiltQuaConfig,
-        capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
         **kwargs: Any,
     ) -> QuaConfig:
-        run_preload_validations(
-            capabilities, self.context[INIT_MODE_KEY], "octaves" in data, self.context[OCTAVE_ALREADY_CONFIGURED_KEY]
-        )
+        converter: DictToQuaConfigConverter = self.context["converter"]
 
-        pb_config = self.set_config_wrapper(capabilities)
+        converter.run_preload_validations(data, self.context[OCTAVE_ALREADY_CONFIGURED_KEY])  # type: ignore[arg-type]
+
+        pb_config = converter.set_config_wrapper()
         controller_config = get_controller_pb_config(pb_config)
         logical_config = get_logical_pb_config(pb_config)
 
@@ -1903,7 +1889,7 @@ class QuaConfigSchema(Schema):
             for name, control_device in data["controllers"].items():
                 controller_config.control_devices[name] = control_device
             # Controllers attribute is supported only in config v1
-            if _all_controllers_are_opx(controller_config.control_devices) and isinstance(
+            if converter.all_controllers_are_opx(controller_config.control_devices) and isinstance(
                 controller_config, QuaConfigQuaConfigV1
             ):
                 for name, control_device in controller_config.control_devices.items():
@@ -1923,7 +1909,23 @@ class QuaConfigSchema(Schema):
             for pulse_name, pulse in data["pulses"].items():
                 logical_config.pulses[pulse_name] = pulse
 
-        apply_post_load_setters(pb_config, capabilities)
-        validate_inputs_or_outputs_exist(pb_config)
+        converter.apply_post_load_setters(pb_config)
+        _validate_inputs_or_outputs_exist(pb_config)
 
         return pb_config
+
+
+def _validate_inputs_or_outputs_exist(pb_config: QuaConfig) -> None:
+    elements_config = get_logical_pb_config(pb_config).elements
+
+    for element in elements_config.values():
+        _, element_input = betterproto.which_one_of(element, "element_inputs_one_of")
+        _, element_outputs = betterproto.which_one_of(element, "element_outputs_one_of")
+        if (
+            element_input is None
+            and element_outputs is None
+            and not bool(element.outputs)  # this is for backward compatibility
+            and not bool(element.digital_outputs)
+            and not bool(element.digital_inputs)
+        ):
+            raise NoInputsOrOutputsError

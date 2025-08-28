@@ -1,7 +1,7 @@
 import abc
 import logging
 from io import BytesIO
-from typing import Union, BinaryIO, Optional
+from typing import Union, Generic, TypeVar, BinaryIO, Optional
 
 import numpy.typing
 
@@ -24,10 +24,14 @@ from qm._stream_results._utils import (
 logger = logging.getLogger(__name__)
 
 
-VERY_LONG_TIME = 1e8  # 3.17 years
+# 23 days. Reduced from 1e8 due to Windows gRPC timeout limits causing server errors (https://quantum-machines.atlassian.net/browse/OPXK-25752).
+VERY_LONG_TIME = 2e6
 
 
-class BaseSingleStreamFetcher(metaclass=abc.ABCMeta):
+ReturnedT = TypeVar("ReturnedT", Optional[numpy.typing.NDArray[numpy.generic]], numpy.typing.NDArray[numpy.generic])
+
+
+class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
     def __init__(
         self,
         schema: JobResultItemSchema,
@@ -35,14 +39,14 @@ class BaseSingleStreamFetcher(metaclass=abc.ABCMeta):
         stream_metadata_errors: list[StreamMetadataError],
         stream_metadata: Optional[StreamMetadata],
         capabilities: ServerCapabilities,
-        multiple_results_fetcher: Optional[MultipleStreamsFetcher],
+        multiple_streams_fetcher: Optional[MultipleStreamsFetcher],
     ) -> None:
         self._schema = schema
         self._service = service
         self._stream_metadata_errors = stream_metadata_errors
         self._stream_metadata = stream_metadata
         self._has_job_streaming_state = capabilities.supports(QopCaps.job_streaming_state)
-        self._multiple_streams_fetcher = multiple_results_fetcher
+        self._multiple_streams_fetcher = multiple_streams_fetcher
         self._validate_schema()
 
     @property
@@ -161,9 +165,7 @@ class BaseSingleStreamFetcher(metaclass=abc.ABCMeta):
         log_execution_errors(response, self.name, check_for_errors)
         return response
 
-    def fetch_all(
-        self, *, check_for_errors: bool = True, flat_struct: bool = False
-    ) -> Optional[numpy.typing.NDArray[numpy.generic]]:
+    def fetch_all(self, *, check_for_errors: bool = True, flat_struct: bool = False) -> ReturnedT:
         """Fetch a result from the current result stream saved in server memory.
         The result stream is populated by the save() and save_all() statements.
         Note that if save_all() statements are used, calling this function twice
@@ -178,18 +180,20 @@ class BaseSingleStreamFetcher(metaclass=abc.ABCMeta):
             all results of current result stream
         """
         return self.fetch(
-            slice(0, self.count_so_far()),
+            slice(0, None),
             check_for_errors=check_for_errors,
             flat_struct=flat_struct,
         )
 
+    @abc.abstractmethod
     def fetch(
         self,
         item: Union[int, slice],
         *,
         check_for_errors: bool = True,
         flat_struct: bool = False,
-    ) -> Optional[numpy.typing.NDArray[numpy.generic]]:
+        timeout: Optional[float] = None,
+    ) -> ReturnedT:
         """Fetch a single result from the current result stream saved in server memory.
         The result stream is populated by the save().
 
@@ -198,6 +202,7 @@ class BaseSingleStreamFetcher(metaclass=abc.ABCMeta):
             check_for_errors: If true, the function would also check whether run-time errors happened during the
                 program execution and would write to the logger an error message.
             flat_struct: results will have a flat structure - dimensions will be part of the shape and not of the type
+            timeout: Timeout for waiting in seconds
 
         Returns:
             the current result
@@ -207,7 +212,7 @@ class BaseSingleStreamFetcher(metaclass=abc.ABCMeta):
             res.fetch() # return the item in the top position
             ```
         """
-        return self.strict_fetch(item, check_for_errors=check_for_errors, flat_struct=flat_struct)
+        pass
 
     def strict_fetch(
         self,
@@ -215,6 +220,7 @@ class BaseSingleStreamFetcher(metaclass=abc.ABCMeta):
         *,
         check_for_errors: bool = True,
         flat_struct: bool = False,
+        timeout: Optional[float] = None,
     ) -> numpy.typing.NDArray[numpy.generic]:
         """Fetch a result from the current result stream saved in server memory.
         The result stream is populated by the save() and save_all() statements.
@@ -226,6 +232,7 @@ class BaseSingleStreamFetcher(metaclass=abc.ABCMeta):
             check_for_errors: If true, the function would also check whether run-time errors happened during the
                 program execution and would write to the logger an error message.
             flat_struct: results will have a flat structure - dimensions will be part of the shape and not of the type
+            timeout: Timeout for waiting in seconds
 
         Returns:
             a single result if item is integer or multiple results if item is a Python slice object.
@@ -244,29 +251,37 @@ class BaseSingleStreamFetcher(metaclass=abc.ABCMeta):
         """
         if self._multiple_streams_fetcher is not None:
             flat_struct_items = {self.name} if flat_struct else frozenset()
-            return self._multiple_streams_fetcher.fetch({self.name: item}, flat_struct_items, check_for_errors)[
-                self.name
-            ]
+            return self._multiple_streams_fetcher.strict_fetch(
+                {self.name: item}, flat_struct_items, check_for_errors, timeout
+            )[self.name]
         # This class tries to use the newer API of fetching multiple stream at once.
         # If the server does not have this capability, it resorts to the older API.
         header = self._get_named_header(check_for_errors=check_for_errors, flat_struct=flat_struct)
         assert_no_dataloss(header, self._job_id)
         slicer = _standardize_slice(self.name, item, header)
-        array = self._fetch_results(header, slicer.start, slicer.stop)
+        array = self._fetch_results(header, slicer.start, slicer.stop, timeout)
 
         return array
 
     def _fetch_results(
-        self, header: JobNamedResultHeader, start: int, stop: int
+        self, header: JobNamedResultHeader, start: int, stop: int, timeout: Optional[float]
     ) -> numpy.typing.NDArray[numpy.generic]:
         data_writer = BytesIO()
-        count_data_written = run_async(self._add_results_to_writer(data_writer, start, stop))
+        count_data_written = run_async(self._add_results_to_writer(data_writer, start, stop, timeout))
         return _create_results_array(count_data_written, header, data_writer)
 
-    async def _add_results_to_writer(self, data_writer: BinaryIO, start: int, stop: int) -> int:
+    async def _add_results_to_writer(
+        self, data_writer: BinaryIO, start: int, stop: int, timeout: Optional[float]
+    ) -> int:
         _count_data_written = 0
-        async for result in self._service.get_job_named_result(self._schema.name, start, stop - start):
+        async for result in self._service.get_job_named_result(self._schema.name, start, stop - start, timeout):
             data_writer.write(result.data)
             _count_data_written += result.count_of_items
 
         return _count_data_written
+
+
+AnySingleStreamFetcher = Union[
+    BaseSingleStreamFetcher[Optional[numpy.typing.NDArray[numpy.generic]]],
+    BaseSingleStreamFetcher[numpy.typing.NDArray[numpy.generic]],
+]

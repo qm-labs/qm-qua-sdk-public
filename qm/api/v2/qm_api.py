@@ -3,6 +3,7 @@ import contextlib
 from typing import (
     List,
     Type,
+    Tuple,
     Union,
     Literal,
     Mapping,
@@ -19,7 +20,6 @@ from typing import (
 
 from qm.utils import LOG_LEVEL_MAP
 from qm.octave import QmOctaveConfig
-from qm.grpc.qua_config import QuaConfig
 from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.program import Program, load_config
 from qm.grpc.compiler import CompilerMessage
@@ -28,21 +28,24 @@ from qm.grpc.frontend import SimulatedResponsePart
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
 from qm.grpc.qm_manager import ConfigValidationMessage
+from qm.elements.element import NewApiUpconvertedElement
 from qm.api.models.server_details import ConnectionDetails
-from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.utils.config_utils import get_controller_pb_config
 from qm.api.simulation_api import create_simulation_request
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.elements.up_converted_input import UpconvertedInputNewApi
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
+from qm.grpc.qua_config import QuaConfig, QuaConfigCorrectionEntry
+from qm.program._dict_to_pb_converter import DictToQuaConfigConverter
 from qm.program._fill_defaults_in_config_v1 import fill_defaults_in_config_v1
 from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, transfer_statuses_to_enum
-from qm.type_hinting.config_types import FullQuaConfig, LogicalQuaConfig, ControllerQuaConfig
 from qm.octave.qm_octave import QmOctaveForNewApi, create_mixer_correction, create_dc_offset_octave_update
+from qm.type_hinting.config_types import FullQuaConfig, MixerConfigType, LogicalQuaConfig, ControllerQuaConfig
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params, get_request_compiler_options
 from qm.octave.octave_mixer_calibration import (
     AutoCalibrationParams,
     MixerCalibrationResults,
+    LOFrequencyCalibrationResult,
     NewApiOctaveMixerCalibration,
 )
 from qm.exceptions import (
@@ -253,7 +256,8 @@ class QmApi(BaseApiV2[QmServiceStub]):
         Returns:
             A dictionary with the QMs config
         """
-        return convert_msg_to_config(self._get_pb_config())
+        converter = DictToQuaConfigConverter(self._caps)
+        return converter.deconvert(self._get_pb_config())
 
     def compile(
         self,
@@ -573,13 +577,63 @@ class QmApi(BaseApiV2[QmServiceStub]):
             update: ControllerQuaConfig = {}
             if inst.intermediate_frequency in qe_cal.image:
                 update = create_dc_offset_octave_update(inst_input, i_offset=qe_cal.i0, q_offset=qe_cal.q0)
-            mixers = [
-                create_mixer_correction(if_freq, inst_input.lo_frequency, if_cal.fine.correction)
-                for if_freq, if_cal in qe_cal.image.items()
-            ]
-            update["mixers"] = {inst_input.mixer: mixers}
+
+            update["mixers"] = {inst_input.mixer: self._update_mixer_corrections(qe_cal, inst_input, inst)}
             self.update_config(update)
+
         return res
+
+    def _update_mixer_corrections(
+        self, qe_cal: LOFrequencyCalibrationResult, inst_input: UpconvertedInputNewApi, inst: NewApiUpconvertedElement
+    ) -> List[MixerConfigType]:
+        mixers_corrections = []
+
+        should_add_original_frequency = True
+        for if_freq, if_cal in qe_cal.image.items():
+            mixers_corrections.append(create_mixer_correction(if_freq, inst_input.lo_frequency, if_cal.fine.correction))
+
+            if if_freq == inst.intermediate_frequency:
+                should_add_original_frequency = False
+
+        if should_add_original_frequency:
+            """
+            Before QOP 3.5, there was no need to add the mixers that were used when opening the QM.
+            Starting with 3.5, however, the introduction of “send program with config” changed this behavior: the list
+            of mixers is now completely overridden by the configuration provided in either update_config or in the
+            config sent with the program. So now we need to make sure that the mixer correction for the original IF
+            frequency of the element is also added, in case it was not part of the calibration.
+            """
+            mixers_corrections.append(self._get_original_frequency_mixer_correction(inst_input, inst))
+        return mixers_corrections
+
+    def _get_original_frequency_mixer_correction(
+        self,
+        inst_input: UpconvertedInputNewApi,
+        inst: NewApiUpconvertedElement,
+    ) -> MixerConfigType:
+        current_config = self._get_pb_config()
+
+        current_correction_entries = get_controller_pb_config(current_config).mixers.get(inst_input.mixer, None)
+
+        if current_correction_entries is None:
+            raise KeyError("There should always be a correction entry for the mixer")
+
+        correction_matrix = self._get_correction_matrix_for_if_lo_pair(
+            inst.intermediate_frequency, inst_input.lo_frequency, current_correction_entries.correction
+        )
+
+        return create_mixer_correction(inst.intermediate_frequency, inst_input.lo_frequency, correction_matrix)
+
+    @staticmethod
+    def _get_correction_matrix_for_if_lo_pair(
+        if_freq: float, lo_freq: float, correction_entries: List[QuaConfigCorrectionEntry]
+    ) -> Tuple[float, float, float, float]:
+        for correction_entry in correction_entries:
+            if correction_entry.frequency_double == if_freq and correction_entry.lo_frequency_double == lo_freq:
+                matrix = correction_entry.correction
+                return matrix.v00, matrix.v01, matrix.v10, matrix.v11
+
+        raise KeyError("There should always be a correction entry for the mixer with the given IF and LO frequencies.")
 
     def reset_digital_filters(self) -> None:
         """

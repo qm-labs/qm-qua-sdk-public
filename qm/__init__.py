@@ -28,6 +28,7 @@ from qm.simulate import (  # noqa
 from ._stream_results import (  # noqa
     StreamsManager,
     StreamingResultFetcher,
+    BaseSingleStreamFetcher,
     SingleStreamingResultFetcher,
     MultipleStreamingResultFetcher,
     SingleStreamSingleResultFetcher,
@@ -40,6 +41,7 @@ __all__ = [
     "QmPendingJob",
     "QmJob",
     "StreamsManager",
+    "BaseSingleStreamFetcher",
     "StreamingResultFetcher",
     "SingleStreamingResultFetcher",
     "MultipleStreamingResultFetcher",

@@ -1,6 +1,7 @@
 import logging
 import dataclasses
-from typing import Dict, Union, Iterable, cast
+from typing import Union, cast
+from collections.abc import Iterable
 
 import betterproto
 
@@ -17,7 +18,7 @@ LOG_LEVEL_MAP = {
 Node = Union[betterproto.Message, Iterable["Node"]]
 
 
-def list_fields(node: Node) -> Dict[str, Node]:
+def list_fields(node: Node) -> dict[str, Node]:
     fields = dataclasses.fields(cast(DataclassProtocol, node))
     output = {}
     for field in fields:

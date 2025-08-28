@@ -1,7 +1,6 @@
 from types import TracebackType
 from dataclasses import dataclass
-from typing_extensions import Literal
-from typing import Any, List, Type, Tuple, Generic, Optional, Sequence
+from typing import Any, List, Type, Tuple, Generic, Literal, Optional, Sequence
 
 from betterproto.lib.google.protobuf import Any as BetterAny
 

@@ -31,7 +31,6 @@ from qm.type_hinting.config_types import FullQuaConfig
 from qm.utils.config_utils import get_logical_pb_config
 from qm.api.v2.job_api.generic_apis import JobGenericApi
 from qm.api.models.server_details import ConnectionDetails
-from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.api.v2.job_api.job_elements_db import JobElementsDB
 from qm.utils.general_utils import create_input_stream_name
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
@@ -56,6 +55,7 @@ from qm.grpc.v2 import (
 )
 
 from ...._stream_results import StreamsManager
+from ....program._dict_to_pb_converter import DictToQuaConfigConverter
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +193,8 @@ class JobApi(JobGenericApi):
         Returns:
              The config with which this job was compiled
         """
-        return convert_msg_to_config(self._get_pb_config())
+        converter = DictToQuaConfigConverter(self._caps)
+        return converter.deconvert(self._get_pb_config())
 
     def push_to_input_stream(self, stream_name: str, data: List[Union[bool, int, float]]) -> None:
         """Push data to the input stream declared in the QUA program.
@@ -275,7 +276,7 @@ class JobApi(JobGenericApi):
         """
         return self.get_status() == "Running"
 
-    def wait_until(self, state: Union[JobStatus, Collection[JobStatus]], timeout: float) -> None:
+    def wait_until(self, state: Union[JobStatus, Collection[JobStatus]], timeout: Optional[float] = None) -> None:
         """
         Waits until a specific state is reached. If the job is already passed the given state, the function will
         immediately return. See [get_status][qm.api.v2.job_api.job_api.JobApi.get_status] for a list of statuses.
@@ -291,7 +292,8 @@ class JobApi(JobGenericApi):
         if isinstance(state, str):
             state = {state}
         try:
-            run_async(self._wait_until(state, timeout))
+            timeout = timeout if timeout is not None else self._timeout
+            run_async(self._wait_until(state, timeout))  # type: ignore[arg-type]
         except QMTimeoutError as e:
             raise QMTimeoutError(f"Job {self.id} did not reach any state of {state} within {timeout} seconds") from e
 
@@ -312,9 +314,9 @@ class JobApi(JobGenericApi):
         """
         Returns:
 
-             `True` if the job will no longer run (Has reached "Completed", "Canceled" or "Error").
+             `True` if the job will no longer run (Has reached "Done", "Canceled" or "Error").
         """
-        return self.get_status() in {"Completed", "Canceled", "Error"}
+        return self.get_status() in {"Done", "Canceled", "Error"}
 
     def cancel(self) -> None:
         """

@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Type, Tuple, Mapping, AsyncIterator
+from typing import Dict, List, Type, Tuple, Mapping, Optional, AsyncIterator
 
 from qm.api.base_api import BaseApi
 from qm.api.models.server_details import ConnectionDetails
@@ -38,12 +38,19 @@ class JobResultServiceApi(BaseApi[JobResultsServiceStub]):
         return response.errors
 
     async def get_job_named_result(
-        self, output_name: str, long_offset: int, limit: int
+        self,
+        output_name: str,
+        long_offset: int,
+        limit: int,
+        timeout: Optional[float],
     ) -> AsyncIterator[JobNamedResult]:
+        timeout = timeout if timeout is not None else self._timeout
+
         request = GetJobNamedResultRequest(
             job_id=self._id, output_name=output_name, long_offset=long_offset, limit=limit
         )
-        response = self._run_async_iterator(self._stub.get_job_named_result, request, timeout=self._timeout)
+        response = self._run_async_iterator(self._stub.get_job_named_result, request, timeout=timeout)
+
         async for result in response:
             yield JobNamedResult(data=result.data, count_of_items=result.count_of_items, output_name=output_name)
 
@@ -62,7 +69,6 @@ class JobResultServiceApi(BaseApi[JobResultsServiceStub]):
         response = self._run(self._stub.get_job_named_result_header(request, timeout=self._timeout))
         return JobNamedResultHeader(
             count_so_far=response.count_so_far,
-            is_single=response.is_single,
             bare_dtype=response.simple_d_type,
             shape=tuple(response.shape),
             has_dataloss=response.has_dataloss,

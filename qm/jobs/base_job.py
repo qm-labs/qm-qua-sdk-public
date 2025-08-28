@@ -32,7 +32,7 @@ class QmBaseJob:
         self._frontend = frontend_api
         self._capabilities = capabilities
 
-        self._job_manager = create_job_manager_from_api(frontend_api)
+        self._job_manager = create_job_manager_from_api(frontend_api, capabilities)
 
         self._added_user_id: Optional[str] = None
         self._time_added: Optional[datetime.datetime] = None

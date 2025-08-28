@@ -3,10 +3,9 @@ import warnings
 import dataclasses
 from enum import Enum
 from dataclasses import dataclass
-from typing import List, Tuple, Union
 from typing import Optional, Sequence
-from typing_extensions import Literal
 from typing import Iterable as IterableClass
+from typing import List, Tuple, Union, Literal
 
 import numpy as np
 from betterproto.lib.std.google.protobuf import Value, ListValue

@@ -1,7 +1,7 @@
 import logging
 from io import BytesIO
 from collections import defaultdict
-from typing import Dict, Tuple, Union, Literal, Mapping, BinaryIO, Collection
+from typing import Dict, Tuple, Union, Literal, Mapping, BinaryIO, Optional, Collection
 
 import numpy.typing
 
@@ -13,6 +13,7 @@ from qm._stream_results._utils import (
     assert_no_dataloss,
     log_execution_errors,
     _create_results_array,
+    postprocess_single_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,10 +37,29 @@ class MultipleStreamsFetcher:
         items: Mapping[str, Union[int, slice]],
         flat_struct_items: Union[Collection[str], Literal["all"]] = frozenset(),
         check_for_errors: bool = True,
+        timeout: Optional[float] = None,
+    ) -> Mapping[str, Optional[numpy.typing.NDArray[numpy.generic]]]:
+        bare_results = self.strict_fetch(items, flat_struct_items, check_for_errors, timeout)
+        results: dict[str, Optional[numpy.typing.NDArray[numpy.generic]]] = {}
+        for name, result in bare_results.items():
+            if self._schemas[name].is_single:
+                is_flat_struct = flat_struct_items == "all" or name in flat_struct_items
+                results[name] = postprocess_single_result(result, is_flat_struct)
+            else:
+                results[name] = result
+        return results
+
+    def strict_fetch(
+        self,
+        items: Mapping[str, Union[int, slice]],
+        flat_struct_items: Union[Collection[str], Literal["all"]] = frozenset(),
+        check_for_errors: bool = True,
+        timeout: Optional[float] = None,
     ) -> Mapping[str, numpy.typing.NDArray[numpy.generic]]:
+
         headers = self._get_named_headers(items, flat_struct_items)
         name_to_slice, name_to_header = self._standardize_query_params(items, headers, check_for_errors)
-        return self._fetch_results(name_to_slice, name_to_header)
+        return self._fetch_results(name_to_slice, name_to_header, timeout=timeout)
 
     def _get_named_headers(
         self, items: Collection[str], flat_struct_items: Union[Collection[str], Literal["all"]]
@@ -52,11 +72,18 @@ class MultipleStreamsFetcher:
         self,
         name_to_slice: Mapping[str, slice],
         name_to_header: Mapping[str, JobNamedResultHeader],
+        timeout: Optional[float],
     ) -> Mapping[str, numpy.typing.NDArray[numpy.generic]]:
         name_to_writer = {n: BytesIO() for n in name_to_slice}
-        name_to_count_data_written = run_async(self._add_results_to_writers(name_to_slice, name_to_writer))
+        name_to_count_data_written = run_async(
+            self._add_results_to_writers(name_to_slice, name_to_writer, timeout=timeout)
+        )
         name_to_array = {
-            n: _create_results_array(name_to_count_data_written[n], name_to_header[n], name_to_writer[n])
+            n: _create_results_array(
+                name_to_count_data_written[n],
+                name_to_header[n],
+                name_to_writer[n],
+            )
             for n in name_to_slice
         }
         return name_to_array
@@ -90,9 +117,10 @@ class MultipleStreamsFetcher:
         self,
         name_to_slice: Mapping[str, slice],
         name_to_writer: Mapping[str, BinaryIO],
+        timeout: Optional[float],
     ) -> Mapping[str, int]:
         name_to_count_data_written: Dict[str, int] = defaultdict(int)
-        async for result in self._service.get_job_named_results(name_to_slice):
+        async for result in self._service.get_job_named_results(name_to_slice, timeout=timeout):
             data_writer = name_to_writer[result.output_name]
             data_writer.write(result.data)
             name_to_count_data_written[result.output_name] += result.count_of_items

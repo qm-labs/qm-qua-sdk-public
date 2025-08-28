@@ -20,12 +20,12 @@ from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
 from qm.elements_db import ElementsDB, init_elements
 from qm.utils.types_utils import convert_object_type
-from qm.program.ConfigBuilder import convert_msg_to_config
 from qm.elements.up_converted_input import UpconvertedInput
 from qm._QmJobErrors import InvalidDigitalInputPolarityError
 from qm.api.v2.job_api.job_api import JobApiWithDeprecations
 from qm.octave._calibration_names import COMMON_OCTAVE_PREFIX
 from qm.api.job_manager_api import create_job_manager_from_api
+from qm.program._dict_to_pb_converter import DictToQuaConfigConverter
 from qm.api.models.capabilities import OPX_FEM_IDX, ServerCapabilities
 from qm.jobs.job_queue_with_deprecations import QmQueueWithDeprecations
 from qm.program._fill_defaults_in_config_v1 import fill_defaults_in_config_v1
@@ -79,7 +79,7 @@ class QuantumMachine:
         self._capabilities = capabilities
 
         self._simulation_api = SimulationApi(self._frontend.connection_details)
-        self._job_manager = create_job_manager_from_api(frontend_api)
+        self._job_manager = create_job_manager_from_api(frontend_api, capabilities)
 
         self._queue = QmQueue(
             config=self._config,
@@ -804,7 +804,8 @@ class QuantumMachine:
         """
         config = self._get_pb_config()
         self._config = config
-        return convert_msg_to_config(config)
+        converter = DictToQuaConfigConverter(self._capabilities)
+        return converter.deconvert(config)
 
     def save_config_to_file(self, filename: PathLike) -> None:
         """Saves the qm current config to a file

@@ -1,12 +1,12 @@
 import logging
 import warnings
-from typing_extensions import Mapping  # Mapping in 3.8 does not support class indexing
 from typing import (
     Dict,
     List,
     Tuple,
     Union,
     Literal,
+    Mapping,
     TypeVar,
     Callable,
     KeysView,
@@ -15,37 +15,44 @@ from typing import (
     ItemsView,
     Collection,
     ValuesView,
+    cast,
     overload,
 )
 
 import numpy
 
+from qm.type_hinting import Number
 from qm.utils import deprecation_message
 from qm.api.v2.job_result_api import JobResultApi
+from qm.api.models.jobs import JobResultItemSchema
 from qm.api.job_result_api import JobResultServiceApi
-from qm.exceptions import JobFailedError, QmQuaException
 from qm.utils.general_utils import run_until_with_timeout
 from qm.StreamMetadata import StreamMetadata, StreamMetadataError
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
+from qm.exceptions import JobFailedError, QmQuaException, QMTimeoutError
 from qm._stream_results._multiple_streams_fetcher import MultipleStreamsFetcher
 from qm._stream_results._single_stream_fetchers._single_stream_single_result_fetcher import (
     SingleStreamSingleResultFetcher,
 )
 from qm._stream_results._single_stream_fetchers._base_single_stream_fetcher import (
     VERY_LONG_TIME,
-    BaseSingleStreamFetcher,
+    AnySingleStreamFetcher,
 )
 from qm._stream_results._single_stream_fetchers._single_stream_multiple_results_fetcher import (
     SingleStreamMultipleResultFetcher,
+    SingleStreamMultipleResultFetcherWithTimestamps,
 )
 
 logger = logging.getLogger(__name__)
 
 
+TIMESTAMPS_LEGACY_EXT = "_timestamps"
+
+
 _T = TypeVar("_T")
 
 
-class StreamsManager(Mapping[str, Optional[BaseSingleStreamFetcher]]):
+class StreamsManager(Mapping[str, Optional[AnySingleStreamFetcher]]):
     """Access to the results of a QmJob
 
     This object is created by calling [QmJob.result_handles][qm.jobs.running_qm_job.RunningQmJob.result_handles]
@@ -90,41 +97,74 @@ class StreamsManager(Mapping[str, Optional[BaseSingleStreamFetcher]]):
             return MultipleStreamsFetcher(self._schema_items, self._service)
         return None
 
-    def _create_all_single_stream_fetchers(self) -> Mapping[str, BaseSingleStreamFetcher]:
-        _all_fetchers: Dict[str, BaseSingleStreamFetcher] = {}
-
+    def _create_all_single_stream_fetchers(self) -> Mapping[str, AnySingleStreamFetcher]:
+        _all_fetchers: Dict[str, AnySingleStreamFetcher] = {}
         stream_metadata_errors, stream_metadata_dict = self._get_stream_metadata()
 
         for name, item_schema in self._schema_items.items():
-            stream_metadata = stream_metadata_dict.get(name)
-            if item_schema.is_single:
-                _all_fetchers[name] = SingleStreamSingleResultFetcher(
-                    schema=item_schema,
-                    service=self._service,
-                    stream_metadata_errors=stream_metadata_errors,
-                    stream_metadata=stream_metadata,
-                    capabilities=self._capabilities,
-                    multiple_results_fetcher=self._multiple_streams_fetcher,
-                )
+            if name in _all_fetchers:
+                continue
+            timestamps_name = name + TIMESTAMPS_LEGACY_EXT
+            if timestamps_name in self._schema_items:
+                if timestamps_name not in _all_fetchers:
+                    timestamps_schema = self._schema_items[timestamps_name]
+                    _all_fetchers[timestamps_name] = self._create_single_stream_fetcher(
+                        timestamps_schema, stream_metadata_errors, stream_metadata_dict.get(timestamps_name), None
+                    )
+                timestamps_fetcher = _all_fetchers[timestamps_name]
             else:
-                _all_fetchers[name] = SingleStreamMultipleResultFetcher(
-                    job_results=self,
-                    schema=item_schema,
-                    service=self._service,
-                    stream_metadata_errors=stream_metadata_errors,
-                    stream_metadata=stream_metadata,
-                    capabilities=self._capabilities,
-                    multiple_streams_fetcher=self._multiple_streams_fetcher,
-                )
+                timestamps_fetcher = None
+            _all_fetchers[name] = self._create_single_stream_fetcher(
+                item_schema,
+                stream_metadata_errors,
+                stream_metadata_dict.get(name),
+                cast(Optional[SingleStreamMultipleResultFetcher], timestamps_fetcher),
+            )
         return _all_fetchers
+
+    def _create_single_stream_fetcher(
+        self,
+        schema: JobResultItemSchema,
+        stream_metadata_errors: list[StreamMetadataError],
+        metadata: Optional[StreamMetadata],
+        timestamps_fetcher: Optional[SingleStreamMultipleResultFetcher],
+    ) -> AnySingleStreamFetcher:
+        if schema.is_single:
+            assert timestamps_fetcher is None, "Timestamps schema must be of multiple results"
+            return SingleStreamSingleResultFetcher(
+                schema=schema,
+                service=self._service,
+                stream_metadata_errors=stream_metadata_errors,
+                stream_metadata=metadata,
+                capabilities=self._capabilities,
+                multiple_streams_fetcher=self._multiple_streams_fetcher,
+            )
+        if timestamps_fetcher is not None:
+            return SingleStreamMultipleResultFetcherWithTimestamps(
+                timestamps_fetcher=timestamps_fetcher,
+                schema=schema,
+                service=self._service,
+                stream_metadata_errors=stream_metadata_errors,
+                stream_metadata=metadata,
+                capabilities=self._capabilities,
+                multiple_streams_fetcher=self._multiple_streams_fetcher,
+            )
+        return SingleStreamMultipleResultFetcher(
+            schema=schema,
+            service=self._service,
+            stream_metadata_errors=stream_metadata_errors,
+            stream_metadata=metadata,
+            capabilities=self._capabilities,
+            multiple_streams_fetcher=self._multiple_streams_fetcher,
+        )
 
     def __len__(self) -> int:
         return len(self._single_stream_fetchers)
 
-    def __getitem__(self, item: str) -> Optional[BaseSingleStreamFetcher]:
+    def __getitem__(self, item: str) -> Optional[AnySingleStreamFetcher]:
         return self.get(item)
 
-    def __getattr__(self, item: str) -> Optional[BaseSingleStreamFetcher]:
+    def __getattr__(self, item: str) -> Optional[AnySingleStreamFetcher]:
         if item == "shape" or item == "__len__":
             return (
                 None  # this is here because of a bug in pycharm debugger: ver: 2022.3.2 build #PY-223.8617.48 (24/1/23)
@@ -134,7 +174,7 @@ class StreamsManager(Mapping[str, Optional[BaseSingleStreamFetcher]]):
     def _get_stream_metadata(self) -> Tuple[List[StreamMetadataError], Dict[str, StreamMetadata]]:
         return self._service.get_program_metadata()
 
-    def __iter__(self) -> Generator[Tuple[str, Optional[BaseSingleStreamFetcher]], None, None]:  # type: ignore[override]
+    def __iter__(self) -> Generator[Tuple[str, Optional[AnySingleStreamFetcher]], None, None]:  # type: ignore[override]
         warnings.warn(
             deprecation_message(
                 method="streaming_result_fetcher.__iter__",
@@ -148,7 +188,7 @@ class StreamsManager(Mapping[str, Optional[BaseSingleStreamFetcher]]):
         )
         return self.iterate_results()
 
-    def iterate_results(self) -> Generator[Tuple[str, Optional[BaseSingleStreamFetcher]], None, None]:
+    def iterate_results(self) -> Generator[Tuple[str, Optional[AnySingleStreamFetcher]], None, None]:
         for item in self._schema_items.values():
             yield item.name, self.get(item.name)
 
@@ -158,13 +198,13 @@ class StreamsManager(Mapping[str, Optional[BaseSingleStreamFetcher]]):
         """
         return self._single_stream_fetchers.keys()
 
-    def items(self) -> ItemsView[str, BaseSingleStreamFetcher]:
+    def items(self) -> ItemsView[str, AnySingleStreamFetcher]:
         """
         Returns a view, in which the first item is the name of the result and the second is the result
         """
         return self._single_stream_fetchers.items()
 
-    def values(self) -> ValuesView[BaseSingleStreamFetcher]:
+    def values(self) -> ValuesView[AnySingleStreamFetcher]:
         """
         Returns a view of the results
         """
@@ -180,8 +220,8 @@ class StreamsManager(Mapping[str, Optional[BaseSingleStreamFetcher]]):
         return self._single_stream_fetchers[key].is_processing()
 
     def get(
-        self, name: str, /, default: Optional[Union[BaseSingleStreamFetcher, _T]] = None
-    ) -> Optional[Union[BaseSingleStreamFetcher, _T]]:
+        self, name: str, /, default: Optional[Union[AnySingleStreamFetcher, _T]] = None
+    ) -> Optional[Union[AnySingleStreamFetcher, _T]]:
         """Get a handle to a named result from [stream_processing][qm.qua.stream_processing]
 
         Args:
@@ -244,7 +284,7 @@ class StreamsManager(Mapping[str, Optional[BaseSingleStreamFetcher]]):
         timeout: float = VERY_LONG_TIME,
         stream_names: Optional[Mapping[str, Union[int, slice]]] = None,
         item: None = None,
-    ) -> Mapping[str, numpy.typing.NDArray[numpy.generic]]:
+    ) -> Mapping[str, Union[numpy.typing.NDArray[numpy.generic], Optional[Number]]]:
         pass
 
     @overload
@@ -254,7 +294,7 @@ class StreamsManager(Mapping[str, Optional[BaseSingleStreamFetcher]]):
         timeout: float = VERY_LONG_TIME,
         stream_names: Optional[Collection[str]] = None,
         item: Optional[Union[int, slice]] = None,
-    ) -> Mapping[str, numpy.typing.NDArray[numpy.generic]]:
+    ) -> Mapping[str, Union[numpy.typing.NDArray[numpy.generic], Optional[Number]]]:
         pass
 
     def fetch_results(
@@ -263,12 +303,13 @@ class StreamsManager(Mapping[str, Optional[BaseSingleStreamFetcher]]):
         timeout: float = VERY_LONG_TIME,
         stream_names: Optional[Union[Mapping[str, Union[int, slice]], Collection[str]]] = None,
         item: Optional[Union[int, slice]] = None,
-    ) -> Mapping[str, numpy.typing.NDArray[numpy.generic]]:
+    ) -> Mapping[str, Union[numpy.typing.NDArray[numpy.generic], Optional[Number]]]:
         """Fetch results from the specified streams
 
         Args:
             wait_until_done: If True, will wait until all results are processed before fetching
-            timeout: Timeout for waiting in seconds
+            timeout: Timeout (in seconds) that will be applied to each of the api requests.
+                This means that the actual overall timeout is at least the one given, but it could be more.
             stream_names: A mapping of stream names to indices or slices to fetch, or a collection of stream names to fetch all items from
             item: An index or slice to fetch from each stream
 
@@ -278,19 +319,24 @@ class StreamsManager(Mapping[str, Optional[BaseSingleStreamFetcher]]):
         data_to_fetch = self._standardize_fetch_args(items_to_slice=item, stream_names=stream_names)
 
         if wait_until_done:
-            self.wait_for_all_values(timeout=timeout)
+            try:
+                self.wait_for_all_values(timeout=timeout)
+            # wait_for_all_values can return TimeoutError while our other api calls return QMTimeoutError.
+            # In order to keep the error type consistent, we convert it here.
+            except TimeoutError as e:
+                raise QMTimeoutError(str(e)) from e
 
-        return self._fetch_by_standard_query(data_to_fetch)
+        return self._fetch_by_standard_query(data_to_fetch, timeout=timeout)
 
     def _fetch_by_standard_query(
-        self, data_to_fetch: Mapping[str, Union[int, slice]]
-    ) -> Mapping[str, numpy.typing.NDArray[numpy.generic]]:
+        self, data_to_fetch: Mapping[str, Union[int, slice]], timeout: Optional[float] = None
+    ) -> Mapping[str, Union[numpy.typing.NDArray[numpy.generic], Optional[Number]]]:
         if self._multiple_streams_fetcher is not None:
-            return self._multiple_streams_fetcher.fetch(data_to_fetch)
+            return self._multiple_streams_fetcher.fetch(data_to_fetch, timeout=timeout)
         else:
             results = {}
             for name, curr_item in data_to_fetch.items():
-                val = self._single_stream_fetchers[name].fetch(item=curr_item)
+                val = self._single_stream_fetchers[name].fetch(item=curr_item, timeout=timeout)
                 if val is not None:
                     results[name] = val
                 else:

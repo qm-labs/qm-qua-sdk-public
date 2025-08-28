@@ -27,7 +27,6 @@ from qm.simulate.interface import SimulationConfig
 from qm.api.job_result_api import JobResultServiceApi
 from qm.persistence import BaseStore, SimpleFileStore
 from qm.api.models.server_details import ServerDetails
-from qm.program._qua_config_to_pb import load_config_pb
 from qm.utils.config_utils import get_controller_pb_config
 from qm.octave import QmOctaveConfig, AbstractCalibrationDB
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
@@ -44,6 +43,7 @@ from qm.exceptions import QmmException, ConfigSchemaError, ConfigValidationExcep
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
 
 from ._stream_results import StreamsManager
+from .program._dict_to_pb_converter import DictToQuaConfigConverter
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,7 @@ SERVER_TO_QOP_VERSION_MAP = {
     "3.0-beta-a59f2ea": "3.3.1",
     "3.0-beta-f47a556": "3.4.0",
     "3.0-beta-c2dd405": "3.4.1",
+    "3.0-beta-4e4aa38": "3.5.0",
 }
 
 
@@ -106,7 +107,7 @@ class QuantumMachinesManager:
         *,
         cluster_name: Optional[str] = None,
         timeout: Optional[float] = None,
-        log_level: int = logging.INFO,
+        log_level: Union[int, str] = logging.INFO,
         connection_headers: Optional[Dict[str, str]] = None,
         add_debug_data: bool = False,
         credentials: Optional[ssl.SSLContext] = None,
@@ -124,7 +125,7 @@ class QuantumMachinesManager:
             port: Port where to find the QM orchestrator. If None, local settings are used.
             cluster_name (string): The name of the cluster. Requires redirection between devices.
             timeout (float): The timeout, in seconds, for detecting the qmm and most other gateway API calls. Default is 60.
-            log_level (string): The logging level for the connection instance. Defaults to `INFO`. Please check `logging` for available options.
+            log_level (Union[int, string]): The logging level for the connection instance. Defaults to `INFO`. Please check `logging` for available options.
             octave (QmOctaveConfig): The configuration for the Octave devices. Deprecated from QOP 2.4.0.
             octave_calibration_db_path (PathLike): The path for storing the Octave's calibration database. It can also be a calibration database which is an instance of `AbstractCalibrationDB`.
             follow_gateway_redirections (bool): If True (default), the client will follow redirections to find a QuantumMachinesManager and Octaves. Otherwise, it will only connect to the given host and port.
@@ -451,7 +452,7 @@ class QuantumMachinesManager:
     ) -> QuaConfig:
         try:
             if disable_marshmallow_validation:
-                loaded_config = load_config_pb(qua_config)
+                loaded_config = DictToQuaConfigConverter(self.capabilities).convert(qua_config)
             else:
                 loaded_config = load_config(qua_config)
             validate_config_capabilities(loaded_config, self._caps)

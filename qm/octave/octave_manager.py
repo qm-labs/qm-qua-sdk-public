@@ -35,8 +35,8 @@ from qm.type_hinting import Number
 from qm.octave.octave_config import QmOctaveConfig
 from qm.type_hinting.config_types import StandardPort
 from qm.octave._calibration_config import _prep_config
-from qm.program._qua_config_to_pb import build_iw_sample
 from qm.api.models.server_details import ConnectionDetails
+from qm.program._dict_to_pb_converter import build_iw_sample
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.exceptions import OpenQmException, OctaveLoopbackError, NoOutputPortDeclared
 from qm.octave._calibration_names import COMMON_OCTAVE_PREFIX, CalibrationElementsNames

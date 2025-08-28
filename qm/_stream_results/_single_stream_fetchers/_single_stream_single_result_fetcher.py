@@ -1,9 +1,10 @@
 import logging
-from typing import Union, Optional, cast
+from typing import Union, Optional
 
-import numpy.typing
+import numpy
 
 from qm.exceptions import QmInvalidSchemaError
+from qm._stream_results._utils import postprocess_single_result
 from qm._stream_results._single_stream_fetchers._base_single_stream_fetcher import (
     VERY_LONG_TIME,
     BaseSingleStreamFetcher,
@@ -12,7 +13,7 @@ from qm._stream_results._single_stream_fetchers._base_single_stream_fetcher impo
 logger = logging.getLogger(__name__)
 
 
-class SingleStreamSingleResultFetcher(BaseSingleStreamFetcher):
+class SingleStreamSingleResultFetcher(BaseSingleStreamFetcher[Optional[numpy.typing.NDArray[numpy.generic]]]):
     """A handle to a result of a pipeline terminating with ``save``"""
 
     def _validate_schema(self) -> None:
@@ -48,6 +49,7 @@ class SingleStreamSingleResultFetcher(BaseSingleStreamFetcher):
         *,
         check_for_errors: bool = True,
         flat_struct: bool = False,
+        timeout: Optional[float] = None,
     ) -> Optional[numpy.typing.NDArray[numpy.generic]]:
         """Fetch a single result from the current result stream saved in server memory.
         The result stream is populated by the save().
@@ -57,6 +59,7 @@ class SingleStreamSingleResultFetcher(BaseSingleStreamFetcher):
             check_for_errors: If true, the function would also check whether run-time errors happened during the
                 program execution and would write to the logger an error message.
             flat_struct: results will have a flat structure - dimensions will be part of the shape and not of the type
+            timeout: Timeout for waiting in seconds
 
         Returns:
             the current result
@@ -68,18 +71,5 @@ class SingleStreamSingleResultFetcher(BaseSingleStreamFetcher):
         """
         if (isinstance(item, int) and item != 0) or isinstance(item, slice):
             logger.warning("Fetching single result will always return the single value")
-        value = self.strict_fetch(0, check_for_errors=check_for_errors, flat_struct=flat_struct)
-        if len(value) == 0:
-            logger.warning("Nothing to fetch: no results were found. Please wait until the results are ready.")
-            return None
-        if flat_struct:
-            data = value
-        else:
-            data = value[0]
-
-        if len(data) == 1:
-            to_return = data[0]
-        else:
-            to_return = data
-
-        return cast(numpy.typing.NDArray[numpy.generic], to_return)
+        value = self.strict_fetch(0, check_for_errors=check_for_errors, flat_struct=flat_struct, timeout=timeout)
+        return postprocess_single_result(value, flat_struct)
