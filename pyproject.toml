@@ -46,7 +46,6 @@ datadog-api-client = "^2.6.0"
 dependency_injector = "^4.41.0"
 qm-octave = "2.1.6"
 typing-extensions = "^4.5"
-poetry ="<=2.1.3"
 
 grpclib = { version = "^0.4.5", python = ">=3.10", allow-prereleases = true }
 plotly = "^5.13.0"
@@ -110,7 +109,7 @@ move-generated-grpc.sequence = [
     { "script" = "os:remove('__init__.py')" }
 ]
 
-download-proto = "python scripts/download_proto.py"
+download-proto = "python scripts/download_proto.py -c ==1.2.4rc0.post2-2817df9"
 create-grpc = "poetry run python -m grpc_tools.protoc -Iproto --python_betterproto_out=. proto/qm/pb/**/*.proto io/qualang/api/v1/info_service.proto proto/qm/grpc/v2/*.proto"
 copy-version-grpc = "cp proto/VERSION qm/grpc/VERSION"
 

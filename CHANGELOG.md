@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Unreleased
 
 
+## [1.2.3.1] - 2025-11-24
+
+- Requires Python >=3.9, <3.13
+
+
+### Fixed
+- Removed poetry from dependencies
+
 ## [1.2.3] - 2025-08-28
 
 - Requires Python >=3.9, <3.13
