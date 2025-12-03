@@ -67,7 +67,7 @@ def collection_has_type_float(collection: Collection[NumberType]) -> bool:
 
 
 def get_iterable_elements_datatype(
-    it: Union[numpy.typing.NDArray[NumberT], Sequence[NumberT], NumberT]  # type: ignore[type-var]
+    it: Union[numpy.typing.NDArray[NumberT], Sequence[NumberT], NumberT],  # type: ignore[type-var]
 ) -> Type[NumberT]:
     if isinstance(it, np.ndarray):
         item = cast("NumberT", it[0].item())

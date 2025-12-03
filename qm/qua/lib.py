@@ -89,7 +89,7 @@ def call_library_function(
         deprecation_message(
             method="call_library_function",
             deprecated_in="1.2.2",
-            removed_in="1.4.0",
+            removed_in="2.0.0",
             details="""
 Please call the required function directly from the available classes.
 For instance, instead of using call_library_function(Random.rand_int, int, x, y), simply use Random(x).rand_int(y).""",
@@ -105,7 +105,7 @@ def call_vectors_library_function(
         deprecation_message(
             method="call_vectors_library_function",
             deprecated_in="1.2.2",
-            removed_in="1.4.0",
+            removed_in="2.0.0",
             details="""
 Please call the required function directly from the available classes.
 For instance, instead of using call_vectors_library_function(Math.sum, x.dtype, x), simply use Math.sum(x).""",
@@ -144,14 +144,16 @@ class Math:
 
     @staticmethod
     def div(x: Scalar[NumberT], y: Scalar[NumberT]) -> QuaLibFunctionOutput[float]:
-        r"""Computes the division between two same-type variables $x/y$
+        r"""Computes the division between two same-type variables $x/y$.
+        Takes integer and fixed variables as long as both are of the same type.
+        When both inputs are integer, the return type can be either a fixed point number or an integer, in which case $floor(x/y)$ is outputted.
 
         Args:
-            x: a QUA parameter
-            y: a QUA parameter not equal to 0
+            x: a QUA int or fixed
+            y: a QUA int or fixed
 
         Returns:
-            a QUA fixed
+            a QUA int or fixed
         """
         return _create_output_expression(Math.div, float, x, y)
 

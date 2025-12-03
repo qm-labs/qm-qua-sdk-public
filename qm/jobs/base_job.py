@@ -94,7 +94,7 @@ class QmBaseJob:
             deprecation_message(
                 method="job.insert_input_stream",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method was renamed to `job.push_to_input_stream`.",
             ),
             DeprecationWarning,

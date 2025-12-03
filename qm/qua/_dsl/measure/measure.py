@@ -6,10 +6,10 @@ from qm._loc import _get_loc
 from qm.exceptions import QmQuaException
 from qm.qua._expressions import QuaVariable
 from qm.qua._dsl.amplitude import AmpValuesType
+from qm.qua._dsl._utils import _standardize_timestamp_label
 from qm.qua._dsl.measure.measure_process_factories import demod
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.measure.analog_measure_process import MeasureProcessAbstract
-from qm.qua._dsl._utils import _TIMESTAMPS_LEGACY_SUFFIX, _standardize_timestamp_label
 from qm.qua._dsl.stream_processing.stream_processing import StreamType, ResultStreamSource, declare_stream
 from qm.grpc.qua import (
     QuaProgramAnyStatement,
@@ -46,7 +46,7 @@ def measure(
     pass
 
 
-def measure(  # type: ignore[misc]
+def measure(
     pulse: MeasurePulseType,
     element: str,
     *outputs: Union[
@@ -230,9 +230,7 @@ def _declare_legacy_adc(tag: str) -> ResultStreamSource:
     if result_object is None:
         result_object = declare_stream(adc_trace=True)
         program_scope.add_stream_declaration(tag, result_object)
-        result_object.input1()._auto_save_all(tag + "_input1")
-        result_object.input1().timestamps()._auto_save_all(tag + "_input1" + _TIMESTAMPS_LEGACY_SUFFIX)
-        result_object.input2()._auto_save_all(tag + "_input2")
-        result_object.input2().timestamps()._auto_save_all(tag + "_input2" + _TIMESTAMPS_LEGACY_SUFFIX)
+        result_object.input1().with_timestamps()._auto_save_all(tag + "_input1")
+        result_object.input2().with_timestamps()._auto_save_all(tag + "_input2")
 
     return result_object

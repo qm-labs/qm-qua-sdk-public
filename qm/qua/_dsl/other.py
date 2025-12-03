@@ -8,7 +8,7 @@ from qm.qua._expressions import literal_int, literal_bool, literal_real
 
 
 def L(value: Union[bool, int, float]) -> MessageExpressionType:
-    warnings.warn(deprecation_message("L", "1.2.3", "1.3.0"), DeprecationWarning, stacklevel=2)
+    warnings.warn(deprecation_message("L", "1.2.3", "2.0.0"), DeprecationWarning, stacklevel=2)
     if isinstance(value, bool):
         return literal_bool(value)
     if isinstance(value, int):

@@ -373,7 +373,7 @@ class ControlDeviceConverter(
 
     @staticmethod
     def upconverter_config_dec_to_pb(
-        data: Union[MwUpconverterConfigType, QuaConfigUpConverterConfigDec]
+        data: Union[MwUpconverterConfigType, QuaConfigUpConverterConfigDec],
     ) -> QuaConfigUpConverterConfigDec:
         if isinstance(data, QuaConfigUpConverterConfigDec):
             return data
@@ -395,7 +395,7 @@ class ControlDeviceConverter(
         return {
             "type": cast(Literal["opx", "opx1"], data.type),
             "analog_outputs": self._deconvert_controller_analog_outputs(data.analog_outputs),
-            "analog_inputs": _deconvert_controller_analog_inputs(data.analog_inputs),
+            "analog_inputs": _deconvert_controller_analog_inputs(data.analog_inputs, is_opx_plus_controller=True),
             "digital_outputs": _deconvert_controller_digital_outputs(data.digital_outputs),
             "digital_inputs": _deconvert_controller_digital_inputs(data.digital_inputs),
         }
@@ -471,9 +471,9 @@ class ControlDeviceConverter(
                 "delay": data.delay,
                 "shareable": data.shareable,
                 "filter": self._filters_converter.deconvert(data.filter),
-                "crosstalk": data.crosstalk_v2.value
-                if self._capabilities.supports(QopCaps.config_v2)
-                else data.crosstalk,
+                "crosstalk": (
+                    data.crosstalk_v2.value if self._capabilities.supports(QopCaps.config_v2) else data.crosstalk
+                ),
             },
         )
         if data.sampling_rate:
@@ -518,29 +518,35 @@ class ControlDeviceConverter(
 
 
 def _deconvert_controller_analog_inputs(
-    inputs: Mapping[int, QuaConfigAnalogInputPortDec]
+    inputs: Mapping[int, QuaConfigAnalogInputPortDec], is_opx_plus_controller: bool = False
 ) -> Mapping[Union[int, str], AnalogInputPortConfigType]:
     ret: Mapping[Union[int, str], AnalogInputPortConfigType] = {
-        idx: _deconvert_controller_analog_input(data) for idx, data in inputs.items()
+        idx: _deconvert_controller_analog_input(data, is_opx_plus_controller) for idx, data in inputs.items()
     }
     return ret
 
 
-def _deconvert_controller_analog_input(data: QuaConfigAnalogInputPortDec) -> AnalogInputPortConfigType:
+def _deconvert_controller_analog_input(
+    data: QuaConfigAnalogInputPortDec, is_opx_plus_controller: bool
+) -> AnalogInputPortConfigType:
+    sampling_rate = data.sampling_rate
+    if is_opx_plus_controller and not data.sampling_rate:
+        sampling_rate = 1e9  # For OPX+ controllers, the get_config always returns 0, but we know it is 1e9 (the only allowed value for OPX+)
+
     ret = cast(
         AnalogInputPortConfigType,
         {
             "offset": data.offset,
             "gain_db": data.gain_db if data.gain_db is not None else 0,
             "shareable": data.shareable,
-            "sampling_rate": 1e9,  # The only allowed value (the get_config always returns 0, but we know it is 1e9)
+            "sampling_rate": sampling_rate,
         },
     )
     return ret
 
 
 def _deconvert_controller_digital_outputs(
-    outputs: Dict[int, QuaConfigDigitalOutputPortDec]
+    outputs: Dict[int, QuaConfigDigitalOutputPortDec],
 ) -> Mapping[Union[int, str], DigitalOutputPortConfigType]:
     return {idx: _deconvert_controller_digital_output(data) for idx, data in outputs.items()}
 
@@ -557,7 +563,7 @@ def _deconvert_controller_digital_output(data: QuaConfigDigitalOutputPortDec) ->
 
 
 def _deconvert_controller_digital_inputs(
-    inputs: Dict[int, QuaConfigDigitalInputPortDec]
+    inputs: Dict[int, QuaConfigDigitalInputPortDec],
 ) -> Mapping[Union[int, str], DigitalInputPortConfigType]:
     return {idx: _deconvert_digital_input(data) for idx, data in inputs.items()}
 
@@ -580,7 +586,7 @@ def _deconvert_digital_input(data: QuaConfigDigitalInputPortDec) -> DigitalInput
 
 
 def _deconvert_mw_analog_inputs(
-    inputs: Dict[int, QuaConfigMicrowaveAnalogInputPortDec]
+    inputs: Dict[int, QuaConfigMicrowaveAnalogInputPortDec],
 ) -> Mapping[Union[int, str], MwFemAnalogInputPortConfigType]:
     return {idx: _deconvert_single_mw_analog_input(_input) for idx, _input in inputs.items()}
 

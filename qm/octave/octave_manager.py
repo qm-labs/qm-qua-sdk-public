@@ -217,7 +217,6 @@ class OctaveManager:
         frequency: Optional[ClockFrequency] = None,
         clock_mode: Optional[ClockMode] = None,
     ) -> None:
-
         """This function will set the octave clock type - internal, external or buffered.
         It can also set the clock frequency - 10, 100 or 1000 MHz
 

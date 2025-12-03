@@ -6,6 +6,7 @@ from qm.api.frontend_api import FrontendApi
 from qm._octaves_container import OctavesContainer
 from qm.octave.octave_config import QmOctaveConfig
 from qm.utils.config_utils import get_logical_pb_config
+from qm.api.models.capabilities import ServerCapabilities
 from qm.elements.element import Element, AllElements, NewApiUpconvertedElement
 from qm.elements.element_outputs import NoOutput, ElementOutput, DownconvertedOutput
 from qm.elements.element_inputs import (
@@ -50,10 +51,11 @@ def init_elements(
     pb_config: QuaConfig,
     frontend_api: FrontendApi,
     machine_id: str,
+    capabilities: ServerCapabilities,
     octave_config: Optional[QmOctaveConfig] = None,
 ) -> ElementsDB:
     elements = {}
-    _octave_container = OctavesContainer(pb_config, octave_config)
+    _octave_container = OctavesContainer(pb_config, capabilities, octave_config)
     logical_config = get_logical_pb_config(pb_config)
     for name, element_config in logical_config.elements.items():
         _, element_inputs = betterproto.which_one_of(element_config, "element_inputs_one_of")
@@ -69,6 +71,7 @@ def init_elements(
             machine_id=machine_id,
             element_input=input_inst,
             element_output=rf_output,
+            set_frequency_as_double=capabilities.supports_double_frequency,
         )
     return ElementsDB(elements)
 
@@ -182,9 +185,13 @@ class UpconvertedElementsDB(Dict[str, NewApiUpconvertedElement]):
         raise ElementNotFound(key)
 
 
-def init_octave_elements(pb_config: QuaConfig, octave_config: Optional[QmOctaveConfig]) -> UpconvertedElementsDB:
+def init_octave_elements(
+    pb_config: QuaConfig,
+    capabilities: ServerCapabilities,
+    octave_config: Optional[QmOctaveConfig],
+) -> UpconvertedElementsDB:
     elements = {}
-    _octave_container = OctavesContainer(pb_config, octave_config)
+    _octave_container = OctavesContainer(pb_config, capabilities, octave_config)
 
     for name, element_config in get_logical_pb_config(pb_config).elements.items():
         _, element_inputs = betterproto.which_one_of(element_config, "element_inputs_one_of")
@@ -197,5 +204,6 @@ def init_octave_elements(pb_config: QuaConfig, octave_config: Optional[QmOctaveC
                     config=element_config,
                     element_input=input_inst,
                     element_output=rf_output,
+                    set_frequency_as_double=capabilities.supports_double_frequency,
                 )
     return UpconvertedElementsDB(elements)

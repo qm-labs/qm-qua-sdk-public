@@ -38,7 +38,7 @@ class ExecutionError:
         error_severity: Union[
             GetJobErrorsResponseExecutionErrorSeverity,
             GetJobErrorsResponseGetJobErrorsResponseSuccessExecutionErrorSeverity,
-        ]
+        ],
     ) -> ExecutionErrorSeverity:
         if error_severity in {
             GetJobErrorsResponseExecutionErrorSeverity.WARNING,

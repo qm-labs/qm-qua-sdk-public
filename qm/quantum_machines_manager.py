@@ -2,19 +2,20 @@ import ssl
 import json
 import logging
 import warnings
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union, Mapping, Iterable, Optional, TypedDict, Collection
 
 import marshmallow
 from octave_sdk.octave import OctaveDetails
 
+import qm.grpc as qm_pb
 from qm.api.v2.qm_api import QmApi
 from qm.user_config import UserConfig
 from qm.grpc.qua_config import QuaConfig
 from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
 from qm.program import Program, load_config
-from qm.utils.general_utils import is_debug
 from qm.type_hinting.general import PathLike
 from qm.api.v2.job_api.job_api import JobData
 from qm.quantum_machine import QuantumMachine
@@ -24,12 +25,14 @@ from qm.logging_utils import set_logging_level
 from qm.api.v2.job_api import JobApi, JobStatus
 from qm.api.server_detector import detect_server
 from qm.simulate.interface import SimulationConfig
+from qm.version import __version__ as qm_qua_version
 from qm.api.job_result_api import JobResultServiceApi
 from qm.persistence import BaseStore, SimpleFileStore
 from qm.api.models.server_details import ServerDetails
 from qm.utils.config_utils import get_controller_pb_config
 from qm.octave import QmOctaveConfig, AbstractCalibrationDB
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
+from qm.utils.general_utils import is_debug, parse_proto_version
 from qm._octaves_container import load_config_from_calibration_db
 from qm.api.models.info import QuaMachineInfo, ImplementationInfo
 from qm.program._qua_config_schema import validate_config_capabilities
@@ -147,7 +150,7 @@ class QuantumMachinesManager:
                 deprecation_message(
                     "file_store_root",
                     "1.2.3",
-                    "1.3.0",
+                    "2.0.0",
                     "This parameter is going to be removed, remove it from you initialization",
                 ),
                 DeprecationWarning,
@@ -161,7 +164,7 @@ class QuantumMachinesManager:
                 deprecation_message(
                     "store",
                     "1.2.3",
-                    "1.3.0",
+                    "2.0.0",
                     "This parameter is going to be removed, remove it from you initialization",
                 ),
                 DeprecationWarning,
@@ -181,6 +184,8 @@ class QuantumMachinesManager:
             async_follow_redirects=async_follow_redirects,
             async_trust_env=async_trust_env,
         )
+        self._raise_warning_for_outdated_qm_qua_version()
+
         if self._server_details.octaves:
             if octave is None:
                 octave = QmOctaveConfig()
@@ -260,7 +265,7 @@ class QuantumMachinesManager:
     @property
     def store(self) -> BaseStore:
         warnings.warn(
-            deprecation_message("qmm.store", "1.2.3", "1.3.0"),
+            deprecation_message("qmm.store", "1.2.3", "2.0.0"),
             DeprecationWarning,
             stacklevel=2,
         )
@@ -314,16 +319,36 @@ class QuantumMachinesManager:
                 octave_client = self._octave_manager.get_client(octave)
                 octave_client.perform_healthcheck()
 
+    @staticmethod
+    def _get_local_proto_version() -> str:
+        version_path = Path(qm_pb.__file__).parent / "VERSION"
+        return version_path.read_text().strip()
+
+    def _raise_warning_for_outdated_qm_qua_version(self) -> None:
+        """
+        Raises a warning if the current qm-qua version is outdated compared to the proto used by the server.
+        For example, the qm-qua used is 1.2.2, while the qop version is a newer one, which uses a proto compatible with qm-qua 1.2.3.
+        We do this check by comparing between the local proto version and the proto version returned by the gateway (which contains the qm-qua version it is compatible with).
+        """
+        if self._server_details.proto_version is not None:
+            local_proto_version = parse_proto_version(QuantumMachinesManager._get_local_proto_version())
+            qop_proto_version = parse_proto_version(self._server_details.proto_version)
+
+            if local_proto_version < qop_proto_version:
+                logger.warning(
+                    f"You are using an outdated version of `qm-qua` which was not tested against the current QOP "
+                    f"version. Please consider updating to the latest qm-qua version, or at least to version"
+                    f" '{qop_proto_version.base_version}'."
+                )
+
     def version_dict(self) -> Version:
         """
         Returns:
             A dictionary with the qm-qua and QOP versions
         """
-        from qm.version import __version__
-
         output_dict: Version = {}
         server_version = self._server_details.server_version
-        output_dict["qm-qua"] = __version__
+        output_dict["qm-qua"] = qm_qua_version
         if server_version in SERVER_TO_QOP_VERSION_MAP:
             output_dict["QOP"] = SERVER_TO_QOP_VERSION_MAP[server_version]
         else:
@@ -338,8 +363,6 @@ class QuantumMachinesManager:
         Returns:
             An object with the qm-qua and QOP versions
         """
-        from qm.version import __version__
-
         octaves = {}
         if self._octave_config is not None:
             for octave_name in self._octave_config.get_devices():
@@ -355,7 +378,7 @@ class QuantumMachinesManager:
         return DevicesVersion(
             gateway=gateway,
             controllers={k: None for k in controllers},  # type: ignore[misc]
-            qm_qua=__version__,
+            qm_qua=qm_qua_version,
             octaves=octaves,
         )
 
@@ -486,7 +509,7 @@ class QuantumMachinesManager:
             deprecation_message(
                 "qmm.open_qm_from_file",
                 "1.2.0",
-                "1.3.0",
+                "2.0.0",
                 "This method is going to be removed.",
             ),
             DeprecationWarning,
@@ -545,14 +568,14 @@ class QuantumMachinesManager:
         pb_config = load_config(config)
 
         if self._api:
-            request = create_simulation_request(pb_config, program, simulate, standardized_options)
+            request = create_simulation_request(pb_config, program, simulate, standardized_options, self._caps)
             simulated_job = self._api.simulate(
                 request.config, request.high_level_program, request.simulate, request.controller_connections
             )
             return simulated_job
         else:
             job_id, simulated_response_part = self._simulation_api.simulate(
-                pb_config, program, simulate, standardized_options
+                pb_config, program, simulate, standardized_options, self._caps
             )
             return SimulatedJob(
                 job_id=job_id,
@@ -577,7 +600,7 @@ class QuantumMachinesManager:
             deprecation_message(
                 "qmm.list_open_quantum_machines",
                 "1.2.0",
-                "1.4.0",
+                "2.0.0",
                 "This method was renamed to `qmm.list_open_qms()`",
             )
         )
@@ -638,7 +661,7 @@ class QuantumMachinesManager:
             deprecation_message(
                 "qmm.close_all_quantum_machines",
                 "1.2.0",
-                "1.4.0",
+                "2.0.0",
                 "This function is going to change its name to `qmm.close_all_qms()`",
             ),
             category=DeprecationWarning,
@@ -653,7 +676,7 @@ class QuantumMachinesManager:
                 deprecation_message(
                     "get_controllers",
                     "1.2.0",
-                    "1.3.0",
+                    "2.0.0",
                     "This will have a different return type",
                 ),
                 category=DeprecationWarning,
@@ -688,7 +711,7 @@ class QuantumMachinesManager:
                 deprecation_message(
                     "clear_all_job_results",
                     "1.2.0",
-                    "1.3.0",
+                    "2.0.0",
                     "This method is going to be removed.",
                 ),
                 category=DeprecationWarning,
@@ -747,7 +770,7 @@ class QuantumMachinesManager:
 
     @staticmethod
     def set_capabilities_offline(
-        capabilities: Optional[Union[Collection[Capability], ServerCapabilities]] = None
+        capabilities: Optional[Union[Collection[Capability], ServerCapabilities]] = None,
     ) -> None:
         """
         Some modules of the sdk cannot be run without the capabilities of the QOP server, which is automatically set

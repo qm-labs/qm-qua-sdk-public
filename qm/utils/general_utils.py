@@ -2,6 +2,8 @@ import time
 import logging
 from typing import Any, Dict, Generic, TypeVar, Callable
 
+import packaging.version
+
 SERVICE_HEADER_NAME = "x-grpc-service"
 
 T = TypeVar("T")
@@ -65,3 +67,11 @@ class Singleton(type, Generic[_T]):
 
 def is_debug() -> bool:
     return logging.getLogger("qm").level <= logging.DEBUG
+
+
+def parse_proto_version(raw_proto_version: str) -> packaging.version.Version:
+    # We need to replace the '-' with '+' to comply with PEP 440, as packaging.version.parse follows PEP 440.
+    # Our published proto versions use '-' since the gateway can't handle '+' in S3 object keys.
+    if ".dev0." in raw_proto_version:
+        raw_proto_version = raw_proto_version.replace(".dev0.", ".dev0+")
+    return packaging.version.parse(raw_proto_version.replace("-", "+"))

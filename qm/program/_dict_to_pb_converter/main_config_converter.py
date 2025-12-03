@@ -144,7 +144,7 @@ class DictToQuaConfigConverter(
 
         if "version" in input_data:
             warnings.warn(
-                deprecation_message("version", "1.2.2", "1.3.0", "Please remove it from the QUA config."),
+                deprecation_message("version", "1.2.2", "2.0.0", "Please remove it from the QUA config."),
                 DeprecationWarning,
             )
 

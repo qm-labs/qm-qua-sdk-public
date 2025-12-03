@@ -253,7 +253,7 @@ class _WaveformPlotBuilder:
         ):
             self._add_plot_data_for_analog_output_port(figure_row_number + 1, output_port, port_waveforms_list)
 
-        for (figure_row_number, (output_port, digital_port_waveforms_list)) in enumerate(
+        for figure_row_number, (output_port, digital_port_waveforms_list) in enumerate(
             self._report_by_output_ports.flat_digital_out.items()
         ):
             self._add_plot_data_for_digital_output_port(

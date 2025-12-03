@@ -7,6 +7,7 @@ from qm.api.base_api import BaseApi
 from qm.grpc.qua_config import QuaConfig
 from qm.utils.protobuf_utils import LOG_LEVEL_MAP
 from qm.simulate.interface import SimulationConfig
+from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
 from qm.exceptions import QMSimulationError, FailedToExecuteJobException
 from qm.api.models.compiler import CompilerOptionArguments, get_request_compiler_options
@@ -33,6 +34,7 @@ def create_simulation_request(
     program: Program,
     simulate: SimulationConfig,
     compiler_options: CompilerOptionArguments,
+    capabilities: ServerCapabilities,
 ) -> SimulationRequest:
     if not isinstance(program, Program):
         raise Exception("program argument must be of type qm.program.Program")
@@ -52,7 +54,7 @@ def create_simulation_request(
             include_digital_waveforms=simulate.include_digital_waveforms,
             extra_processing_timeout_ms=simulate.extraProcessingTimeoutInMs,
         )
-        request = simulate.update_simulate_request(request)
+        request = simulate.update_simulate_request(request, capabilities)
 
         for connection in simulate.controller_connections:
             if not isinstance(connection.source, type(connection.target)):
@@ -122,11 +124,12 @@ class SimulationApi(BaseApi[FrontendStub]):
         program: Program,
         simulate: SimulationConfig,
         compiler_options: CompilerOptionArguments,
+        capabilities: ServerCapabilities,
     ) -> Tuple[str, SimulatedResponsePart]:
         if type(program) is not Program:
             raise Exception("program argument must be of type qm.program.Program")
 
-        request = create_simulation_request(config, program, simulate, compiler_options)
+        request = create_simulation_request(config, program, simulate, compiler_options, capabilities)
         logger.info("Simulating program")
 
         response = self._run(self._stub.simulate(request, timeout=self._timeout))

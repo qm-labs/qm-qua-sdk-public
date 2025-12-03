@@ -16,7 +16,7 @@ warnings.warn(
     deprecation_message(
         "qm.results",
         "1.2.3",
-        "1.3.0",
+        "2.0.0",
         "If you need anything from this module, import it directly from `qm` or from `qm.simulate` for simulator-related functionality.",
     ),
     DeprecationWarning,

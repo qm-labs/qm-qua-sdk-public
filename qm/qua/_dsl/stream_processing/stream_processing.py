@@ -13,6 +13,7 @@ from betterproto.lib.std.google.protobuf import Value, ListValue
 from qm._loc import _get_loc
 from qm.type_hinting import Number
 from qm.exceptions import QmQuaException
+from qm.utils import deprecation_message
 from qm.qua._dsl._type_hints import OneOrMore
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.grpc.qua import QuaProgramAnyStatement, QuaProgramSaveStatement
@@ -511,6 +512,16 @@ class ResultStreamSource(ResultStream):
 
     def timestamps(self) -> "ResultStreamSource":
         """Get a stream with only the timestamps of the stream-items"""
+        warnings.warn(
+            deprecation_message(
+                method="timestamps",
+                deprecated_in="1.2.3",
+                removed_in="2.0.0",
+                details="timestamps() is deprecated, please use with_timestamps() instead.",
+            ),
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return ResultStreamSource(
             dataclasses.replace(
                 self._configuration,

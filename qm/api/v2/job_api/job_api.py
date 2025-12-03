@@ -337,6 +337,8 @@ class JobApi(JobGenericApi):
 
     def resume(self) -> None:
         """Resumes a program that was halted using the [pause][qm.qua.pause] statement"""
+        if self.get_status() == "Error":
+            return
         request = ResumeRequest(job_id=self._id)
         self._run(self._stub.resume(request, timeout=self._timeout))
 
@@ -891,7 +893,7 @@ class JobApi(JobGenericApi):
         deprecation_message(
             method="job.update_oscillator_frequency",
             deprecated_in="1.2.2",
-            removed_in="1.3.0",
+            removed_in="2.0.0",
             details="Use job.set_converter_frequency.",
         )
         self.set_converter_frequency(element, frequency_hz, update_component)
@@ -965,7 +967,7 @@ class JobApiWithDeprecations(JobApi):
             deprecation_message(
                 method="job.insert_input_stream",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method was renamed to `job.push_to_input_stream()`.",
             ),
             DeprecationWarning,
@@ -1003,7 +1005,7 @@ class JobApiWithDeprecations(JobApi):
             deprecation_message(
                 method="job.halt",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method was renamed to `job.cancel`.",
             ),
             DeprecationWarning,
@@ -1026,7 +1028,7 @@ class JobApiWithDeprecations(JobApi):
             deprecation_message(
                 method="job.wait_for_execution",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details='This method is going to be removed, please use `job.wait_until("Running")`.',
             ),
             DeprecationWarning,

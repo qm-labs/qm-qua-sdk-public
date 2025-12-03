@@ -3,14 +3,11 @@ import logging
 from io import BytesIO
 from typing import Union, Generic, TypeVar, BinaryIO, Optional
 
-import numpy.typing
-
 from qm.utils.async_utils import run_async
 from qm.api.v2.job_result_api import JobResultApi
-from qm.exceptions import InvalidStreamMetadataError
 from qm.api.job_result_api import JobResultServiceApi
 from qm.utils.general_utils import run_until_with_timeout
-from qm.StreamMetadata import StreamMetadata, StreamMetadataError
+from qm.type_hinting.general import NumpyArray, NumpyNumber
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm._stream_results._multiple_streams_fetcher import MultipleStreamsFetcher
 from qm.api.models.jobs import DtypeType, JobStreamingState, JobResultItemSchema, JobNamedResultHeader
@@ -27,8 +24,8 @@ logger = logging.getLogger(__name__)
 # 23 days. Reduced from 1e8 due to Windows gRPC timeout limits causing server errors (https://quantum-machines.atlassian.net/browse/OPXK-25752).
 VERY_LONG_TIME = 2e6
 
-
-ReturnedT = TypeVar("ReturnedT", Optional[numpy.typing.NDArray[numpy.generic]], numpy.typing.NDArray[numpy.generic])
+NumpyArrayOrSingleValue = Union[NumpyNumber, NumpyArray]
+ReturnedT = TypeVar("ReturnedT", NumpyArray, Optional[NumpyArrayOrSingleValue])
 
 
 class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
@@ -36,15 +33,11 @@ class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
         self,
         schema: JobResultItemSchema,
         service: Union[JobResultServiceApi, JobResultApi],
-        stream_metadata_errors: list[StreamMetadataError],
-        stream_metadata: Optional[StreamMetadata],
         capabilities: ServerCapabilities,
         multiple_streams_fetcher: Optional[MultipleStreamsFetcher],
     ) -> None:
         self._schema = schema
         self._service = service
-        self._stream_metadata_errors = stream_metadata_errors
-        self._stream_metadata = stream_metadata
         self._has_job_streaming_state = capabilities.supports(QopCaps.job_streaming_state)
         self._multiple_streams_fetcher = multiple_streams_fetcher
         self._validate_schema()
@@ -74,21 +67,6 @@ class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
     @property
     def numpy_dtype(self) -> DtypeType:
         return self._schema.dtype
-
-    @property
-    def stream_metadata(self) -> Optional[StreamMetadata]:
-        """Provides the StreamMetadata of this stream.
-
-        Metadata currently includes the values and shapes of the automatically identified loops
-        in the program.
-
-        """
-        if len(self._stream_metadata_errors) > 0:
-            logger.error("Error creating stream metadata:")
-            for e in self._stream_metadata_errors:
-                logger.error(f"{e.error} at: {e.location}")
-            raise InvalidStreamMetadataError(self._stream_metadata_errors)
-        return self._stream_metadata
 
     def wait_for_values(self, count: int = 1, timeout: float = VERY_LONG_TIME) -> None:
         """Wait until we know at least `count` values were processed for this named result
@@ -166,18 +144,19 @@ class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
         return response
 
     def fetch_all(self, *, check_for_errors: bool = True, flat_struct: bool = False) -> ReturnedT:
-        """Fetch a result from the current result stream saved in server memory.
-        The result stream is populated by the save() and save_all() statements.
-        Note that if save_all() statements are used, calling this function twice
-        may give different results.
+        """
+        Fetches all available results from the current result stream saved in server memory.
+        The result stream is populated by the `save()` or `save_all()` statements.
 
         Args:
             check_for_errors: If true, the function would also check whether run-time errors happened during the
                 program execution and would write to the logger an error message.
-            flat_struct: results will have a flat structure - dimensions will be part of the shape and not of the type
+            flat_struct: Results will have a flat structure - dimensions will be part of the shape and not of the type
 
         Returns:
-            all results of current result stream
+            All available results for the stream. This can be a single numpy scalar or a numpy array, which depends
+            on the stream operators that were used. For example, using a buffer or 'with_timestamps' will return a
+            numpy array.
         """
         return self.fetch(
             slice(0, None),
@@ -194,24 +173,33 @@ class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
         flat_struct: bool = False,
         timeout: Optional[float] = None,
     ) -> ReturnedT:
-        """Fetch a single result from the current result stream saved in server memory.
-        The result stream is populated by the save().
+        """
+        Fetches specific results from the current result stream saved in server memory.
+        The result stream is populated by the `save()` or `save_all()` statements.
 
         Args:
-            item: ignored
+            item: The index, or a slice indicating a range, of the result in the stream.
             check_for_errors: If true, the function would also check whether run-time errors happened during the
                 program execution and would write to the logger an error message.
-            flat_struct: results will have a flat structure - dimensions will be part of the shape and not of the type
-            timeout: Timeout for waiting in seconds
+            flat_struct: Results will have a flat structure - dimensions will be part of the shape and not of the type
+            timeout: Timeout for waiting in seconds.
 
         Returns:
-            the current result
+            The requested result from the stream. This can be a single numpy scalar or a numpy array, which depends
+            on the stream operators that were used. For example, using a buffer or 'with_timestamps' will return a
+            numpy array.
 
         Example:
             ```python
             res.fetch() # return the item in the top position
             ```
         """
+        results = self.strict_fetch(item, check_for_errors=check_for_errors, flat_struct=flat_struct, timeout=timeout)
+        return self._postprocess(results, flat_struct)
+
+    @staticmethod
+    @abc.abstractmethod
+    def _postprocess(fetched_data: NumpyArray, flat_struct: bool) -> ReturnedT:
         pass
 
     def strict_fetch(
@@ -221,21 +209,22 @@ class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
         check_for_errors: bool = True,
         flat_struct: bool = False,
         timeout: Optional[float] = None,
-    ) -> numpy.typing.NDArray[numpy.generic]:
-        """Fetch a result from the current result stream saved in server memory.
-        The result stream is populated by the save() and save_all() statements.
-        Note that if save_all() statements are used, calling this function twice
-        with the same item index may give different results.
+    ) -> NumpyArray:
+        """
+        Fetches specific results from the current result stream saved in server memory.
+        The result stream is populated by the `save()` or `save_all()` statements.
 
         Args:
-            item: The index of the result in the saved results stream.
+            item: The index, or a slice indicating a range, of the result in the stream.
             check_for_errors: If true, the function would also check whether run-time errors happened during the
                 program execution and would write to the logger an error message.
-            flat_struct: results will have a flat structure - dimensions will be part of the shape and not of the type
-            timeout: Timeout for waiting in seconds
+            flat_struct: Results will have a flat structure - dimensions will be part of the shape and not of the type
+            timeout: Timeout for waiting in seconds.
 
         Returns:
-            a single result if item is integer or multiple results if item is a Python slice object.
+            The requested result from the stream. This can be a single numpy scalar or a numpy array, which depends
+            on the stream operators that were used. For example, using a buffer or 'with_timestamps' will return a
+            numpy array.
 
         Raises:
             Exception: If item is not an integer or a slice object.
@@ -265,7 +254,7 @@ class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
 
     def _fetch_results(
         self, header: JobNamedResultHeader, start: int, stop: int, timeout: Optional[float]
-    ) -> numpy.typing.NDArray[numpy.generic]:
+    ) -> NumpyArray:
         data_writer = BytesIO()
         count_data_written = run_async(self._add_results_to_writer(data_writer, start, stop, timeout))
         return _create_results_array(count_data_written, header, data_writer)
@@ -282,6 +271,6 @@ class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
 
 
 AnySingleStreamFetcher = Union[
-    BaseSingleStreamFetcher[Optional[numpy.typing.NDArray[numpy.generic]]],
-    BaseSingleStreamFetcher[numpy.typing.NDArray[numpy.generic]],
+    BaseSingleStreamFetcher[NumpyArray],
+    BaseSingleStreamFetcher[Optional[NumpyArrayOrSingleValue]],
 ]

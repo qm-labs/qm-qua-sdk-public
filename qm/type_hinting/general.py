@@ -4,6 +4,7 @@ import dataclasses
 from typing import Any, Union, TypeVar, Protocol, runtime_checkable
 
 import numpy
+import numpy.typing as npt
 
 PathLike = Union[str, bytes, pathlib.Path, os.PathLike]  # type: ignore[type-arg]
 Number = Union[int, float]
@@ -13,6 +14,7 @@ NumberT = TypeVar("NumberT", int, bool, float)
 
 NumpyNumber = Union[numpy.floating[Any], numpy.integer[Any]]
 NumpyValue = Union[NumpyNumber, numpy.bool_]
+NumpyArray = npt.NDArray[numpy.generic]
 
 NumpySupportedNumber = Union[Number, NumpyNumber]
 NumpySupportedFloat = Union[float, numpy.floating[Any]]

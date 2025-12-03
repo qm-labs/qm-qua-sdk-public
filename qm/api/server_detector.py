@@ -72,6 +72,7 @@ def detect_server(
             port=port,
             host=host,
             server_version=server_version,
+            proto_version=info.implementation.proto_version,
             qua_implementation=info,
             connection_details=connection_details,
             octaves={
@@ -121,7 +122,7 @@ def _redirect(
 
 def _connect(
     connection_details: ConnectionDetails,
-) -> Tuple[Optional[QuaMachineInfo], Optional[str]]:
+) -> Tuple[QuaMachineInfo, Optional[str]]:
     frontend = FrontendApi(connection_details)
     info_service = InfoServiceApi(connection_details)
 

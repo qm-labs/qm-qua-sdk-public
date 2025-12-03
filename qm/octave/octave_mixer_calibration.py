@@ -500,9 +500,9 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 rf_down_conv=RfDownConvUpdate(
                     index=CALIBRATION_INPUT,
                     enabled=True,
-                    lo_input=RfDownConvUpdateLoInput.LO_INPUT_1
-                    if params.use_main_lo
-                    else RfDownConvUpdateLoInput.LO_INPUT_2,
+                    lo_input=(
+                        RfDownConvUpdateLoInput.LO_INPUT_1 if params.use_main_lo else RfDownConvUpdateLoInput.LO_INPUT_2
+                    ),
                     rf_input=rf_input,
                 )
             ),
@@ -519,9 +519,11 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                     index=4,
                     gain=0xFFFF,
                     synth_output_power=SynthUpdateSynthOutputPower.SYNTH_OUTPUT_POWER_POS5DB,
-                    main_output=SynthUpdateMainOutput.MAIN_OUTPUT_MAIN
-                    if params.use_main_lo
-                    else SynthUpdateMainOutput.MAIN_OUTPUT_OFF,
+                    main_output=(
+                        SynthUpdateMainOutput.MAIN_OUTPUT_MAIN
+                        if params.use_main_lo
+                        else SynthUpdateMainOutput.MAIN_OUTPUT_OFF
+                    ),
                     secondary_output=SynthUpdateSecondaryOutput.SECONDARY_OUTPUT_OFF,
                 )
             ),
@@ -529,15 +531,19 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 if_down_conv=IfDownConvUpdate(
                     index=CALIBRATION_INPUT,
                     channel1=IfDownConvUpdateChannel(
-                        mode=IfDownConvUpdateMode.MODE_BYPASS
-                        if params.dconv_quadrature != DConvQuadrature.I
-                        else IfDownConvUpdateMode.MODE_OFF,
+                        mode=(
+                            IfDownConvUpdateMode.MODE_BYPASS
+                            if params.dconv_quadrature != DConvQuadrature.I
+                            else IfDownConvUpdateMode.MODE_OFF
+                        ),
                         coupling=IfDownConvUpdateCoupling.COUPLING_AC,
                     ),
                     channel2=IfDownConvUpdateChannel(
-                        mode=IfDownConvUpdateMode.MODE_BYPASS
-                        if params.dconv_quadrature != DConvQuadrature.Q
-                        else IfDownConvUpdateMode.MODE_OFF,
+                        mode=(
+                            IfDownConvUpdateMode.MODE_BYPASS
+                            if params.dconv_quadrature != DConvQuadrature.Q
+                            else IfDownConvUpdateMode.MODE_OFF
+                        ),
                         coupling=IfDownConvUpdateCoupling.COUPLING_AC,
                     ),
                 )
@@ -574,7 +580,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                         rf_up_conv=RfUpConvUpdate(
                             index=index,
                             fast_switch_mode=RfUpConvUpdateFastSwitchMode.FAST_SWITCH_MODE_OFF,
-                            enabled=True
+                            enabled=True,
                             # YR - I added the enabled update to make the assertion down the code pass
                         )
                     )
@@ -638,8 +644,8 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         lo_adc_data_input2.wait_for_values(1)
         lo_adc_data = np.array(
             [
-                lo_adc_data_input1.fetch(slice(0, 1), flat_struct=True),
-                lo_adc_data_input2.fetch(slice(0, 1), flat_struct=True),
+                lo_adc_data_input1.fetch(slice(0, 1))["value"],  # type: ignore[index, call-overload]
+                lo_adc_data_input2.fetch(slice(0, 1))["value"],  # type: ignore[index, call-overload]
             ]
         )
         return i0_coarse, q0_coarse, debug_coarse, lo_adc_data
@@ -654,8 +660,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
 
         for _ in range(2):
             job.resume()
-            while not job.is_paused():
-                time.sleep(0.001)
+            self._wait_for_job_pause(job)
 
         i0_shift, q0_shift, debug_fine = _get_and_analyze_lo_data(job, n_lo, lo_offset, 2)
         return i0_shift, q0_shift, debug_fine
@@ -663,6 +668,14 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
     def _restore_previous_state(self, restore_params: _StateRestoreParams, element_input: UpconvertedInput) -> None:
         self._low_level_client.update(updates=restore_params.octave_updates)
         self._set_input_lo_frequency(element_input, restore_params.lo_frequency)
+
+    def _wait_for_job_pause(self, job: Union[RunningQmJob, JobApi]) -> None:
+        """Waits for the job to be paused."""
+        while not job.is_paused():
+            status = job.status if isinstance(job, RunningQmJob) else job.get_status()
+            if status == "ERROR":
+                raise QmQuaException("Job encountered an error during calibration.")
+            time.sleep(0.01)
 
     def calibrate(
         self,
@@ -704,8 +717,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
 
             lo_offset, image_offset = 0, 0
 
-            while not job.is_paused():
-                time.sleep(0.01)
+            self._wait_for_job_pause(job)
 
             # Let's look if there is a previous calibration value (to compate with at the end)
             prev_lo_cal = None
@@ -760,8 +772,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 coarse_gain, coarse_phase = curr_lo_freq_result.dc_gain, curr_lo_freq_result.dc_phase
                 self._set_io_values(io1=coarse_gain, io2=coarse_phase)
                 logger.debug(f"coarse. gain = {coarse_gain:.5f}, phase = {coarse_phase:0.5f}")
-                while not job.is_paused():
-                    time.sleep(0.001)
+                self._wait_for_job_pause(job)
                 job.resume()
 
                 gp_coarse = _get_and_analyze_image_data(job, n_image_samples, image_offset, 1)[0]
@@ -775,8 +786,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 coarse_gain, coarse_phase = gp_coarse.gain, gp_coarse.phase
                 self._set_io_values(io1=coarse_gain, io2=coarse_phase)
                 logger.debug(f"coarse. gain = {coarse_gain:.5f}, phase = {coarse_phase:0.5f}")
-                while not job.is_paused():
-                    time.sleep(0.001)
+                self._wait_for_job_pause(job)
                 job.resume()
 
                 gp_fine = _get_and_analyze_image_data(job, n_image_samples, image_offset, 1)[0]

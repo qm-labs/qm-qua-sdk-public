@@ -52,10 +52,6 @@ class ControllerBase:
     name: str
 
     @property
-    def temperature(self) -> Optional[float]:
-        return None
-
-    @property
     def controller_type(self) -> ControllerTypes:
         raise NotImplementedError
 
@@ -82,15 +78,19 @@ class Controller(ControllerBase):
 class ControllerOPX1000(ControllerBase):
     hostname: str
     fems: Dict[int, FemTypes]
+    _temperatures: Optional[Dict[str, float]]
 
     @property
     def controller_type(self) -> ControllerTypes:
         return "OPX1000"
 
     @property
-    def temperature(self) -> Optional[float]:
-        logger.warning("Temperature is not yet available for OPX1000 controllers.")
-        return None
+    def temperatures(self) -> Optional[Mapping[str, float]]:
+        if self._temperatures is None:
+            logger.warning(
+                f"Temperatures are not supported in this QOP {QopCaps.device_temperatures.from_qop_version} version"
+            )
+        return self._temperatures
 
 
 class QmmApi(BaseApiV2[QmmServiceStub]):
@@ -157,15 +157,17 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
     def open_qm(self, config: QuaConfig, close_other_machines: Optional[bool] = None) -> QmApi:
         if close_other_machines is None:
             warnings.warn(
-                "close_other_machines is not set, as from 1.3.0 default will be False, now setting to True. Please set it explicitly to remove this message and keep the wanted behavior in future versions.",
+                "close_other_machines is not set, as from 2.0.0 default will be False, now setting to True. Please set it explicitly to remove this message and keep the wanted behavior in future versions.",
                 DeprecationWarning,
             )
             close_other_machines = True
         request = OpenQuantumMachineRequest(
             config=config,
-            close_mode=OpenQuantumMachineRequestCloseMode.CLOSE_MODE_IF_NEEDED  # type: ignore[arg-type]
-            if close_other_machines
-            else OpenQuantumMachineRequestCloseMode.CLOSE_MODE_UNSPECIFIED,
+            close_mode=(
+                OpenQuantumMachineRequestCloseMode.CLOSE_MODE_IF_NEEDED  # type: ignore[arg-type]
+                if close_other_machines
+                else OpenQuantumMachineRequestCloseMode.CLOSE_MODE_UNSPECIFIED
+            ),
         )
 
         try:
@@ -219,6 +221,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
                         for i, f in value.fems.items()
                         if f.type > 0
                     },
+                    _temperatures=value.temperatures if self._caps.supports(QopCaps.device_temperatures) else None,
                 )
             else:
                 raise NotImplementedError(f"Controller type {value.controller_type} is not supported.")

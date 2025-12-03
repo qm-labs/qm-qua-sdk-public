@@ -394,7 +394,7 @@ def advance_input_stream(
         QuaArrayInputStream[bool],
         QuaArrayInputStream[int],
         QuaArrayInputStream[float],
-    ]
+    ],
 ) -> None:
     """Advances the input stream pointer to the next available variable/vector.
 

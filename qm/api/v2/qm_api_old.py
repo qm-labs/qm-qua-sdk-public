@@ -70,7 +70,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_job_by_id",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, please use `qmm.get_job()`.",
             ),
             DeprecationWarning,
@@ -88,7 +88,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.queue",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This property is going to be removed, all functionality will exist directly under "
                 "`QuantumMachine`. For example, instead of `qm.queue.add(prog)` use `qm.add_to_queue(prog)`.",
             ),
@@ -163,7 +163,7 @@ class QmApiWithDeprecations(QmApi):
                     deprecation_message(
                         method=f"The argument {name}",
                         deprecated_in="1.2.0",
-                        removed_in="1.4.0",
+                        removed_in="2.0.0",
                     ),
                 )
 
@@ -174,7 +174,7 @@ class QmApiWithDeprecations(QmApi):
                 deprecation_message(
                     method="The argument simulate",
                     deprecated_in="1.2.0",
-                    removed_in="1.4.0",
+                    removed_in="2.0.0",
                     details="The simulate argument is deprecated, please use the simulate method.",
                 ),
             )
@@ -206,7 +206,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.list_controllers",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, please get data from `qm.get_config()`.",
             ),
             DeprecationWarning,
@@ -220,6 +220,27 @@ class QmApiWithDeprecations(QmApi):
             return tuple(controller_config.control_devices) or tuple(controller_config.controllers)
 
         return tuple(controller_config.control_devices)
+
+    def _upsert_mixer_correction_entry(
+        self,
+        mixer: str,
+        intermediate_frequency: Number,
+        lo_frequency: Number,
+        values: Tuple[float, float, float, float],
+    ) -> None:
+        """
+        TLDR: Starting with QOP 3.5, upsert mechanism for mixers is done inside the SDK, and not inside the QOP
+
+        Before QOP 3.5, there was no need to add the correction entries that were used when opening the QM.
+        Starting with 3.5, however, the introduction of “send program with config” changed this behavior: the list
+        of corrections is now completely overridden by the configuration provided in update_config.
+        So now we need to make sure that we update only the relevant intermediate frequency, and manually add all other
+        corrections.
+        """
+        correction_entries = self._get_current_mixer_entries(mixer)
+        self._upsert_correction_entry(correction_entries, intermediate_frequency, lo_frequency, values)
+        config_for_update: ControllerQuaConfig = {"mixers": {mixer: correction_entries}}
+        self.update_config(config_for_update)
 
     def set_mixer_correction(
         self,
@@ -262,24 +283,15 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.set_mixer_correction",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, please use `job.set_element_correction()`.",
             ),
             DeprecationWarning,
             stacklevel=1,
         )
-        config: ControllerQuaConfig = {
-            "mixers": {
-                mixer: [
-                    {
-                        "correction": values,
-                        "intermediate_frequency": intermediate_frequency,
-                        "lo_frequency": lo_frequency,
-                    }
-                ]
-            },
-        }
-        self.update_config(config)
+
+        self._upsert_mixer_correction_entry(mixer, intermediate_frequency, lo_frequency, values)
+
         job = self._get_running_job()
         if job is not None:
             for name, element_config in self._get_elements_pb_config().items():
@@ -307,7 +319,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.set_intermediate_frequency",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use "
                 "`job.set_intermediate_frequency()`.",
             ),
@@ -334,7 +346,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_intermediate_frequency",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use "
                 "`job.get_intermediate_frequency()`.",
             ),
@@ -370,7 +382,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_output_dc_offset_by_element",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, please get idle value from `qm.get_config()`"
                 " or current value from job `job.get_output_dc_offset_by_element()`",
             ),
@@ -434,7 +446,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.set_output_dc_offset_by_element",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, please set idle value with `qm.update_config()`"
                 " or current value from job `job.set_output_dc_offset_by_element()`",
             ),
@@ -502,7 +514,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.set_input_dc_offset_by_element",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use "
                 "`job.set_input_dc_offset_by_element()`.",
             ),
@@ -534,7 +546,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_input_dc_offset_by_element",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, please get the value from `qm.get_config()`.",
             ),
             DeprecationWarning,
@@ -567,7 +579,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_digital_delay",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use "
                 "`job.get_output_digital_delay()`.",
             ),
@@ -592,7 +604,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.set_digital_delay",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use "
                 "`job.set_output_digital_delay()`.",
             ),
@@ -619,7 +631,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_digital_buffer",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use "
                 "`job.get_output_digital_buffer()`.",
             ),
@@ -644,7 +656,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.set_digital_buffer",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use "
                 "`job.set_output_digital_buffer()`.",
             ),
@@ -673,7 +685,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_time_of_flight",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, please get the value from `qm.get_config()`.",
             ),
             DeprecationWarning,
@@ -703,7 +715,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_smearing",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, please get the value from `qm.get_config()`.",
             ),
             DeprecationWarning,
@@ -720,7 +732,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.io1",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This property is going to be removed, please use `job.get_io_values()[0]`",
             ),
             DeprecationWarning,
@@ -734,7 +746,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.io1",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This property is going to be removed, please use `job.set_io_values(io1=value)`",
             ),
             DeprecationWarning,
@@ -748,7 +760,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.io2",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This property is going to be removed, please use `job.get_io_values()[1]`",
             ),
             DeprecationWarning,
@@ -762,7 +774,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.io2",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This property is going to be removed, please use `job.set_io_values(io2=value)`",
             ),
             DeprecationWarning,
@@ -790,7 +802,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.set_io1_value",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use `job.set_io_values(io1=value)`",
             ),
             DeprecationWarning,
@@ -818,7 +830,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.set_io2_value",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use `job.set_io_values(io2=value)`",
             ),
             DeprecationWarning,
@@ -851,7 +863,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.set_io_values",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use `job.set_io_values()`",
             ),
             DeprecationWarning,
@@ -878,7 +890,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_io2_value",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use `job.get_io_values()[0]`",
             ),
             DeprecationWarning,
@@ -901,7 +913,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_io2_value",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use `job.get_io_values()[1]`",
             ),
             DeprecationWarning,
@@ -924,7 +936,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_io_values",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use `job.get_io_values()`",
             ),
             DeprecationWarning,
@@ -959,7 +971,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.save_config_to_file",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed.",
             ),
             DeprecationWarning,
@@ -977,7 +989,7 @@ class QmApiWithDeprecations(QmApi):
             deprecation_message(
                 method="qm.get_running_job",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, please use `qm.get_jobs(status=['Running'])`",
             ),
             DeprecationWarning,

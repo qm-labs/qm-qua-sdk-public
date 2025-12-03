@@ -57,6 +57,7 @@ class QopCaps:
     exponential_dc_gain_filter = Capability("qm.exponential_dc_gain_filter", "3.5")
     multiple_streams_fetching = Capability("qm.multiple_streams_fetching", "3.5")
     external_stream = Capability("qm.external_stream", "3.5", name_in_exception="declaring an external stream")
+    device_temperatures = Capability("qm.device_temperatures", "3.6")
 
     @staticmethod
     def get_all() -> Set[Capability]:

@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Dict, List, Type, Tuple, Union, Mapping, Optional, Sequence, AsyncIterator
+from typing import Dict, Type, Union, Mapping, Optional, Sequence, AsyncIterator
 
 import betterproto
 
@@ -7,7 +7,6 @@ from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.exceptions import DataFetchingError
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.models.jobs import JobNamedResult, JobStreamingState, JobResultItemSchema, JobNamedResultHeader
-from qm.StreamMetadata import StreamMetadata, StreamMetadataError, _get_stream_metadata_dict_from_proto_resp
 from qm.grpc.v2 import (
     Range,
     JobServiceStub,
@@ -17,7 +16,6 @@ from qm.grpc.v2 import (
     GetNamedResultsRequest,
     GetJobResultStateRequest,
     GetJobResultSchemaRequest,
-    GetProgramMetadataRequest,
     GetNamedResultsRequestOutput,
     JobServiceGetJobStatusRequest,
     GetJobNamedResultHeaderRequest,
@@ -130,7 +128,7 @@ class JobResultApi(BaseApiV2[JobServiceStub]):
         response: Union[
             GetJobNamedResultHeaderResponseGetJobNamedResultHeaderResponseSuccess,
             GetJobNamedResultsHeadersResponseGetJobNamedResultsHeadersResponseSuccessOutputHeader,
-        ]
+        ],
     ) -> JobNamedResultHeader:
         return JobNamedResultHeader(
             count_so_far=response.count_so_far,
@@ -139,18 +137,6 @@ class JobResultApi(BaseApiV2[JobServiceStub]):
             has_dataloss=response.has_data_loss,
             has_execution_errors=False,
         )
-
-    def get_program_metadata(self) -> Tuple[List[StreamMetadataError], Dict[str, StreamMetadata]]:
-        request = GetProgramMetadataRequest(job_id=self._id)
-
-        response = self._run(self._stub.get_program_metadata(request, timeout=self._timeout))
-        metadata_errors = [
-            StreamMetadataError(error.error, error.location)
-            for error in response.program_stream_metadata.stream_metadata_extraction_error
-        ]
-
-        metadata_dict = _get_stream_metadata_dict_from_proto_resp(response.program_stream_metadata)
-        return metadata_errors, metadata_dict
 
     def get_job_result_schema(self) -> Mapping[str, JobResultItemSchema]:
         request = GetJobResultSchemaRequest(job_id=self._id)

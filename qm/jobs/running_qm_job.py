@@ -65,6 +65,8 @@ class RunningQmJob(QmBaseJob):
 
     def resume(self) -> bool:
         """Resumes a program that was halted using the [pause][qm.qua.pause] statement"""
+        if self.status == "ERROR":
+            return False
         return self._job_manager.resume(self._id)
 
     def is_paused(self) -> bool:

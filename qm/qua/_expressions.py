@@ -110,7 +110,7 @@ class QuaExpression(Generic[S], metaclass=abc.ABCMeta):
     def __bool__(self) -> bool:
         raise QmQuaException(
             "Attempted to use a Python logical operator on a QUA variable. If you are unsure why you got this message,"
-            " please see https://qm-docs.qualang.io/guides/qua_ref#boolean-operations"
+            " please see https://docs.quantum-machines.co/latest/docs/Guides/qua_ref/#boolean-operations"
         )
 
 

@@ -25,10 +25,11 @@ class UpconvertedInput(MixInputs):
         client: RFOutput,
         port: Tuple[str, int],
         gain: Optional[float],
+        set_frequency_as_double: bool,
         calibration_db: Optional["AbstractCalibrationDB"] = None,
         use_input_attenuators: bool = False,
     ):
-        super().__init__(name, config, frontend_api, machine_id)
+        super().__init__(name, config, frontend_api, machine_id, set_frequency_as_double=set_frequency_as_double)
         self._client = client
         self._lo_frequency = config.lo_frequency_double if config.lo_frequency_double else float(config.lo_frequency)
         self._port = port
@@ -133,6 +134,7 @@ class UpconvertedInputNewApi(UpconvertedInput):
         client: RFOutput,
         port: Tuple[str, int],
         gain: Optional[float],
+        set_frequency_as_double: bool,
         calibration_db: Optional["AbstractCalibrationDB"] = None,
         use_input_attenuators: bool = False,
     ):
@@ -144,6 +146,7 @@ class UpconvertedInputNewApi(UpconvertedInput):
             client=client,
             port=port,
             gain=gain,
+            set_frequency_as_double=set_frequency_as_double,
             calibration_db=calibration_db,
             use_input_attenuators=use_input_attenuators,
         )

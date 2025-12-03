@@ -1,6 +1,7 @@
 from typing import List, Tuple, cast
 
-from qm.simulate.interface import SimulatorInterface, SupportedConnectionTypes, get_opx_fem_number
+from qm.api.models.capabilities import ServerCapabilities
+from qm.simulate.interface import SimulatorInterface, SupportedConnectionTypes
 from qm.grpc.frontend import (
     SimulationRequest,
     ExecutionRequestSimulateSimulationInterfaceRawInterface,
@@ -29,18 +30,9 @@ class RawInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInterfac
         ```
     """
 
-    @property
-    def connections(self) -> List[Tuple[str, int, int, List[float]]]:
-        connections = []
-        for connection in self._connections:
-            connections.append(
-                (connection.from_controller, connection.from_fem, connection.from_port, connection.to_samples)
-            )
-        return connections
-
     @classmethod
     def _validate_and_standardize_single_connection(
-        cls, connection: SupportedConnectionTypes
+        cls, connection: SupportedConnectionTypes, fem_number_in_simulator: int
     ) -> ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections:
         if not isinstance(connection, tuple):
             raise Exception("each connection must be of type tuple")
@@ -57,14 +49,19 @@ class RawInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInterfac
             tuple_3 = cast(Tuple[str, int, List[float]], connection)
             return ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections(
                 from_controller=tuple_3[0],
-                from_fem=get_opx_fem_number(),
+                from_fem=fem_number_in_simulator,
                 from_port=tuple_3[1],
                 to_samples=tuple_3[2],
             )
         raise Exception("connection should be tuple of length of 3 or 4")
 
-    def update_simulate_request(self, request: SimulationRequest) -> SimulationRequest:
+    def update_simulate_request(
+        self, request: SimulationRequest, capabilities: ServerCapabilities
+    ) -> SimulationRequest:
         request.simulate.simulation_interface.raw = ExecutionRequestSimulateSimulationInterfaceRawInterface(
-            noise_power=self.noisePower, connections=self._connections
+            noise_power=self.noisePower,
+            connections=self._validate_and_standardize_connections(
+                self._raw_connections, capabilities.fem_number_in_simulator
+            ),
         )
         return request

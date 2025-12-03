@@ -16,7 +16,7 @@ def reset_phase(element: str) -> None:
         deprecation_message(
             method="reset_phase",
             deprecated_in="1.2.2",
-            removed_in="1.4.0",
+            removed_in="2.0.0",
             details="reset_if_phase instead.",
         ),
         DeprecationWarning,

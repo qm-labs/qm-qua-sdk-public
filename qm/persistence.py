@@ -24,7 +24,7 @@ class BaseStore(metaclass=abc.ABCMeta):
             deprecation_message(
                 method="BaseStore",
                 deprecated_in="1.2.3",
-                removed_in="1.3.0",
+                removed_in="2.0.0",
                 details="Base store is deprecated, and also everything that inherits from it. Please remove it from your code.",
             )
         )

@@ -64,6 +64,7 @@ class ServerDetails:
     port: int
     host: str
     server_version: str
+    proto_version: Optional[str]
     connection_details: ConnectionDetails
     octaves: Dict[str, ConnectionDetails]
 

@@ -1,10 +1,9 @@
 import logging
-from typing import Dict, List, Type, Tuple, Mapping, Optional, AsyncIterator
+from typing import List, Type, Mapping, Optional, AsyncIterator
 
 from qm.api.base_api import BaseApi
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.models.jobs import JobNamedResult, JobStreamingState, JobResultItemSchema, JobNamedResultHeader
-from qm.StreamMetadata import StreamMetadata, StreamMetadataError, _get_stream_metadata_dict_from_proto_resp
 from qm.grpc.results_analyser import (
     GetJobStateRequest,
     GetJobErrorsRequest,
@@ -12,7 +11,6 @@ from qm.grpc.results_analyser import (
     GetJobNamedResultRequest,
     GetJobErrorsResponseError,
     GetJobResultSchemaRequest,
-    GetProgramMetadataRequest,
     GetJobNamedResultHeaderRequest,
 )
 
@@ -85,21 +83,6 @@ class JobResultServiceApi(BaseApi[JobResultsServiceStub]):
             closed=response.closed,
             has_dataloss=response.has_dataloss,
         )
-
-    def get_program_metadata(self) -> Tuple[List[StreamMetadataError], Dict[str, StreamMetadata]]:
-        request = GetProgramMetadataRequest(job_id=self._id)
-
-        response = self._run(self._stub.get_program_metadata(request, timeout=self._timeout))
-
-        if response.success:
-            metadata_errors = [
-                StreamMetadataError(error.error, error.location)
-                for error in response.program_stream_metadata.stream_metadata_extraction_error
-            ]
-            metadata_dict = _get_stream_metadata_dict_from_proto_resp(response.program_stream_metadata)
-            return metadata_errors, metadata_dict
-        logger.warning(f"Failed to fetch program metadata for job: {self._id}")
-        return [], {}
 
     def get_job_result_schema(self) -> Mapping[str, JobResultItemSchema]:
         request = GetJobResultSchemaRequest(job_id=self._id)

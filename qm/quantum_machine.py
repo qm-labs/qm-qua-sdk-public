@@ -89,7 +89,7 @@ class QuantumMachine:
         )
 
         self._elements: ElementsDB = init_elements(
-            pb_config, frontend_api, machine_id=machine_id, octave_config=octave_config
+            pb_config, frontend_api, capabilities=self._capabilities, machine_id=machine_id, octave_config=octave_config
         )
         self._octave = QmOctave(self, octave_manager)
 
@@ -191,7 +191,7 @@ class QuantumMachine:
 
         if simulate is not None:
             job_id, simulated_response_part = self._simulation_api.simulate(
-                self._get_pb_config(), program, simulate, standardized_compiler_options
+                self._get_pb_config(), program, simulate, standardized_compiler_options, self._capabilities
             )
             return SimulatedJob(
                 job_id=job_id,
@@ -290,6 +290,7 @@ class QuantumMachine:
             intermediate_frequency=intermediate_frequency,
             lo_frequency=lo_frequency,
             values=values,
+            set_frequency_as_double=self._capabilities.supports_double_frequency,
         )
 
     def calibrate_element(

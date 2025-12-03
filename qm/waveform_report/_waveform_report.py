@@ -293,7 +293,7 @@ class Event:
 
     @staticmethod
     def is_supported(dict_description: EventType) -> bool:
-        supported_events_list = ["phase_reset"]
+        supported_events_list = ["phase_reset", "reset_timestamp"]
         event_message = dict_description["eventMessage"]
         ret = event_message in supported_events_list
         if not ret:

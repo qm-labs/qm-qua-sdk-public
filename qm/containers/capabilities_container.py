@@ -21,8 +21,6 @@ def create_capabilities_container(
         modules=[
             "qm.program._qua_config_schema",
             "qm.program.ConfigBuilder",
-            "qm.simulate.interface",
         ],
-        packages=["qm.elements"],
     )
     return container

@@ -14,6 +14,7 @@ from qm.utils.async_utils import run_async
 from qm.api.frontend_api import FrontendApi
 from qm.exceptions import QMSimulationError
 from qm.waveform_report import WaveformReport
+from qm.type_hinting.general import NumpyArray
 from qm.api.simulation_api import SimulationApi
 from qm.jobs.running_qm_job import RunningQmJob
 from qm.grpc.frontend import SimulatedResponsePart
@@ -172,9 +173,7 @@ class SimulatedJob(RunningQmJob):
             else:
                 raise QMSimulationError("Error while pulling samples")
 
-    def _get_np_simulated_samples(
-        self, include_analog: bool = True, include_digital: bool = True
-    ) -> numpy.typing.NDArray[numpy.generic]:
+    def _get_np_simulated_samples(self, include_analog: bool = True, include_digital: bool = True) -> NumpyArray:
         writer = BytesIO()
         data_writer = BytesIO()
 
@@ -260,11 +259,11 @@ def _write_simulator_result(
         raise QMSimulationError("Error while pulling samples")
 
 
-def _build_np_array(writer: BinaryIO, data_writer: BinaryIO) -> numpy.typing.NDArray[numpy.generic]:
+def _build_np_array(writer: BinaryIO, data_writer: BinaryIO) -> NumpyArray:
     data_writer.seek(0)
     for d in data_writer:
         writer.write(d)
 
     writer.seek(0)
-    ret: numpy.typing.NDArray[numpy.generic] = numpy.load(writer)
+    ret: NumpyArray = numpy.load(writer)
     return ret

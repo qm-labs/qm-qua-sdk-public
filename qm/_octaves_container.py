@@ -29,9 +29,12 @@ OptionalOctaveInputPort = Optional[Tuple[str, int]]
 
 
 class OctavesContainer:
-    def __init__(self, pb_config: QuaConfig, octave_config: Optional[QmOctaveConfig] = None):
+    def __init__(
+        self, pb_config: QuaConfig, capabilities: ServerCapabilities, octave_config: Optional[QmOctaveConfig] = None
+    ):
         self._octaves_pb_config = get_controller_pb_config(pb_config).octaves
         self._octave_qm_config = octave_config or QmOctaveConfig()
+        self._capabilities = capabilities
 
         _qua_config_opx_to_octave_i = {}
         _qua_config_opx_to_octave_q = {}
@@ -101,7 +104,13 @@ class OctavesContainer:
     ) -> MixInputs:
         port = self.get_upconverter_port_ref(element_config)
         if port is None:
-            return MixInputs(name, element_config.mix_inputs, frontend_api, machine_id)
+            return MixInputs(
+                name,
+                element_config.mix_inputs,
+                frontend_api,
+                machine_id,
+                set_frequency_as_double=self._capabilities.supports_double_frequency,
+            )
 
         octave_name, octave_port = port
         client = self._get_octave_client(octave_name)
@@ -114,6 +123,7 @@ class OctavesContainer:
             client=client.rf_outputs[octave_port],
             port=port,
             calibration_db=self._octave_qm_config.calibration_db,
+            set_frequency_as_double=self._capabilities.supports_double_frequency,
             gain=self._get_octave_gain(octave_name, octave_port),
             use_input_attenuators=self._get_octave_input_attenuators(octave_name, octave_port),
         )
@@ -138,6 +148,7 @@ class OctavesContainer:
             port=port,
             calibration_db=self._octave_qm_config.calibration_db,
             gain=gain,
+            set_frequency_as_double=self._capabilities.supports_double_frequency,
             use_input_attenuators=self._get_octave_input_attenuators(octave_name, octave_port),
         )
 
@@ -180,7 +191,7 @@ def load_config_from_calibration_db(
     controller_pb_config = get_controller_pb_config(pb_config)
     logical_pb_config = get_logical_pb_config(pb_config)
 
-    octaves_container = OctavesContainer(pb_config, octave_config)
+    octaves_container = OctavesContainer(pb_config, capabilities, octave_config)
 
     logger.debug("Loading mixer calibration data onto the config")
 

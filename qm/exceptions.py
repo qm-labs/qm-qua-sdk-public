@@ -7,7 +7,6 @@ from typing import Any, List, Generic, TypeVar, Sequence
 import betterproto
 from marshmallow import ValidationError
 
-from qm.StreamMetadata import StreamMetadataError
 from qm.grpc.qm_manager import ConfigValidationMessage, PhysicalValidationMessage
 
 
@@ -95,13 +94,6 @@ class ErrorJobStateError(QmQuaException):
 
 class UnknownJobStateError(QmQuaException):
     pass
-
-
-class InvalidStreamMetadataError(QmQuaException):
-    def __init__(self, stream_metadata_errors: List[StreamMetadataError], *args: Any):
-        stream_errors_message = "\n".join(f"{e.error} at: {e.location}" for e in stream_metadata_errors)
-        message = f"Error creating stream metadata:\n{stream_errors_message}"
-        super().__init__(message, *args)
 
 
 class ConfigValidationException(QmQuaException):

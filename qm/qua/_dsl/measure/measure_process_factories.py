@@ -592,11 +592,15 @@ class dual_demod(_DualAccumulationMethod):
         See [Dual demodulation](../../Guides/demod.md#dual-demodulation).
 
         Args:
-            iw1 (str): integration weights to be applied to the I quadrature of a `MWOutput` element
-                or `out1` for an element with multiple `outputs`.
-            iw2 (str): integration weights to be applied to the Q quadrature of a `MWOutput` element
-                or `out2` for an element with multiple `outputs`.
-            target (QUA variable): variable to which the demod result is saved
+            args (Any): Accepts either 3 or 5 positional arguments: `iw1`, `iw2`, `target` or `iw1`, `element_output1`, `iw2`, `element_output2`, `target`:
+
+                * iw1 (str): integration weights to be applied to element_output1
+                * element_output1 (str): the output of an element from which to get ADC results
+                * iw2 (str): integration weights to be applied to element_output2
+                * element_output2 (str): the output of an element from which to get ADC results
+                * target (QUA variable): variable to which the demod result is saved
+
+            kwargs (Any): Accepts keyword arguments corresponding to the parameters.
         """
         return super().full(*args, **kwargs)
 

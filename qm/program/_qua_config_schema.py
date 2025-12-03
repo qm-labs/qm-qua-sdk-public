@@ -491,16 +491,13 @@ class AnalogOutputPortDefSchemaMwFem(Schema):
     )
     full_scale_power_dbm = fields.Int(
         strict=True,
-        metadata={
-            "description": "The power in dBm of the full scale of the output, "
-            "should be an integer between -41 and 10 in steps of 3"
-        },
+        metadata={"description": "The power in dBm of the full scale of the output, integer"},
     )
     band = fields.Int(
-        metadata={"description": "The frequency band of the oscillator, can be 1, 2 or 3"},
+        metadata={"description": "The frequency band of the oscillator, integer"},
     )
 
-    delay = fields.Int(metadata={"description": "Output's delay, in units of ns."})
+    delay = fields.Int(metadata={"description": "Output's delay, integer in units of ns."})
     shareable = fields.Bool(
         dump_default=False,
         metadata={"description": "Whether the port is shareable with other QM instances"},
@@ -1712,7 +1709,7 @@ class ElementSchema(Schema):
 
         if "outputPulseParameters" in data:
             warnings.warn(
-                deprecation_message("outputPulseParameters", "1.2.2", "1.3.0", "Use timeTaggingParameters instead."),
+                deprecation_message("outputPulseParameters", "1.2.2", "2.0.0", "Use timeTaggingParameters instead."),
                 DeprecationWarning,
             )
             el.output_pulse_parameters = data["outputPulseParameters"]
@@ -1737,7 +1734,7 @@ class ElementSchema(Schema):
                 el.hold_offset = data["hold_offset"]
 
         if "thread" in data:
-            warnings.warn(deprecation_message("thread", "1.2.2", "1.3.0", "Use 'core' instead."), DeprecationWarning)
+            warnings.warn(deprecation_message("thread", "1.2.2", "2.0.0", "Use 'core' instead."), DeprecationWarning)
             el.thread = element_thread_to_pb(data["thread"])
         if "core" in data:
             el.thread = element_thread_to_pb(data["core"])
@@ -1878,7 +1875,7 @@ class QuaConfigSchema(Schema):
 
         if "version" in data:
             warnings.warn(
-                deprecation_message("'version'", "1.2.2", "1.3.0", "Please remove it from the Qua config."),
+                deprecation_message("'version'", "1.2.2", "2.0.0", "Please remove it from the Qua config."),
                 DeprecationWarning,
             )
         if "elements" in data:

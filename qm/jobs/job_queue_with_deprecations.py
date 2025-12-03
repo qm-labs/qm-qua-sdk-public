@@ -28,7 +28,7 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
             deprecation_message(
                 method="queue.pending_jobs",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details='This property is going to be removed, use qm.get_jobs("In queue").',
             ),
             DeprecationWarning,
@@ -71,7 +71,7 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
             deprecation_message(
                 method="queue.add",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, use qm.add_to_queue.",
             ),
             DeprecationWarning,
@@ -98,7 +98,7 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
             deprecation_message(
                 method="queue.add_compiled",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, use `qm.add_to_queue()`.",
             ),
             DeprecationWarning,
@@ -124,7 +124,7 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
             deprecation_message(
                 method="queue.remove_by_id",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, use qm.clear_queue(user_ids=[user_id]) or job.cancel().",
             ),
             DeprecationWarning,
@@ -152,7 +152,7 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
             deprecation_message(
                 method="queue.remove_by_user_id",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, use qm.clear_queue(user_ids=[user_id]) or job.cancel().",
             ),
             DeprecationWarning,
@@ -170,7 +170,7 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
             deprecation_message(
                 method="queue.clear",
                 deprecated_in="1.2.0",
-                removed_in="1.4.0",
+                removed_in="2.0.0",
                 details="This method is going to be removed, use qm.clear_queue.",
             ),
             DeprecationWarning,

@@ -95,7 +95,7 @@ class ElementConverter(BaseDictToPbConverter[ElementConfigType, QuaConfigElement
 
         if "thread" in data:
             warnings.warn(
-                deprecation_message("thread", "1.2.0", "1.3.0", "Use 'core' instead"),
+                deprecation_message("thread", "1.2.0", "2.0.0", "Use 'core' instead"),
                 DeprecationWarning,
             )
             element.thread = element_thread_to_pb(data["thread"])
@@ -194,7 +194,7 @@ class ElementConverter(BaseDictToPbConverter[ElementConfigType, QuaConfigElement
 
         if "outputPulseParameters" in data:
             warnings.warn(
-                deprecation_message("outputPulseParameters", "1.2.0", "1.3.0", "Use timeTaggingParameters instead"),
+                deprecation_message("outputPulseParameters", "1.2.0", "2.0.0", "Use timeTaggingParameters instead"),
                 DeprecationWarning,
             )
             element.output_pulse_parameters = self.create_time_tagging_parameters(data["outputPulseParameters"])
@@ -225,13 +225,13 @@ class ElementConverter(BaseDictToPbConverter[ElementConfigType, QuaConfigElement
         if polarity in {"ABOVE", "ASCENDING"}:
             if polarity == "ASCENDING":
                 warnings.warn(
-                    deprecation_message("ASCENDING", "1.2.2", "1.3.0", "Use 'ABOVE' instead"), DeprecationWarning
+                    deprecation_message("ASCENDING", "1.2.2", "2.0.0", "Use 'ABOVE' instead"), DeprecationWarning
                 )
             return QuaConfigOutputPulseParametersPolarity.ASCENDING  # type: ignore[return-value]
         elif polarity in {"BELOW", "DESCENDING"}:
             if polarity == "DESCENDING":
                 warnings.warn(
-                    deprecation_message("DESCENDING", "1.2.2", "1.3.0", "Use 'BELOW' instead"), DeprecationWarning
+                    deprecation_message("DESCENDING", "1.2.2", "2.0.0", "Use 'BELOW' instead"), DeprecationWarning
                 )
             return QuaConfigOutputPulseParametersPolarity.DESCENDING  # type: ignore[return-value]
         else:
@@ -396,7 +396,7 @@ def _deconvert_element_thread(element_thread: QuaConfigElementThread) -> str:
 
 
 def _deconvert_port_reference(
-    data: Union[QuaConfigAdcPortReference, QuaConfigDacPortReference, QuaConfigPortReference]
+    data: Union[QuaConfigAdcPortReference, QuaConfigDacPortReference, QuaConfigPortReference],
 ) -> PortReferenceType:
     if data.fem:
         return data.controller, data.fem, data.number
@@ -405,7 +405,7 @@ def _deconvert_port_reference(
 
 
 def _deconvert_mw_analog_inputs(
-    inputs: dict[int, QuaConfigMicrowaveAnalogInputPortDec]
+    inputs: dict[int, QuaConfigMicrowaveAnalogInputPortDec],
 ) -> Mapping[Union[int, str], MwFemAnalogInputPortConfigType]:
     return {idx: _deconvert_single_mw_analog_input(_input) for idx, _input in inputs.items()}
 

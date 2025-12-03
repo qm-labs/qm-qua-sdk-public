@@ -49,9 +49,10 @@ typing-extensions = "^4.5"
 
 grpclib = { version = "^0.4.5", python = ">=3.10", allow-prereleases = true }
 plotly = "^5.13.0"
-httpx = { version = ">=0.23.3,<1", extras = ["http2"] }
+httpx = { version = ">=0.27.0,<1", extras = ["http2"] }  # Note: httpx 0.28.0+ has reported issues in Jupyter notebooks. Make sure to test if considering further version restrictions.
 
 [tool.poetry.group.dev.dependencies]
+poetry ="<=2.1.3"
 grpcio-tools = "^1.57"
 
 coverage = "^7.0.1"
@@ -71,6 +72,7 @@ poetry-dynamic-versioning = { extras = ["plugin"], version = "^1.0.0" }
 mypy = "^1.14"
 isort = "^5.11.5"
 boto3 = "^1.40.1"
+qm-saas = "^1.1.5"
 
 [tool.poetry.extras]
 simulation = ["certifi"]
@@ -93,39 +95,60 @@ skip_gitignore = true
 force_sort_within_sections = true
 extra_standard_library = ["typing_extensions"]
 
+
 [tool.poe.tasks]
+
 clean-proto.sequence = [
-    { "script" = "shutil:rmtree('qm/proto', ignore_errors=True)" },
+    { script = "shutil:rmtree('qm/proto', ignore_errors=True)" },
 ]
 
 clean-grpc.sequence = [
-    { "script" = "shutil:rmtree('qm/grpc', ignore_errors=True)" },
-    { "script" = "shutil:rmtree('qm/pb', ignore_errors=True)" },
-    { "script" = "shutil:rmtree('qm/io', ignore_errors=True)" },
-    { "script" = "os:mkdir('qm/grpc')" },
-]
-move-generated-grpc.sequence = [
-    { "script" = "shutil:move('io', 'qm/io')" },
-    { "script" = "os:remove('__init__.py')" }
+    { script = "shutil:rmtree('qm/grpc', ignore_errors=True)" },
+    { script = "shutil:rmtree('qm/pb', ignore_errors=True)" },
+    { script = "shutil:rmtree('qm/io', ignore_errors=True)" },
+    { script = "os:mkdir('qm/grpc')" },
 ]
 
-download-proto = "python scripts/download_proto.py -c ==1.2.4rc0.post2-2817df9"
-create-grpc = "poetry run python -m grpc_tools.protoc -Iproto --python_betterproto_out=. proto/qm/pb/**/*.proto io/qualang/api/v1/info_service.proto proto/qm/grpc/v2/*.proto"
+move-generated-grpc.sequence = [
+    { script = "shutil:move('io', 'qm/io')" },
+    { script = "os:remove('__init__.py')" }
+]
+
+download-proto = "python scripts/download_proto.py -c ==1.2.4rc0.post22-a43f8a5"
+
+create-grpc.shell = """
+set -eu
+
+echo "Generating gRPC code from repo: $PROTO_SRC_PATH/proto"
+
+python -m grpc_tools.protoc \
+  -I"$PROTO_SRC_PATH/proto" \
+  --python_betterproto_out=. \
+  $(find "$PROTO_SRC_PATH/proto/qm/pb" -name '*.proto') \
+  "$PROTO_SRC_PATH/proto/io/qualang/api/v1/info_service.proto" \
+  $(find "$PROTO_SRC_PATH/proto/qm/grpc/v2" -maxdepth 1 -name '*.proto')
+"""
+create-grpc.args = [
+  { name = "PROTO_SRC_PATH", positional = true, default = "." }
+]
+
 copy-version-grpc = "cp proto/VERSION qm/grpc/VERSION"
 
-generate-grpc-local.sequence = [
+generate-grpc-from-dir.sequence = [
     "clean-grpc",
-    "create-grpc",
+    "create-grpc $PROTO_SRC_PATH",
     "move-generated-grpc",
     "copy-version-grpc"
+]
+generate-grpc-from-dir.args = [
+  { name = "PROTO_SRC_PATH", positional = true, default = "./" }
 ]
 
 generate-grpc.sequence = [
     "clean-proto",
     "download-proto",
-    "generate-grpc-local",
+    "generate-grpc-from-dir",
 ]
-
 
 check-grpc-breaking-changes = "buf breaking --against '.git#branch=main'"
 

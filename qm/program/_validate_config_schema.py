@@ -9,20 +9,23 @@ logger = logging.getLogger(__name__)
 
 
 def _element_has_outputs(data: ElementConfigType) -> bool:
-    return bool(data.get("outputs")) or bool(data.get("RF_outputs")) or bool(data.get("MWOutput"))
+    return (
+        bool(data.get("outputs"))
+        or bool(data.get("RF_outputs"))
+        or bool(data.get("MWOutput"))
+        or bool(data.get("digitalOutputs"))
+    )
 
 
 def _validate_existence_of_field(data: ElementConfigType, field_name: str) -> None:
-    if _element_has_outputs(data) and field_name not in data:
+    """
+    Validate that a field is defined if and only if the element has outputs.
+    """
+    if field_name in data:
+        if not _element_has_outputs(data):
+            raise ValidationError(f"{field_name} should be used only with elements that have outputs")
+    elif _element_has_outputs(data):
         raise ValidationError(f"An element with an output must have {field_name} defined")
-    if not _element_has_outputs(data) and field_name in data:
-        if "outputs" in data:
-            logger.warning(
-                f"The field `{field_name}` exists though the element has no outputs (empty dict). "
-                f"This behavior is going to cause `ValidationError` in the future."
-            )
-            return
-        raise ValidationError(f"{field_name} should be used only with elements that have outputs")
 
 
 def validate_output_tof(data: ElementConfigType) -> None:

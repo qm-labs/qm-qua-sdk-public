@@ -151,7 +151,7 @@ def _get_reshaped_data(
     raw_data = {}
     for name in names:
         result_handle = name_to_result_handle[name]
-        raw_data[name] = result_handle.fetch(slice(data_first, data_last), flat_struct=True)
+        raw_data[name] = result_handle.fetch(slice(data_first, data_last))["value"]  # type: ignore[index, call-overload]
 
     full_data: Dict[str, Array] = {}
     for name, value in raw_data.items():

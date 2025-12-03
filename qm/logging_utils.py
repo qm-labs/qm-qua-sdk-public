@@ -29,7 +29,7 @@ def config_loggers(user_config: UserConfig) -> None:
 
 def set_logging_level(level: Union[int, str]) -> None:
     """Sets the logging level of the qm-qua module ("qm")
-    See `Messages control <https://qm-docs.qualang.io/guides/error#messages-control>`__ for more information.
+    See `Messages control <https://docs.quantum-machines.co/latest/docs/Guides/error/#messages-control>`__ for more information.
 
     Args:
         level: A string of either: 'DEBUG', 'INFO', 'WARNING', or

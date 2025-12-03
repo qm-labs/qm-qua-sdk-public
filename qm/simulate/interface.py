@@ -2,10 +2,7 @@ import abc
 from dataclasses import dataclass
 from typing import Any, List, Type, Tuple, Union, Generic, TypeVar, Optional
 
-from dependency_injector.wiring import Provide, inject
-
 from qm.api.models.capabilities import ServerCapabilities
-from qm.containers.capabilities_container import CapabilitiesContainer
 from qm.grpc.frontend import (
     SimulationRequest,
     ExecutionRequestSimulateSimulationInterfaceNone,
@@ -32,10 +29,12 @@ T = TypeVar(
 class SimulatorInterface(Generic[T], metaclass=abc.ABCMeta):
     def __init__(self, connections: List[SupportedConnectionTypes], noisePower: float = 0.0):
         self.noisePower = self._validate_and_standardize_noise_power(noisePower)
-        self._connections: List[T] = self._validate_and_standardize_connections(connections)
+        self._raw_connections = connections
 
     @abc.abstractmethod
-    def update_simulate_request(self, request: SimulationRequest) -> SimulationRequest:
+    def update_simulate_request(
+        self, request: SimulationRequest, capabilities: ServerCapabilities
+    ) -> SimulationRequest:
         pass
 
     @staticmethod
@@ -49,25 +48,24 @@ class SimulatorInterface(Generic[T], metaclass=abc.ABCMeta):
             raise Exception("noisePower must be a positive number")
         return float(noise_power)
 
-    @classmethod
-    def _validate_and_standardize_connections(cls, connections: List[SupportedConnectionTypes]) -> List[T]:
+    def _validate_and_standardize_connections(
+        self, connections: List[SupportedConnectionTypes], fem_number_in_simulator: int
+    ) -> List[T]:
         if not isinstance(connections, list):
             raise Exception("connections argument must be of type list")
         standardized_connections = []
         for connection in connections:
-            standardized_connections.append(cls._validate_and_standardize_single_connection(connection))
+            standardized_connections.append(
+                self._validate_and_standardize_single_connection(connection, fem_number_in_simulator)
+            )
         return standardized_connections
 
     @classmethod
     @abc.abstractmethod
-    def _validate_and_standardize_single_connection(cls, connection: SupportedConnectionTypes) -> T:
+    def _validate_and_standardize_single_connection(
+        cls, connection: SupportedConnectionTypes, fem_number_in_simulator: int
+    ) -> T:
         pass
-
-
-@inject
-def get_opx_fem_number(capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]) -> int:
-    """This function is here to overcome a bug in the GW, that expects the FEM to be 0"""
-    return capabilities.fem_number_in_simulator
 
 
 SimulationInterfaceTypes = Union[
@@ -122,11 +120,13 @@ class SimulationConfig:
         self.controller_connections = controller_connections
         self.extraProcessingTimeoutInMs = extraProcessingTimeoutInMs
 
-    def update_simulate_request(self, request: SimulationRequest) -> SimulationRequest:
+    def update_simulate_request(
+        self, request: SimulationRequest, capabilities: ServerCapabilities
+    ) -> SimulationRequest:
         if self.simulation_interface is None:
             request.simulate.simulation_interface.none = ExecutionRequestSimulateSimulationInterfaceNone()
         else:
-            request = self.simulation_interface.update_simulate_request(request)
+            request = self.simulation_interface.update_simulate_request(request, capabilities)
         return request
 
 

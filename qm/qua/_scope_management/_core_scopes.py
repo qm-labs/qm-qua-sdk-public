@@ -1,8 +1,9 @@
 import abc
+import threading
 from collections import deque
 from abc import abstractmethod
 from types import TracebackType
-from typing import TYPE_CHECKING, Set, Dict, List, Type, Deque, Tuple, Literal, Optional
+from typing import TYPE_CHECKING, Set, Dict, List, Type, Deque, Tuple, Literal, Optional, cast
 
 from qm.program.program import Program
 from qm.exceptions import QmQuaException
@@ -21,10 +22,19 @@ if TYPE_CHECKING:
     from qm.qua._dsl.external_stream import QuaStreamDirection
     from qm.qua._dsl.stream_processing.stream_processing import ResultStreamSource, _OutputStream
 
-"""
-The root level scopes stack. Intended for use exclusively by the base scope classes or the scopes manager.
-"""
-_scopes_stack: Deque["_BaseScope"] = deque()
+# The root level scopes stack. Intended for use exclusively by _get_scopes_stack().
+# It is a thread-local stack - each thread gets its own stack, so it is safe for multi-threaded use.
+_thread_local = threading.local()
+
+
+def _get_scopes_stack() -> Deque["_BaseScope"]:
+    """
+    Get the scopes stack (thread-local), creates it if necessary.
+    Intended for use exclusively by the base scope classes or the scopes manager.
+    """
+    if not hasattr(_thread_local, "scopes_stack"):
+        _thread_local.scopes_stack = deque()
+    return cast(Deque["_BaseScope"], _thread_local.scopes_stack)
 
 
 class _BaseScope(metaclass=abc.ABCMeta):
@@ -32,10 +42,11 @@ class _BaseScope(metaclass=abc.ABCMeta):
         self._statements: List[QuaProgramAnyStatement] = []
 
     def __enter__(self) -> None:
-        if len(_scopes_stack) == 0 and not isinstance(self, _ProgramScope):
+        scopes_stack = _get_scopes_stack()
+        if len(scopes_stack) == 0 and not isinstance(self, _ProgramScope):
             raise QmQuaException("First scope must be a program scope")
 
-        _scopes_stack.append(self)
+        scopes_stack.append(self)
         return None
 
     def __exit__(
@@ -49,7 +60,8 @@ class _BaseScope(metaclass=abc.ABCMeta):
         return False
 
     def _on_clean_exit(self) -> None:
-        _scopes_stack.pop()
+        scopes_stack = _get_scopes_stack()
+        scopes_stack.pop()
 
     @property
     def statements(self) -> List[QuaProgramAnyStatement]:
@@ -88,7 +100,8 @@ class _ProgramScope(_BaseScope):
         self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[TracebackType]
     ) -> Literal[False]:
         self._program._set_and_exit(self._generate_pb_qua_program(), self._used_capabilities)
-        _scopes_stack.clear()
+        scopes_stack = _get_scopes_stack()
+        scopes_stack.clear()
         return False
 
     @property
@@ -176,8 +189,9 @@ class _LeadingScope(_BaseScope, metaclass=abc.ABCMeta):
     def _on_clean_exit(self) -> None:
         """Pops the current scope (created in __enter__) and appends its statement to the previous scope"""
         statement = self._create_statement()
-        _scopes_stack.pop()
-        _scopes_stack[-1].append_statement(statement)
+        scopes_stack = _get_scopes_stack()
+        scopes_stack.pop()
+        scopes_stack[-1].append_statement(statement)
 
     @abc.abstractmethod
     def _create_statement(self) -> QuaProgramAnyStatement:

@@ -1,7 +1,8 @@
 import logging
 from typing import List, Tuple, cast
 
-from qm.simulate.interface import SimulatorInterface, SupportedConnectionTypes, get_opx_fem_number
+from qm.api.models.capabilities import ServerCapabilities
+from qm.simulate.interface import SimulatorInterface, SupportedConnectionTypes
 from qm.grpc.frontend import (
     SimulationRequest,
     ExecutionRequestSimulateSimulationInterfaceNone,
@@ -50,22 +51,6 @@ class LoopbackInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInt
         self._validate_latency(latency)
         self.latency = latency
 
-    @property
-    def connections(self) -> List[Tuple[str, int, int, str, int, int]]:
-        connections = []
-        for connection in self._connections:
-            connections.append(
-                (
-                    connection.from_controller,
-                    connection.from_fem,
-                    connection.from_port,
-                    connection.to_controller,
-                    connection.to_fem,
-                    connection.to_port,
-                )
-            )
-        return connections
-
     @staticmethod
     def _validate_latency(latency: int) -> None:
         if (not isinstance(latency, int)) or latency < 0:
@@ -73,7 +58,7 @@ class LoopbackInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInt
 
     @classmethod
     def _validate_and_standardize_single_connection(
-        cls, connection: SupportedConnectionTypes
+        cls, connection: SupportedConnectionTypes, fem_number_in_simulator: int
     ) -> ExecutionRequestSimulateSimulationInterfaceLoopbackConnections:
         if not connection:
             logger.warning("No loopback was defined, treating as no loopback.")
@@ -101,10 +86,10 @@ class LoopbackInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInt
             tuple_4 = cast(Tuple[str, int, str, int], connection)
             return ExecutionRequestSimulateSimulationInterfaceLoopbackConnections(
                 from_controller=tuple_4[0],
-                from_fem=get_opx_fem_number(),
+                from_fem=fem_number_in_simulator,
                 from_port=tuple_4[1],
                 to_controller=tuple_4[2],
-                to_fem=get_opx_fem_number(),
+                to_fem=fem_number_in_simulator,
                 to_port=tuple_4[3],
             )
         if len(connection) == 3:
@@ -121,14 +106,17 @@ class LoopbackInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInt
         raise Exception("connection should be tuple of length 3, 4 or 6")
 
     def update_simulate_request(
-        self,
-        request: SimulationRequest,
+        self, request: SimulationRequest, capabilities: ServerCapabilities
     ) -> SimulationRequest:
-        if not self._connections:
+        if not self._raw_connections:
             request.simulate.simulation_interface.none = ExecutionRequestSimulateSimulationInterfaceNone()
             return request
 
         request.simulate.simulation_interface.loopback = ExecutionRequestSimulateSimulationInterfaceLoopback(
-            latency=self.latency, noise_power=self.noisePower, connections=self._connections
+            latency=self.latency,
+            noise_power=self.noisePower,
+            connections=self._validate_and_standardize_connections(
+                self._raw_connections, capabilities.fem_number_in_simulator
+            ),
         )
         return request

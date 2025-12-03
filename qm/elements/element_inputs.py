@@ -2,13 +2,10 @@ import logging
 from typing import Tuple, Generic, TypeVar, Optional, Sequence
 
 import numpy
-from dependency_injector.wiring import Provide, inject
 
 from qm.api.frontend_api import FrontendApi
 from qm.grpc.general_messages import Matrix
-from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.devices import MixerInfo, AnalogOutputPortFilter
-from qm.containers.capabilities_container import CapabilitiesContainer
 from qm.type_hinting.general import NumpySupportedFloat, NumpySupportedNumber
 from qm.grpc.qua_config import (
     QuaConfigMixInputs,
@@ -46,7 +43,6 @@ def _create_taps_filter(
     return AnalogOutputPortFilter(feedforward=[float(x) for x in feedforward], feedback=[float(x) for x in feedback])
 
 
-@inject
 def static_set_mixer_correction(
     frontend_api: FrontendApi,
     machine_id: str,
@@ -54,7 +50,7 @@ def static_set_mixer_correction(
     intermediate_frequency: NumpySupportedNumber,
     lo_frequency: NumpySupportedNumber,
     values: Tuple[NumpySupportedFloat, NumpySupportedFloat, NumpySupportedFloat, NumpySupportedFloat],
-    capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities],
+    set_frequency_as_double: bool,
 ) -> None:
     # TODO - this function is here (and not under MixedInputsElement) to support backwards the direct calling to mixer
     #  Once it is changed, one can put this function under the element
@@ -74,7 +70,7 @@ def static_set_mixer_correction(
 
     mixer_lo_frequency_double = 0.0
     mixer_intermediate_frequency_double = 0.0
-    if capabilities.supports_double_frequency:
+    if set_frequency_as_double:
         mixer_lo_frequency_double = float(lo_frequency)
         mixer_intermediate_frequency_double = abs(float(intermediate_frequency))
 
@@ -142,6 +138,17 @@ class SingleInputCollection(ElementInput[QuaConfigSingleInputCollection]):
 
 
 class MixInputs(ElementInput[QuaConfigMixInputs]):
+    def __init__(
+        self,
+        name: str,
+        config: QuaConfigMixInputs,
+        frontend_api: FrontendApi,
+        machine_id: str,
+        set_frequency_as_double: bool,
+    ):
+        super().__init__(name, config, frontend_api, machine_id)
+        self._set_frequency_as_double = set_frequency_as_double
+
     @property
     def i_port(self) -> QuaConfigDacPortReference:
         return self._config.i
@@ -151,24 +158,20 @@ class MixInputs(ElementInput[QuaConfigMixInputs]):
         return self._config.q
 
     @property
-    @inject
-    def lo_frequency(self, capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]) -> float:
-        if capabilities.supports_double_frequency:
+    def lo_frequency(self) -> float:
+        if self._set_frequency_as_double:
             return self._config.lo_frequency_double
         return self._config.lo_frequency
 
     def set_lo_frequency(self, value: float) -> None:
         self._set_config_lo_frequency(value)
 
-    @inject
-    def _set_config_lo_frequency(
-        self, value: float, capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]
-    ) -> None:
+    def _set_config_lo_frequency(self, value: float) -> None:
         freq = float(value)
         logger.debug(f"Setting element '{self._name}' LO frequency to '{freq}'.")
         self._config.lo_frequency = int(freq)
         self._config.lo_frequency_double = 0.0
-        if capabilities.supports_double_frequency:
+        if self._set_frequency_as_double:
             self._config.lo_frequency_double = float(freq)
 
     @property
@@ -208,4 +211,5 @@ class MixInputs(ElementInput[QuaConfigMixInputs]):
             intermediate_frequency=intermediate_frequency,
             lo_frequency=lo_frequency,
             values=values,
+            set_frequency_as_double=self._set_frequency_as_double,
         )

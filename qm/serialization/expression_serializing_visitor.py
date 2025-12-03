@@ -143,7 +143,8 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
         self._out = f"{var}[{index}]"
 
     def visit_qm_grpc_qua_QuaProgramArrayLengthExpression(self, node: QuaProgramArrayLengthExpression) -> None:
-        self._out = f"{node.array.name}.length()"
+        var = ExpressionSerializingVisitor(self._visitor).serialize(node.array)
+        self._out = f"{var}.length()"
 
     def visit_qm_grpc_qua_QuaProgramLiteralExpression(self, node: QuaProgramLiteralExpression) -> None:
         self._out = node.value

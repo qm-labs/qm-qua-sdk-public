@@ -4,8 +4,6 @@ from qm.api.models.capabilities import QopCaps
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.stream_processing.stream_processing import StreamType, ResultStreamSource, declare_stream
 
-_TIMESTAMPS_LEGACY_SUFFIX = "_timestamps"
-
 
 def _standardize_timestamp_label(timestamp_stream: Optional[StreamType]) -> Optional[str]:
     timestamp_label = None
@@ -25,8 +23,9 @@ def _declare_save(tag: str, add_legacy_timestamp: bool = False) -> ResultStreamS
     if result_object is None:
         result_object = declare_stream()
         program_scope.add_stream_declaration(tag, result_object)
-        result_object._auto_save_all(tag)
 
         if add_legacy_timestamp:
-            result_object.timestamps()._auto_save_all(tag + _TIMESTAMPS_LEGACY_SUFFIX)
+            result_object.with_timestamps().save_all(tag)
+        else:
+            result_object.save_all(tag)
     return result_object

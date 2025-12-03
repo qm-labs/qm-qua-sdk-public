@@ -2,13 +2,10 @@ import logging
 from typing import Union, Generic
 
 import numpy
-from dependency_injector.wiring import Provide, inject
 
 from qm.api.frontend_api import FrontendApi
 from qm.elements.element_outputs import ElementOutput
-from qm.api.models.capabilities import ServerCapabilities
 from qm.elements.up_converted_input import UpconvertedInputNewApi
-from qm.containers.capabilities_container import CapabilitiesContainer
 from qm.elements.element_inputs import ElementInput, ElementInputGRPCType
 from qm.grpc.qua_config import (
     QuaConfigMixInputs,
@@ -30,6 +27,7 @@ class Element(Generic[ElementInputGRPCType]):
         machine_id: str,
         element_input: ElementInput[ElementInputGRPCType],
         element_output: ElementOutput,
+        set_frequency_as_double: bool,
     ):
         self._config = config
         self._name = name
@@ -37,31 +35,26 @@ class Element(Generic[ElementInputGRPCType]):
         self._id = machine_id
         self.input: ElementInput[ElementInputGRPCType] = element_input
         self.output = element_output
+        self._set_frequency_as_double = set_frequency_as_double
 
     @property
     def name(self) -> str:
         return self._name
 
-    @inject
-    def set_intermediate_frequency(
-        self, freq: float, capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]
-    ) -> None:
+    def set_intermediate_frequency(self, freq: float) -> None:
         if not isinstance(freq, (numpy.floating, float)):
             raise TypeError("freq must be a float")
 
         freq = float(freq)
         logger.debug(f"Setting element '{self._name}' intermediate frequency to '{freq}'.")
         self._frontend.set_intermediate_frequency(self._id, self._name, freq)
-        self._config.intermediate_frequency_double = float(freq) if capabilities.supports_double_frequency else 0.0
+        self._config.intermediate_frequency_double = float(freq) if self._set_frequency_as_double else 0.0
         self._config.intermediate_frequency = int(freq)
 
     @property
-    @inject
-    def intermediate_frequency(
-        self, capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]
-    ) -> float:
+    def intermediate_frequency(self) -> float:
         sign: int = (-1) ** self._config.intermediate_frequency_negative
-        if capabilities.supports_double_frequency:
+        if self._set_frequency_as_double:
             freq = self._config.intermediate_frequency_double
         else:
             freq = float(self._config.intermediate_frequency or 0)
@@ -124,6 +117,7 @@ class NewApiUpconvertedElement(Element[QuaConfigMixInputs]):
         config: QuaConfigElementDec,
         element_input: UpconvertedInputNewApi,
         element_output: ElementOutput,
+        set_frequency_as_double: bool,
     ):
         super().__init__(
             name,
@@ -132,16 +126,14 @@ class NewApiUpconvertedElement(Element[QuaConfigMixInputs]):
             machine_id=None,  # type: ignore[arg-type]
             element_input=element_input,
             element_output=element_output,
+            set_frequency_as_double=set_frequency_as_double,
         )
 
     @property
     def name(self) -> str:
         return self._name
 
-    @inject
-    def set_intermediate_frequency(
-        self, freq: float, capabilities: ServerCapabilities = Provide[CapabilitiesContainer.capabilities]
-    ) -> None:
+    def set_intermediate_frequency(self, freq: float) -> None:
         raise NotImplementedError
 
     def set_output_digital_delay(self, digital_input: str, delay: int) -> None:
