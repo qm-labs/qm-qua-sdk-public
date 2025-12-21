@@ -188,6 +188,8 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         for warning in response.open_qm_warnings:
             logger.warning(f"Open QM ended with warning {warning.code}: {warning.message}")
 
+        logger.info("Opened quantum machine with id: " + response.quantum_machine_id)
+
         return self.get_qm(response.quantum_machine_id, _pb_config=config)
 
     def perform_healthcheck(self) -> None:

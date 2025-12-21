@@ -359,7 +359,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
                 raise ValueError("Cannot add compiler options to a compiled program.")
             if config is not None:
                 raise ValueError("Cannot add a config to a compiled program.")
-            return self._add_compiled(program)
+            job = self._add_compiled(program)
         else:
             self._caps.validate(program.used_capabilities)
             pb_config = self._convert_config_param_to_pb(config, self.add_to_queue.__name__)
@@ -367,7 +367,10 @@ class QmApi(BaseApiV2[QmServiceStub]):
             if compiler_options is None:
                 compiler_options = CompilerOptionArguments()
             program.qua_program.compiler_options = get_request_compiler_options(compiler_options)
-            return self._add_program(program, pb_config)
+            job = self._add_program(program, pb_config)
+
+        logger.info(f"Program added to queue. Job id: {job.id}")
+        return job
 
     def get_job(self, job_id: str) -> JobApi:
         """

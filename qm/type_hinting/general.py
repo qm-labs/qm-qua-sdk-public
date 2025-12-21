@@ -9,7 +9,7 @@ import numpy.typing as npt
 PathLike = Union[str, bytes, pathlib.Path, os.PathLike]  # type: ignore[type-arg]
 Number = Union[int, float]
 Value = Union[Number, bool]
-NumberT = TypeVar("NumberT", int, bool, float)
+NumberT = TypeVar("NumberT", bool, int, float)
 """A generic type variable that can be used to represent a pythonic `int`, `bool` or `float`."""
 
 NumpyNumber = Union[numpy.floating[Any], numpy.integer[Any]]

@@ -403,6 +403,23 @@ class AssignmentTargetInterface(metaclass=abc.ABCMeta):
         pass
 
 
+class NotAllowedOperation(QmQuaException):
+    def __init__(self, expression_type: str) -> None:
+        super(NotAllowedOperation, self).__init__(
+            f"In-place operations are not supported for QUA {expression_type}. Please use `assign` instead."
+        )
+
+
+class NotAllowedOperationVariable(NotAllowedOperation):
+    def __init__(self) -> None:
+        super().__init__("variable")
+
+
+class NotAllowedOperationArrayCell(NotAllowedOperation):
+    def __init__(self) -> None:
+        super().__init__("array cell")
+
+
 class QuaVariable(AssignmentTargetInterface, QuaScalarExpression[NumberT, QuaProgramVarRefExpression]):
     """A class representing a QUA scalar variable. Note that a `QuaVariable` is also a `QuaScalarExpression`."""
 
@@ -435,6 +452,42 @@ class QuaVariable(AssignmentTargetInterface, QuaScalarExpression[NumberT, QuaPro
     def assignment_statement(self) -> QuaProgramAssignmentStatementTarget:
         return QuaProgramAssignmentStatementTarget(variable=self.unwrapped_scalar)
 
+    def __iadd__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __isub__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __imul__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __itruediv__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __ifloordiv__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __imod__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __ipow__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __ilshift__(self, other: "Scalar[int]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __irshift__(self, other: "Scalar[int]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __iand__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __ior__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
+    def __ixor__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationVariable
+
 
 class QuaLiteral(QuaScalarExpression[NumberT, QuaProgramLiteralExpression]):
     @property
@@ -460,6 +513,42 @@ class QuaArrayCell(AssignmentTargetInterface, QuaScalarExpression[NumberT, QuaPr
     @property
     def assignment_statement(self) -> QuaProgramAssignmentStatementTarget:
         return QuaProgramAssignmentStatementTarget(array_cell=self.unwrapped_scalar)
+
+    def __iadd__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __isub__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __imul__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __itruediv__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __ifloordiv__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __imod__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __ipow__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __ilshift__(self, other: "Scalar[int]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __irshift__(self, other: "Scalar[int]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __iand__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __ior__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
+
+    def __ixor__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
+        raise NotAllowedOperationArrayCell
 
 
 class QuaBinaryOperation(QuaScalarExpression[NumberT, QuaProgramBinaryExpression]):

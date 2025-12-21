@@ -421,7 +421,7 @@ class Math:
         return _create_output_expression(Math.atan2_2pi, float, y, x)
 
     @staticmethod
-    def abs(x: Scalar[NumberT]) -> QuaLibFunctionOutput[float]:
+    def abs(x: ScalarOfAnyType) -> QuaLibFunctionOutput[float]:
         r"""Computes the absolute value of x
 
         Args:
@@ -619,7 +619,7 @@ class Cast:
         return _create_output_expression(Cast.mul_fixed_by_int, float, x, y)
 
     @staticmethod
-    def to_int(x: Scalar[NumberT]) -> QuaLibFunctionOutput[int]:
+    def to_int(x: ScalarOfAnyType) -> QuaLibFunctionOutput[int]:
         r"""Casts a variable to int. Supports int, fixed or bool
 
         Args:
@@ -631,7 +631,7 @@ class Cast:
         return _create_output_expression(Cast.to_int, int, x)
 
     @staticmethod
-    def to_fixed(x: Scalar[NumberT]) -> QuaLibFunctionOutput[float]:
+    def to_fixed(x: ScalarOfAnyType) -> QuaLibFunctionOutput[float]:
         r"""Casts a variable to fixed. Supports int, fixed or bool
 
         Args:
@@ -643,7 +643,7 @@ class Cast:
         return _create_output_expression(Cast.to_fixed, float, x)
 
     @staticmethod
-    def to_bool(x: Scalar[NumberT]) -> QuaLibFunctionOutput[bool]:
+    def to_bool(x: ScalarOfAnyType) -> QuaLibFunctionOutput[bool]:
         r"""Casts a variable to bool. Supports int, fixed or bool
 
         Args:
@@ -655,7 +655,7 @@ class Cast:
         return _create_output_expression(Cast.to_bool, bool, x)
 
     @staticmethod
-    def unsafe_cast_int(x: Scalar[NumberT]) -> QuaLibFunctionOutput[int]:
+    def unsafe_cast_int(x: ScalarOfAnyType) -> QuaLibFunctionOutput[int]:
         r"""Treats the given input variable, bitwise, as an integer.
         For a given fixed point number, this is equivalent to multiplying by
         $2^{28}$
@@ -671,7 +671,7 @@ class Cast:
         return _create_output_expression(Cast.unsafe_cast_int, int, x)
 
     @staticmethod
-    def unsafe_cast_fixed(x: Scalar[NumberT]) -> QuaLibFunctionOutput[float]:
+    def unsafe_cast_fixed(x: ScalarOfAnyType) -> QuaLibFunctionOutput[float]:
         r"""Treats the given input variable, bitwise, as a fixed point number.
         For a given integer, this is equivalent to multiplying by $2^{-28}$
 
@@ -686,7 +686,7 @@ class Cast:
         return _create_output_expression(Cast.unsafe_cast_fixed, float, x)
 
     @staticmethod
-    def unsafe_cast_bool(x: Scalar[NumberT]) -> QuaLibFunctionOutput[bool]:
+    def unsafe_cast_bool(x: ScalarOfAnyType) -> QuaLibFunctionOutput[bool]:
         r"""Treats the given input variable, bitwise, as a boolean.
         A boolean is determined by the right-most bit, so for a given integer, this is
         equivalent to a parity check.
