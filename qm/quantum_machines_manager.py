@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Union, Mapping, Iterable, Optional, TypedDict, Collection
 
 import marshmallow
+import packaging.version
 from octave_sdk.octave import OctaveDetails
 
 import qm.grpc as qm_pb
@@ -66,7 +67,7 @@ class DevicesVersion:
 
     @property
     def QOP(self) -> Optional[str]:
-        return SERVER_TO_QOP_VERSION_MAP.get(self.gateway)
+        return _get_qop_version(self.gateway)
 
 
 SERVER_TO_QOP_VERSION_MAP = {
@@ -97,6 +98,15 @@ SERVER_TO_QOP_VERSION_MAP = {
     "3.0-beta-10692.d6b91d0": "3.5.1",
     "3.6.0-11345.aa8a9fd": "3.6.0",
 }
+
+
+def _get_qop_version(server_version: str) -> Optional[str]:
+    if server_version in SERVER_TO_QOP_VERSION_MAP:
+        return SERVER_TO_QOP_VERSION_MAP[server_version]
+    try:
+        return packaging.version.parse(server_version.replace("-", "+")).base_version
+    except packaging.version.InvalidVersion:
+        return None
 
 
 @dataclass
@@ -349,11 +359,23 @@ class QuantumMachinesManager:
         Returns:
             A dictionary with the qm-qua and QOP versions
         """
+        warnings.warn(
+            deprecation_message(
+                "qmm.version_dict()",
+                "1.3.0",
+                "2.0.0",
+                "Please use qmm.version() instead.",
+            ),
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
+
         output_dict: Version = {}
         server_version = self._server_details.server_version
         output_dict["qm-qua"] = qm_qua_version
-        if server_version in SERVER_TO_QOP_VERSION_MAP:
-            output_dict["QOP"] = SERVER_TO_QOP_VERSION_MAP[server_version]
+        qop_version = _get_qop_version(server_version)
+        if qop_version is not None:
+            output_dict["QOP"] = qop_version
         else:
             output_dict["OPX"] = server_version
         if is_debug():
@@ -361,7 +383,7 @@ class QuantumMachinesManager:
 
         return output_dict
 
-    def version(self) -> Union[Version, DevicesVersion]:
+    def version(self) -> DevicesVersion:
         """
         Returns:
             An object with the qm-qua and QOP versions
