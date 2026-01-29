@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Union, Mapping, Iterable, Optional, TypedDict, Collection
 
 import marshmallow
-import packaging.version
 from octave_sdk.octave import OctaveDetails
 
 import qm.grpc as qm_pb
@@ -97,15 +96,14 @@ SERVER_TO_QOP_VERSION_MAP = {
     "3.0-beta-4e4aa38": "3.5.0",
     "3.0-beta-10692.d6b91d0": "3.5.1",
     "3.6.0-11345.aa8a9fd": "3.6.0",
+    "3.6.0-12658.702d99c": "3.6.1",
 }
 
 
 def _get_qop_version(server_version: str) -> Optional[str]:
     if server_version in SERVER_TO_QOP_VERSION_MAP:
         return SERVER_TO_QOP_VERSION_MAP[server_version]
-    try:
-        return packaging.version.parse(server_version.replace("-", "+")).base_version
-    except packaging.version.InvalidVersion:
+    else:
         return None
 
 

@@ -7,15 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 
-## [1.2.4.1] - 2026-01-27
+## [1.2.5] - 2026-01-29
 
 - Requires Python >=3.9, <3.13
-- Tested against QOP 2.6.0, 3.6.1
+- Tested against QOP 2.6.0, 3.6.0, 3.6.1
+
+### Fixed
+- Correctly report QOP 3.6.1 version using `qmm.version_dict()`.
+
+
+## [1.2.4.1] - 2026-01-27
+
+**Note, this version was [Yanked](https://pypi.org/help/#yanked) as it wrongly reported QOP 3.6.1 as QOP 3.6.0 when using `qmm.version_dict()`**
+
+- Requires Python >=3.9, <3.13
+- Tested against QOP 2.6.0, 3.6.0, 3.6.1
+
 
 ## [1.2.4] - 2025-12-21
 
 - Requires Python >=3.9, <3.13
-- Tested against QOP 2.6.0, 3.6.0
+- Tested against QOP 2.6.0, 3.6.0, 3.6.1
 
 ### Added
 - Added a warning message when opening a `QuantumMachinesManager` with an outdated `qm-qua` compared to the QOP version.
