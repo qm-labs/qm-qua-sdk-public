@@ -205,10 +205,12 @@ class CalibrationDB(AbstractCalibrationDB):
     ) -> Optional[AbstractLOCalibration]:
         """
         Get the LO calibration for a given octave channel, LO frequency, and gain
+
         Args:
             octave_channel: The octave channel to get the calibration for.
             lo_freq: The LO frequency to get the calibration for.
             gain: The gain to get the calibration for.
+
         Returns:
             The LO calibration for the given parameters, or None if it doesn't exist.
         """
@@ -237,11 +239,13 @@ class CalibrationDB(AbstractCalibrationDB):
     ) -> Optional[IFCalibrationDBSchema]:
         """
         Get the IF calibration for a given octave channel, LO frequency, gain, and IF frequency.
+
         Args:
             octave_channel: The octave channel to get the calibration for.
             lo_freq: The LO frequency to get the calibration for.
             gain: The gain to get the calibration for.
             if_freq: The IF frequency to get the calibration for.
+
         Returns:
             The IF calibration for the given parameters, or None if it doesn't exist.
         """
@@ -269,10 +273,12 @@ class CalibrationDB(AbstractCalibrationDB):
     ) -> Mapping[Union[int, float], IFCalibrationDBSchema]:
         """
         Get IF calibration for all IF frequencies for a given octave channel, LO frequency, and gain.
+
         Args:
             octave_channel: The octave channel to get the calibration for.
             lo_freq: The LO frequency to get the calibration for.
             gain: The gain to get the calibration for.
+
         Returns:
             A dictionary of IF frequencies to their respective IF calibration.
         """
@@ -302,6 +308,7 @@ class CalibrationDB(AbstractCalibrationDB):
     ) -> None:
         """
         Update the calibration database with the given calibration results.
+
         Args:
             result: The calibration results to update the database with.
             octave_channel: The octave channel to update the database with.

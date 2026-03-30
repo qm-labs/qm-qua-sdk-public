@@ -1,0 +1,2 @@
+class InvalidLoSource(Exception):
+    pass

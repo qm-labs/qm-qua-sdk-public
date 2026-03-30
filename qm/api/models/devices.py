@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Dict, List, Union
 from dataclasses import asdict, dataclass
 
-from qm.grpc.qm_api import DigitalInputPortPolarity
+from qm.grpc.qm.pb import inc_qm_api_pb2
 
 
 @dataclass(frozen=True)
@@ -25,5 +25,5 @@ class AnalogOutputPortFilter:
 
 
 class Polarity(Enum):
-    RISING = DigitalInputPortPolarity.RISING
-    FALLING = DigitalInputPortPolarity.FALLING
+    RISING = inc_qm_api_pb2.DigitalInputPortPolarity.RISING
+    FALLING = inc_qm_api_pb2.DigitalInputPortPolarity.FALLING

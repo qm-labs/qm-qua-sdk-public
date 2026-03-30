@@ -5,22 +5,15 @@ from typing import Any, List, Type, Tuple, Union, TypeVar, Optional, cast
 from qm.type_hinting import Value
 from qm.api.base_api import BaseApi
 from qm.exceptions import QmValueError
-from qm.grpc.general_messages import Matrix
 from qm.api.models.jobs import PendingJobData
-from qm.grpc.qm_manager import GetRunningJobRequest
+from qm.grpc.qm.pb.frontend_pb2_grpc import FrontendStub
+from qm.utils.protobuf_utils import timestamp_to_datetime
 from qm.api.models.server_details import ConnectionDetails
 from qm.utils.general_utils import create_input_stream_name
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
+from qm.grpc.qm.pb.job_manager_pb2_grpc import JobManagerServiceStub
 from qm.api.stubs.deprecated_job_manager_stub import DeprecatedJobManagerServiceStub
-from qm.grpc.job_manager import (
-    IntStreamData,
-    BoolStreamData,
-    FixedStreamData,
-    JobManagerServiceStub,
-    InsertInputStreamRequest,
-    GetElementCorrectionRequest,
-    SetElementCorrectionRequest,
-)
+from qm.grpc.qm.pb import frontend_pb2, qm_manager_pb2, job_manager_pb2, general_messages_pb2
 from qm._QmJobErrors import (
     MissingJobError,
     MissingElementError,
@@ -30,19 +23,6 @@ from qm._QmJobErrors import (
     InvalidJobExecutionStatusError,
     ElementWithoutIntermediateFrequencyError,
     _handle_job_manager_error,
-)
-from qm.grpc.frontend import (
-    HaltRequest,
-    FrontendStub,
-    ResumeRequest,
-    JobQueryParams,
-    QueryValueMatcher,
-    JobExecutionStatus,
-    IsJobRunningRequest,
-    PausedStatusRequest,
-    IsJobAcquiringDataRequest,
-    GetJobExecutionStatusRequest,
-    IsJobAcquiringDataResponseAcquiringStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,14 +34,16 @@ JobStubType = TypeVar("JobStubType", JobManagerServiceStub, DeprecatedJobManager
 class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
     def __init__(self, connection_details: ConnectionDetails):
         super().__init__(connection_details)
-        self._frontend_stub = FrontendStub(self._channel)
+        self._frontend_stub = FrontendStub(self._channel)  # type: ignore[no-untyped-call]
 
     def set_element_correction(
-        self, job_id: str, element_name: str, correction: Matrix
+        self, job_id: str, element_name: str, correction: general_messages_pb2.Matrix
     ) -> Tuple[float, float, float, float]:
-        request = SetElementCorrectionRequest(job_id=job_id, qe_name=element_name, correction=correction)
+        request = job_manager_pb2.SetElementCorrectionRequest(jobId=job_id, qeName=element_name, correction=correction)
 
-        response = self._run(self._stub.set_element_correction(request, timeout=self._timeout))
+        response: job_manager_pb2.SetElementCorrectionResponse = self._run(
+            self._stub.SetElementCorrection, request, timeout=self._timeout
+        )
 
         valid_errors = (
             MissingElementError,
@@ -78,9 +60,11 @@ class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
         )
 
     def get_element_correction(self, job_id: str, element_name: str) -> Tuple[float, float, float, float]:
-        request = GetElementCorrectionRequest(job_id=job_id, qe_name=element_name)
+        request = job_manager_pb2.GetElementCorrectionRequest(jobId=job_id, qeName=element_name)
 
-        response = self._run(self._stub.get_element_correction(request, timeout=self._timeout))
+        response: job_manager_pb2.GetElementCorrectionResponse = self._run(
+            self._stub.GetElementCorrection, request, timeout=self._timeout
+        )
         valid_errors = (
             MissingElementError,
             ElementWithSingleInputError,
@@ -96,21 +80,23 @@ class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
 
     def insert_input_stream(self, job_id: str, stream_name: str, data: List[Value]) -> None:
         stream_name = create_input_stream_name(stream_name)
-        request = InsertInputStreamRequest(job_id=job_id, stream_name=stream_name)
+        request = job_manager_pb2.InsertInputStreamRequest(jobId=job_id, streamName=stream_name)
 
         if all(type(element) == bool for element in data):
-            request.bool_stream_data = BoolStreamData(data=cast(List[bool], data))
+            request.boolStreamData.CopyFrom(job_manager_pb2.BoolStreamData(data=cast(List[bool], data)))
         elif all(type(element) == int for element in data):
-            request.int_stream_data = IntStreamData(data=cast(List[int], data))
+            request.intStreamData.CopyFrom(job_manager_pb2.IntStreamData(data=cast(List[int], data)))
         elif all(type(element) == float for element in data):
-            request.fixed_stream_data = FixedStreamData(data=cast(List[float], data))
+            request.fixedStreamData.CopyFrom(job_manager_pb2.FixedStreamData(data=cast(List[float], data)))
         else:
             raise QmValueError(
                 f"Invalid type in data, type is '{set(type(el) for el in data)}', "
                 f"accepted types are bool | int | float"
             )
 
-        response = self._run(self._stub.insert_input_stream(request, timeout=self._timeout))
+        response: job_manager_pb2.InsertInputStreamResponse = self._run(
+            self._stub.InsertInputStream, request, timeout=self._timeout
+        )
 
         valid_errors = (
             MissingJobError,
@@ -120,34 +106,42 @@ class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
         _handle_job_manager_error(request, response, valid_errors)
 
     def halt(self, job_id: str) -> bool:
-        request = HaltRequest(job_id=job_id)
-        response = self._run(self._frontend_stub.halt(request, timeout=self._timeout))
+        request = frontend_pb2.HaltRequest(jobId=job_id)
+        response: frontend_pb2.HaltResponse = self._run(self._frontend_stub.Halt, request, timeout=self._timeout)
         return response.ok
 
     def resume(self, job_id: str) -> bool:
-        request = ResumeRequest(job_id=job_id)
-        self._run(self._frontend_stub.resume(request, timeout=self._timeout))
+        request = frontend_pb2.ResumeRequest(jobId=job_id)
+        self._run(self._frontend_stub.Resume, request, timeout=self._timeout)
         return True
 
     def is_paused(self, job_id: str) -> bool:
-        request = PausedStatusRequest(job_id=job_id)
-        response = self._run(self._frontend_stub.paused_status(request, timeout=self._timeout))
-        return response.is_paused
+        request = frontend_pb2.PausedStatusRequest(jobId=job_id)
+        response: frontend_pb2.PausedStatusResponse = self._run(
+            self._frontend_stub.PausedStatus, request, timeout=self._timeout
+        )
+        return response.isPaused
 
     def is_job_running(self, job_id: str) -> bool:
-        request = IsJobRunningRequest(job_id=job_id)
+        request = frontend_pb2.IsJobRunningRequest(jobId=job_id)
 
-        response = self._run(self._frontend_stub.is_job_running(request, timeout=self._timeout))
-        return response.is_running
+        response: frontend_pb2.IsJobRunningResponse = self._run(
+            self._frontend_stub.IsJobRunning, request, timeout=self._timeout
+        )
+        return response.isRunning
 
-    def is_data_acquiring(self, job_id: str) -> IsJobAcquiringDataResponseAcquiringStatus:
-        request = IsJobAcquiringDataRequest(job_id=job_id)
-        response = self._run(self._frontend_stub.is_job_acquiring_data(request, timeout=self._timeout))
-        return response.acquiring_status
+    def is_data_acquiring(self, job_id: str) -> frontend_pb2.IsJobAcquiringDataResponse.AcquiringStatus:
+        request = frontend_pb2.IsJobAcquiringDataRequest(jobId=job_id)
+        response: frontend_pb2.IsJobAcquiringDataResponse = self._run(
+            self._frontend_stub.IsJobAcquiringData, request, timeout=self._timeout
+        )
+        return response.acquiringStatus
 
-    def get_job_execution_status(self, job_id: str, quantum_machine_id: str) -> JobExecutionStatus:
-        request = GetJobExecutionStatusRequest(job_id=job_id, quantum_machine_id=quantum_machine_id)
-        response = self._run(self._frontend_stub.get_job_execution_status(request, timeout=self._timeout))
+    def get_job_execution_status(self, job_id: str, quantum_machine_id: str) -> frontend_pb2.JobExecutionStatus:
+        request = frontend_pb2.GetJobExecutionStatusRequest(jobId=job_id, quantumMachineId=quantum_machine_id)
+        response: frontend_pb2.GetJobExecutionStatusResponse = self._run(
+            self._frontend_stub.GetJobExecutionStatus, request, timeout=self._timeout
+        )
         return response.status
 
     @staticmethod
@@ -156,17 +150,17 @@ class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
         job_id: Optional[str],
         position: Optional[int],
         user_id: Optional[str],
-    ) -> JobQueryParams:
-        request = JobQueryParams(quantum_machine_id=quantum_machine_id)
+    ) -> frontend_pb2.JobQueryParams:
+        request = frontend_pb2.JobQueryParams(quantumMachineId=quantum_machine_id)
 
         if position is not None:
-            request.position = position
+            request.position.value = position
 
         if job_id is not None:
-            request.job_id = QueryValueMatcher(value=job_id)
+            request.jobId.CopyFrom(frontend_pb2.QueryValueMatcher(value=job_id))
 
         if user_id is not None:
-            request.user_id = QueryValueMatcher(value=user_id)
+            request.userId.CopyFrom(frontend_pb2.QueryValueMatcher(value=user_id))
 
         return request
 
@@ -179,8 +173,10 @@ class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
     ) -> int:
         request = JobManagerBaseApi._create_job_query_params(quantum_machine_id, job_id, position, user_id)
 
-        response = self._run(self._frontend_stub.remove_pending_jobs(request, timeout=self._timeout))
-        return response.numbers_of_jobs_removed
+        response: frontend_pb2.RemovePendingJobsResponse = self._run(
+            self._frontend_stub.RemovePendingJobs, request, timeout=self._timeout
+        )
+        return response.numbersOfJobsRemoved
 
     def get_pending_jobs(
         self,
@@ -190,23 +186,25 @@ class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
         user_id: Optional[str],
     ) -> List[PendingJobData]:
         request = JobManagerBaseApi._create_job_query_params(quantum_machine_id, job_id, position, user_id)
-        response = self._run(self._frontend_stub.get_pending_jobs(request, timeout=self._timeout))
+        response = self._run(self._frontend_stub.GetPendingJobs, request, timeout=self._timeout)
         return [
             PendingJobData(
                 job_id=job_id,
-                position_in_queue=status.position_in_queue,
-                time_added=status.time_added,
-                added_by=status.added_by,
+                position_in_queue=status.positionInQueue,
+                time_added=timestamp_to_datetime(status.timeAdded),
+                added_by=status.addedBy,
             )
-            for job_id, status in response.pending_jobs.items()
+            for job_id, status in response.pendingJobs.items()
         ]
 
     def get_running_job(self, machine_id: str) -> Optional[str]:
-        request = GetRunningJobRequest(machine_id=machine_id)
-        response = self._run(self._frontend_stub.get_running_job(request, timeout=self._timeout))
+        request = qm_manager_pb2.GetRunningJobRequest(machineID=machine_id)
+        response: qm_manager_pb2.GetRunningJobResponse = self._run(
+            self._frontend_stub.GetRunningJob, request, timeout=self._timeout
+        )
 
-        if response.job_id:
-            return response.job_id
+        if response.jobId:
+            return response.jobId
         return None
 
 

@@ -2,13 +2,8 @@ import abc
 from dataclasses import dataclass
 from typing import Any, List, Type, Tuple, Union, Generic, TypeVar, Optional
 
+from qm.grpc.qm.pb import frontend_pb2
 from qm.api.models.capabilities import ServerCapabilities
-from qm.grpc.frontend import (
-    SimulationRequest,
-    ExecutionRequestSimulateSimulationInterfaceNone,
-    ExecutionRequestSimulateSimulationInterfaceLoopbackConnections,
-    ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections,
-)
 
 SupportedConnectionTypes = Union[
     Tuple[str, int, int, str, int, int],
@@ -21,8 +16,8 @@ SupportedConnectionTypes = Union[
 
 T = TypeVar(
     "T",
-    ExecutionRequestSimulateSimulationInterfaceLoopbackConnections,
-    ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections,
+    frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.Loopback.Connections,
+    frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.RawInterface.Connections,
 )
 
 
@@ -33,8 +28,8 @@ class SimulatorInterface(Generic[T], metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def update_simulate_request(
-        self, request: SimulationRequest, capabilities: ServerCapabilities
-    ) -> SimulationRequest:
+        self, request: frontend_pb2.SimulationRequest, capabilities: ServerCapabilities
+    ) -> frontend_pb2.SimulationRequest:
         pass
 
     @staticmethod
@@ -69,8 +64,8 @@ class SimulatorInterface(Generic[T], metaclass=abc.ABCMeta):
 
 
 SimulationInterfaceTypes = Union[
-    SimulatorInterface[ExecutionRequestSimulateSimulationInterfaceLoopbackConnections],
-    SimulatorInterface[ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections],
+    SimulatorInterface[frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.Loopback.Connections],
+    SimulatorInterface[frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.RawInterface.Connections],
 ]
 
 
@@ -121,10 +116,12 @@ class SimulationConfig:
         self.extraProcessingTimeoutInMs = extraProcessingTimeoutInMs
 
     def update_simulate_request(
-        self, request: SimulationRequest, capabilities: ServerCapabilities
-    ) -> SimulationRequest:
+        self, request: frontend_pb2.SimulationRequest, capabilities: ServerCapabilities
+    ) -> frontend_pb2.SimulationRequest:
         if self.simulation_interface is None:
-            request.simulate.simulation_interface.none = ExecutionRequestSimulateSimulationInterfaceNone()
+            request.simulate.simulationInterface.none.CopyFrom(
+                getattr(frontend_pb2.ExecutionRequest.Simulate.SimulationInterface, "None")()
+            )
         else:
             request = self.simulation_interface.update_simulate_request(request, capabilities)
         return request

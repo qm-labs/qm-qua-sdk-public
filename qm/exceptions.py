@@ -4,10 +4,10 @@ from collections.abc import Collection
 from abc import ABCMeta, abstractmethod
 from typing import Any, List, Generic, TypeVar, Sequence
 
-import betterproto
 from marshmallow import ValidationError
+from google.protobuf.message import Message
 
-from qm.grpc.qm_manager import ConfigValidationMessage, PhysicalValidationMessage
+from qm.grpc.qm.pb import qm_manager_pb2
 
 
 class QmQuaException(Exception):
@@ -37,6 +37,10 @@ class NoScopeFoundException(QmQuaException):
     pass
 
 
+class SaveToAdcTraceException(QmQuaException):
+    pass
+
+
 class JobNotFoundException(QmQuaException):
     def __init__(self, job_id: str) -> None:
         super().__init__(f"Job {job_id} not found.")
@@ -45,8 +49,8 @@ class JobNotFoundException(QmQuaException):
 class OpenQmException(QmQuaException):
     def __init__(
         self,
-        config_validation_errors: Sequence[ConfigValidationMessage],
-        physical_validation_errors: Sequence[PhysicalValidationMessage],
+        config_validation_errors: Sequence[qm_manager_pb2.ConfigValidationMessage],
+        physical_validation_errors: Sequence[qm_manager_pb2.PhysicalValidationMessage],
     ):
         self.config_validation_formatted_errors = QopConfigValidationError(
             config_validation_errors
@@ -132,6 +136,10 @@ class ConfigSchemaError(ConfigValidationException):
 class NoInputsOrOutputsError(ConfigValidationException):
     def __init__(self) -> None:
         super().__init__("An element must have either outputs or inputs. Please specify at least one.")
+
+
+class NoMatchingOctavePort(ConfigValidationException):
+    pass
 
 
 class ConfigSerializationException(QmQuaException):
@@ -305,7 +313,9 @@ class DataFetchingError(QmQuaException):
     pass
 
 
-ValidationType = TypeVar("ValidationType", PhysicalValidationMessage, ConfigValidationMessage)
+ValidationType = TypeVar(
+    "ValidationType", qm_manager_pb2.PhysicalValidationMessage, qm_manager_pb2.ConfigValidationMessage
+)
 
 
 class QopValidationError(QmQuaException, Generic[ValidationType], metaclass=ABCMeta):
@@ -329,7 +339,7 @@ class QopValidationError(QmQuaException, Generic[ValidationType], metaclass=ABCM
         return "\n".join(self.validation_formatted_errors)
 
 
-class QopPhysicalValidationError(QopValidationError[PhysicalValidationMessage]):
+class QopPhysicalValidationError(QopValidationError[qm_manager_pb2.PhysicalValidationMessage]):
     """
     An exception class for describing physical configuration errors arising from validation by the QOP server.
     """
@@ -339,7 +349,7 @@ class QopPhysicalValidationError(QopValidationError[PhysicalValidationMessage]):
         return "PHYSICAL CONFIG ERROR"
 
 
-class QopConfigValidationError(QopValidationError[ConfigValidationMessage]):
+class QopConfigValidationError(QopValidationError[qm_manager_pb2.ConfigValidationMessage]):
     """
     An exception class for describing configuration errors arising from validation by the QOP server.
     """
@@ -357,7 +367,7 @@ class InvalidQuaArraySubclassError(QmQuaException):
     pass
 
 
-ErrorType = TypeVar("ErrorType", bound=betterproto.Message)
+ErrorType = TypeVar("ErrorType", bound=Message)
 
 
 class QopResponseError(Exception, Generic[ErrorType]):

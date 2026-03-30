@@ -1,37 +1,23 @@
 import logging
 import warnings
 from dataclasses import field, dataclass
-from typing import Dict, List, Type, Union, Literal, Mapping, Iterable, Optional
+from typing import Dict, List, Type, Union, Literal, Mapping, Iterable, Optional, MutableSequence
 
-from qm.grpc.qua import QuaProgram
 from qm.octave import QmOctaveConfig
-from qm.grpc.qua_config import QuaConfig
+from qm.grpc.qm.grpc.v2 import qmm_api_pb2
 from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.octave.octave_manager import OctaveManager
+from qm.utils.protobuf_utils import proto_map_to_dict
 from qm.api.v2.qm_api_old import QmApiWithDeprecations
 from qm.type_hinting.config_types import FullQuaConfig
 from qm.api.models.server_details import ConnectionDetails
+from qm.grpc.qm.grpc.v2.qmm_api_pb2_grpc import QmmServiceStub
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
+from qm.grpc.qm.pb import inc_qua_pb2, frontend_pb2, inc_qua_config_pb2
 from qm.api.v2.qm_api import QmApi, _log_messages, handle_simulation_error
 from qm.exceptions import OpenQmException, QopResponseError, JobNotFoundException
-from qm.grpc.frontend import InterOpxConnection, SimulatedResponsePart, ExecutionRequestSimulate
 from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, JobApiWithDeprecations, transfer_statuses_to_enum
-from qm.grpc.v2 import (
-    GetJobsRequest,
-    QmmServiceStub,
-    JobsQueryParams,
-    GetVersionRequest,
-    HealthCheckRequest,
-    GetControllersRequest,
-    ClearAllJobResultsRequest,
-    OpenQuantumMachineRequest,
-    QmmServiceSimulateRequest,
-    CloseAllQuantumMachinesRequest,
-    ListOpenQuantumMachinesRequest,
-    OpenQuantumMachineRequestCloseMode,
-    QmmServiceResetDataProcessingRequest,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +99,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
     def _stub_class(self) -> Type[QmmServiceStub]:
         return QmmServiceStub
 
-    def get_qm(self, qm_id: str, _pb_config: Optional[QuaConfig] = None) -> QmApi:
+    def get_qm(self, qm_id: str, _pb_config: Optional[inc_qua_config_pb2.QuaConfig] = None) -> QmApi:
         # todo - remove _pb_config when octave config is in the GW
         return self.QM_CLASS(
             connection_details=self.connection_details,
@@ -143,35 +129,37 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         description: str = "",
         status: Union[JobStatus, Iterable[JobStatus]] = tuple(),
     ) -> List[JobData]:
-        query_params = JobsQueryParams(
+        query_params = qmm_api_pb2.JobsQueryParams(
             quantum_machine_ids=list(qm_ids),
             job_ids=list(job_ids),
             user_ids=list(user_ids),
             description=description,
             status=transfer_statuses_to_enum(status),
         )
-        request = GetJobsRequest(query=query_params)
-        response = self._run(self._stub.get_jobs(request, timeout=self._timeout))
+        request = qmm_api_pb2.GetJobsRequest(query=query_params)
+        response: qmm_api_pb2.GetJobsSuccess = self._run(self._stub.GetJobs, request, timeout=self._timeout)
         return [JobData.from_grpc(j) for j in response.jobs]
 
-    def open_qm(self, config: QuaConfig, close_other_machines: Optional[bool] = None) -> QmApi:
+    def open_qm(self, config: inc_qua_config_pb2.QuaConfig, close_other_machines: Optional[bool] = None) -> QmApi:
         if close_other_machines is None:
             warnings.warn(
                 "close_other_machines is not set, as from 2.0.0 default will be False, now setting to True. Please set it explicitly to remove this message and keep the wanted behavior in future versions.",
                 DeprecationWarning,
             )
             close_other_machines = True
-        request = OpenQuantumMachineRequest(
+        request = qmm_api_pb2.OpenQuantumMachineRequest(
             config=config,
             close_mode=(
-                OpenQuantumMachineRequestCloseMode.CLOSE_MODE_IF_NEEDED  # type: ignore[arg-type]
+                qmm_api_pb2.OpenQuantumMachineRequest.CloseMode.CLOSE_MODE_IF_NEEDED
                 if close_other_machines
-                else OpenQuantumMachineRequestCloseMode.CLOSE_MODE_UNSPECIFIED
+                else qmm_api_pb2.OpenQuantumMachineRequest.CloseMode.CLOSE_MODE_UNSPECIFIED
             ),
         )
 
         try:
-            response = self._run(self._stub.open_quantum_machine(request, timeout=self._timeout))
+            response: qmm_api_pb2.OpenQuantumMachineResponse.OpenQuantumMachineResponseSuccess = self._run(
+                self._stub.OpenQuantumMachine, request, timeout=self._timeout
+            )
 
         except QopResponseError as e:
             error = e.error
@@ -194,7 +182,9 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
 
     def perform_healthcheck(self) -> None:
         logger.info("Performing health check")
-        response = self._run(self._stub.health_check(HealthCheckRequest(), timeout=self._timeout))
+        response: qmm_api_pb2.HealthCheckResponse.HealthCheckResponseSuccess = self._run(
+            self._stub.HealthCheck, qmm_api_pb2.HealthCheckRequest(), timeout=self._timeout
+        )
         msg = "Cluster healthcheck completed successfully."
         if response.details:
             msg += " Details:"
@@ -203,14 +193,18 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         logger.info(msg)
 
     def get_version(self) -> VersionResponse:
-        response = self._run(self._stub.get_version(GetVersionRequest(), timeout=self._timeout))
+        response: qmm_api_pb2.GetVersionResponse.GetVersionResponseSuccess = self._run(
+            self._stub.GetVersion, qmm_api_pb2.GetVersionRequest(), timeout=self._timeout
+        )
         return VersionResponse(
             gateway=response.gateway,
             controllers={k: v for k, v in response.controllers.items()},
         )
 
     def get_controllers(self) -> Mapping[str, ControllerBase]:
-        response = self._run(self._stub.get_controllers(GetControllersRequest(), timeout=self._timeout))
+        response: qmm_api_pb2.GetControllersResponse.GetControllersResponseSuccess = self._run(
+            self._stub.GetControllers, qmm_api_pb2.GetControllersRequest(), timeout=self._timeout
+        )
         to_return = {}
         correction_offset = 0 if self._caps.supports(QopCaps.opx1000_fems_return_1_based) else 1
         for name, value in response.control_devices.items():
@@ -223,32 +217,36 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
                         for i, f in value.fems.items()
                         if f.type > 0
                     },
-                    _temperatures=value.temperatures if self._caps.supports(QopCaps.device_temperatures) else None,
+                    _temperatures=proto_map_to_dict(value.temperatures)
+                    if self._caps.supports(QopCaps.device_temperatures)
+                    else None,
                 )
             else:
                 raise NotImplementedError(f"Controller type {value.controller_type} is not supported.")
         return to_return
 
     def reset_data_processing(self) -> None:
-        request = QmmServiceResetDataProcessingRequest()
-        self._run(self._stub.reset_data_processing(request, timeout=self._timeout))
+        request = qmm_api_pb2.QmmServiceResetDataProcessingRequest()
+        self._run(self._stub.ResetDataProcessing, request, timeout=self._timeout)
 
     def validate_qua_config(self, config: FullQuaConfig) -> None:
         pass
 
-    def _get_simulated_job(self, job_id: str, simulated: Union[SimulatedResponsePart, None] = None) -> SimulatedJobApi:
+    def _get_simulated_job(
+        self, job_id: str, simulated: Union[frontend_pb2.SimulatedResponsePart, None] = None
+    ) -> SimulatedJobApi:
         return self.QM_CLASS.SIMULATED_JOB_CLASS(
             self.connection_details, job_id, simulated_response=simulated, capabilities=self._caps
         )
 
     def simulate(
         self,
-        config: QuaConfig,
-        program: QuaProgram,
-        simulate: ExecutionRequestSimulate,
-        controller_connections: List[InterOpxConnection],
+        config: inc_qua_config_pb2.QuaConfig,
+        program: inc_qua_pb2.QuaProgram,
+        simulate: frontend_pb2.ExecutionRequest.Simulate,
+        controller_connections: MutableSequence[frontend_pb2.InterOpxConnection],
     ) -> SimulatedJobApi:
-        request = QmmServiceSimulateRequest(
+        request = qmm_api_pb2.QmmServiceSimulateRequest(
             config=config,
             high_level_program=program,
             simulate=simulate,
@@ -257,24 +255,26 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         logger.info("Simulating program.")
 
         with handle_simulation_error():
-            response = self._run(self._stub.simulate(request, timeout=self._timeout))
+            response: qmm_api_pb2.SimulationSuccess = self._run(self._stub.Simulate, request, timeout=self._timeout)
 
         _log_messages(response.messages)
 
         return self._get_simulated_job(response.job_id, response.simulated)
 
     def list_open_qms(self) -> List[str]:
-        request = ListOpenQuantumMachinesRequest()
-        response = self._run(self._stub.list_open_quantum_machines(request, timeout=self._timeout))
-        return response.machine_ids
+        request = qmm_api_pb2.ListOpenQuantumMachinesRequest()
+        response: qmm_api_pb2.ListOpenQuantumMachinesResponse.ListOpenQuantumMachinesResponseSuccess = self._run(
+            self._stub.ListOpenQuantumMachines, request, timeout=self._timeout
+        )
+        return list(response.machine_ids)
 
     def close_all_qms(self) -> None:
-        request = CloseAllQuantumMachinesRequest()
-        self._run(self._stub.close_all_quantum_machines(request, timeout=self._timeout))
+        request = qmm_api_pb2.CloseAllQuantumMachinesRequest()
+        self._run(self._stub.CloseAllQuantumMachines, request, timeout=self._timeout)
 
     def clear_all_job_results(self) -> None:
-        request = ClearAllJobResultsRequest()
-        self._run(self._stub.clear_all_job_results(request, timeout=self._timeout))
+        request = qmm_api_pb2.ClearAllJobResultsRequest()
+        self._run(self._stub.ClearAllJobResults, request, timeout=self._timeout)
 
 
 class QmmApiWithDeprecations(QmmApi):

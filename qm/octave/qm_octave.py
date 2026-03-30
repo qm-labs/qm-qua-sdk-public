@@ -4,15 +4,14 @@ from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Generic, TypeVar, Optional, ContextManager
 
-from octave_sdk.octave import ClockInfo
-from octave_sdk import IFMode, ClockType, RFOutputMode, ClockFrequency, OctaveLOSource, RFInputLOSource
-
 from qm.elements.element import Element
-from qm.grpc.qua_config import QuaConfigMixInputs
+from qm.octave_sdk.octave import ClockInfo
+from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.elements.element_outputs import DownconvertedOutput
 from qm.elements.up_converted_input import UpconvertedInput
 from qm.octave.octave_manager import ClockMode, OctaveManager
 from qm.octave.abstract_calibration_db import AbstractIFCalibration, AbstractLOCalibration
+from qm.octave_sdk import IFMode, ClockType, RFOutputMode, ClockFrequency, OctaveLOSource, RFInputLOSource
 from qm.type_hinting.config_types import MixerConfigType, ControllerQuaConfig, OPX1000ControllerConfigType
 from qm.octave.octave_mixer_calibration import DeprecatedCalibrationResult, convert_to_old_calibration_result
 
@@ -51,6 +50,12 @@ class NoCalibrationParamsError(Exception):
 
 QmInstT = TypeVar("QmInstT", "QuantumMachine", "QmApi")
 JobInstT = TypeVar("JobInstT", "RunningQmJob", "JobApi")
+
+
+def _map_octave_lo_source_to_rf_input_lo_source(lo_source: OctaveLOSource) -> RFInputLOSource:
+    if lo_source.name in RFInputLOSource.__members__:
+        return RFInputLOSource[lo_source.name]
+    raise ValueError(f"Invalid Octave LO source: {lo_source.name}")
 
 
 class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
@@ -205,7 +210,7 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
         """
         if lo_source is None:
             up_conv = self._get_upconverted_input(element)
-            lo_source = up_conv.lo_source
+            lo_source = _map_octave_lo_source_to_rf_input_lo_source(up_conv.lo_source)
         inst = self._get_downconverted_output(element)
         inst.set_downconversion(lo_source, lo_frequency, if_mode_i, if_mode_q)
 
@@ -233,6 +238,7 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
         - The function need to be run for each LO frequency and element separately
 
         - If close_open_quantum_machines is set to True one must open a new quantum machine after calibration ends
+
         Args:
             element (str): The name of the element for calibration
             lo_if_frequencies_tuple_list (list): a list of tuples that
@@ -290,7 +296,7 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
 
     @staticmethod
     def _fetch_calibrations_from_db(
-        qe: Element[QuaConfigMixInputs],
+        qe: Element[inc_qua_config_pb2.QuaConfig.MixInputs],
     ) -> Tuple[AbstractLOCalibration, AbstractIFCalibration]:
         assert isinstance(qe.input, UpconvertedInput)
         if qe.input._calibration_db is None:
@@ -331,7 +337,10 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
 
     @abstractmethod
     def _update_element_parameters(
-        self, qe: Element[QuaConfigMixInputs], lo_cal: AbstractLOCalibration, if_cal: AbstractIFCalibration
+        self,
+        qe: Element[inc_qua_config_pb2.QuaConfig.MixInputs],
+        lo_cal: AbstractLOCalibration,
+        if_cal: AbstractIFCalibration,
     ) -> None:
         pass
 
@@ -348,7 +357,10 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
 
 class QmOctave(QmOctaveBase["QuantumMachine", "RunningQmJob"]):
     def _update_element_parameters(
-        self, qe: Element[QuaConfigMixInputs], lo_cal: AbstractLOCalibration, if_cal: AbstractIFCalibration
+        self,
+        qe: Element[inc_qua_config_pb2.QuaConfig.MixInputs],
+        lo_cal: AbstractLOCalibration,
+        if_cal: AbstractIFCalibration,
     ) -> None:
         assert isinstance(qe.input, UpconvertedInput)
         qe.input.set_output_dc_offset(i_offset=lo_cal.get_i0(), q_offset=lo_cal.get_q0())
@@ -366,7 +378,10 @@ class QmOctave(QmOctaveBase["QuantumMachine", "RunningQmJob"]):
 
 class QmOctaveForNewApi(QmOctaveBase["QmApi", "JobApi"]):
     def _update_element_parameters(
-        self, qe: Element[QuaConfigMixInputs], lo_cal: AbstractLOCalibration, if_cal: AbstractIFCalibration
+        self,
+        qe: Element[inc_qua_config_pb2.QuaConfig.MixInputs],
+        lo_cal: AbstractLOCalibration,
+        if_cal: AbstractIFCalibration,
     ) -> None:
         assert isinstance(qe.input, UpconvertedInput)
         update = create_dc_offset_octave_update(qe.input, i_offset=lo_cal.get_i0(), q_offset=lo_cal.get_q0())

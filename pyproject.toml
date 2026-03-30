@@ -4,7 +4,7 @@ description = "QUA language SDK to control a Quantum Computer"
 readme = "README.md"
 authors = [{ name = "Quantum Machines", email = "info@quantum-machines.co"}]
 license = "BSD-3-Clause"
-dynamic = [ "classifiers" ]
+dynamic = [ "classifiers", "version" ]
 
 [project.urls]
 Homepage = "https://www.quantum-machines.co/"
@@ -29,50 +29,48 @@ include = [
     "LICENSE",
     {path="qm/io/**/*", format=["sdist", "wheel"]},
     {path="qm/grpc/**/*.py", format=["sdist", "wheel"]},
+    {path="qm/grpc/**/*.pyi", format=["sdist", "wheel"]},
     {path="qm/grpc/VERSION", format=["sdist", "wheel"]},
 ]
 
+
 [tool.poetry.dependencies]
-python = ">=3.9, <3.13"
+python = ">=3.9, <3.14"
 grpcio = "^1.57"
-protobuf = ">=4, <7"
-betterproto = "2.0.0b7"
-marshmallow = ">=3,<3.24"
+protobuf = ">=4.25, <7"
+marshmallow = ">=3,<4"
 marshmallow-polyfield = "^5.7"
 numpy = "<3"
 tinydb = "^4.6.1"
 certifi = { version = "*", optional = true }
 datadog-api-client = "^2.6.0"
-dependency_injector = "^4.41.0"
-qm-octave = "2.1.6"
 typing-extensions = "^4.5"
 
-grpclib = { version = "^0.4.5", python = ">=3.10", allow-prereleases = true }
-plotly = "^5.13.0"
+plotly = ">=5"
 httpx = { version = ">=0.27.0,<1", extras = ["http2"] }  # Note: httpx 0.28.0+ has reported issues in Jupyter notebooks. Make sure to test if considering further version restrictions.
+multidict = "^6.7.0"
 
 [tool.poetry.group.dev.dependencies]
-poetry ="<=2.1.3"
-grpcio-tools = "^1.57"
-
-coverage = "^7.0.1"
+boto3 = "^1.42.30"
+poethepoet = "^0.16.0"
+grpcio-tools = "==1.68.1"
 pytest-asyncio = "^0.20.3"
 pytest-benchmark = { extras = ["aspect"], version = "^4.0.0" }
-
-black = "^22.6.0"
-flake8 = "^3.9.2"
 pytest = "^7.0.0"
 pytest-cov = "^4.0.0"
-flake8-bugbear = "^21.11.29"
-poethepoet = "^0.16.0"
 pytest-order = "^1.0.0"
+pytest-xdist = "^3.8"
+poetry ="<=2.1.3"
+coverage = "^7.0.1"
+black = "^22.6.0"
+flake8 = "^3.9.2"
+flake8-bugbear = "^21.11.29"
 
 apispec = "^5.1.1"
 poetry-dynamic-versioning = { extras = ["plugin"], version = "^1.0.0" }
 mypy = "^1.14"
 isort = "^5.11.5"
-boto3 = "^1.40.1"
-qm-saas = "^1.1.5"
+qm-saas = "^1.1.7"
 
 [tool.poetry.extras]
 simulation = ["certifi"]
@@ -109,40 +107,26 @@ clean-grpc.sequence = [
     { script = "os:mkdir('qm/grpc')" },
 ]
 
-move-generated-grpc.sequence = [
-    { script = "shutil:move('io', 'qm/io')" },
-    { script = "os:remove('__init__.py')" }
-]
+download-proto = "python scripts/download_proto.py"
 
-download-proto = "python scripts/download_proto.py -c ==1.2.4rc0.post22-a43f8a5"
-
-create-grpc.shell = """
-set -eu
-
-echo "Generating gRPC code from repo: $PROTO_SRC_PATH/proto"
-
-python -m grpc_tools.protoc \
-  -I"$PROTO_SRC_PATH/proto" \
-  --python_betterproto_out=. \
-  $(find "$PROTO_SRC_PATH/proto/qm/pb" -name '*.proto') \
-  "$PROTO_SRC_PATH/proto/io/qualang/api/v1/info_service.proto" \
-  $(find "$PROTO_SRC_PATH/proto/qm/grpc/v2" -maxdepth 1 -name '*.proto')
-"""
+create-grpc.shell = "bash scripts/generate_grpc.sh $PROTO_SRC_PATH"
 create-grpc.args = [
   { name = "PROTO_SRC_PATH", positional = true, default = "." }
 ]
 
 copy-version-grpc = "cp proto/VERSION qm/grpc/VERSION"
+postprocess-protobuf = "python scripts/postprocess_proto_generation.py"
 
 generate-grpc-from-dir.sequence = [
     "clean-grpc",
     "create-grpc $PROTO_SRC_PATH",
-    "move-generated-grpc",
-    "copy-version-grpc"
+    "copy-version-grpc",
+    "postprocess-protobuf"
 ]
 generate-grpc-from-dir.args = [
   { name = "PROTO_SRC_PATH", positional = true, default = "./" }
 ]
+
 
 generate-grpc.sequence = [
     "clean-proto",

@@ -1,18 +1,17 @@
-from typing import List, Tuple, Union
-from typing import Iterable as IterableClass
-from typing import Optional, Collection, cast
-
-import betterproto
+from typing import Union, cast
+from collections.abc import Iterable, Collection
 
 from qm._loc import _get_loc
 from qm.type_hinting import NumberT
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.qua._dsl._type_hints import OneOrMore
 from qm.qua._dsl.variable_handling import declare
 from qm.qua._scope_management.scopes_manager import scopes_manager
-from qm.grpc.qua import QuaProgramIfStatement, QuaProgramAssignmentStatement
+from qm.utils.protobuf_utils import which_one_of, serialized_on_wire
 from qm.qua._scope_management._core_scopes import _ProgramScope, _ResultAnalysisScope
 from qm.utils import collection_has_type_int, collection_has_type_bool, collection_has_type_float
+from qm.qua._dsl.stream_processing.direct_stream_processing_interface import DirectStreamSourceInterface
 from qm.qua._expressions import (
     Scalar,
     Vector,
@@ -239,13 +238,13 @@ def elif_(expression: Scalar[bool]) -> _ElifScope:
         raise QmQuaException(
             "'elif' statement must directly follow 'if' statement - Please make sure it is aligned with the corresponding if statement."
         )
-    _, if_statement = betterproto.which_one_of(scope.statements[-1], "statement_oneof")
-    if not isinstance(if_statement, QuaProgramIfStatement):
+    _, if_statement = which_one_of(scope.statements[-1], "statement_oneof")
+    if not isinstance(if_statement, inc_qua_pb2.QuaProgram.IfStatement):
         raise QmQuaException(
             "'elif' statement must directly follow 'if' statement - Please make sure it is aligned with the corresponding if statement."
         )
 
-    if betterproto.serialized_on_wire(if_statement.else_):
+    if serialized_on_wire(getattr(if_statement, "else")):
         raise QmQuaException("'elif' must come before 'else' statement")
 
     return _ElifScope(condition=expression, if_statement=if_statement, loc=if_statement.loc)
@@ -276,20 +275,20 @@ def else_() -> _ElseScope:
             "'else' statement must directly follow 'if' statement - "
             "Please make sure it is aligned with the corresponding if statement."
         )
-    _, if_statement = betterproto.which_one_of(scope.statements[-1], "statement_oneof")
-    if not isinstance(if_statement, QuaProgramIfStatement):
+    _, if_statement = which_one_of(scope.statements[-1], "statement_oneof")
+    if not isinstance(if_statement, inc_qua_pb2.QuaProgram.IfStatement):
         raise QmQuaException(
             "'else' statement must directly follow 'if' statement - "
             "Please make sure it is aligned with the corresponding if statement."
         )
 
-    if betterproto.serialized_on_wire(if_statement.else_):
+    if serialized_on_wire(getattr(if_statement, "else")):
         raise QmQuaException("only a single 'else' statement can follow an 'if' statement")
 
     return _ElseScope(if_statement)
 
 
-def while_(cond: Optional[QuaScalar[bool]] = None) -> _ForScope:
+def while_(cond: QuaScalar[bool]) -> _ForScope:
     """While loop flow control statement in QUA.
 
     To be used with a context manager.
@@ -308,14 +307,14 @@ def while_(cond: Optional[QuaScalar[bool]] = None) -> _ForScope:
             assign(x, x+1)
         ```
     """
-    return for_(None, None, cond, None)
+    return _ForScope(None, to_scalar_pb_expression(cond), None, loc=_get_loc())
 
 
 def for_(
-    var: Optional[QuaVariable[NumberT]] = None,
-    init: Optional[Scalar[NumberT]] = None,
-    cond: Optional[QuaScalar[bool]] = None,
-    update: Optional[QuaScalar[NumberT]] = None,
+    var: Union[QuaVariable[NumberT], DirectStreamSourceInterface[NumberT]],
+    init: Scalar[NumberT],
+    cond: QuaScalar[bool],
+    update: QuaScalar[NumberT],
 ) -> _ForScope:
     """For loop flow control statement in QUA.
 
@@ -328,7 +327,7 @@ def for_(
         cond (QUA expression): an expression which evaluates to a
             boolean variable, determines if to continue to next loop
             iteration
-        update (QUA expression): an expression to add to ``var`` with
+        update (QUA expression): an expression to assign to ``var`` with
             each loop iteration
 
     Example:
@@ -338,26 +337,29 @@ def for_(
             play('pulse', 'element')
         ```
     """
-    init_statement = None
-    cond_expression = None
-    update_statement = None
+    init_statement = inc_qua_pb2.QuaProgram.AssignmentStatement(
+        target=var.assignment_statement,
+        expression=to_scalar_pb_expression(init),
+        loc=_get_loc(),
+    )
+    update_statement = inc_qua_pb2.QuaProgram.AssignmentStatement(
+        target=var.assignment_statement, expression=to_scalar_pb_expression(update), loc=_get_loc()
+    )
+    cond_expression = to_scalar_pb_expression(cond)
 
-    if var is not None and init is not None:
-        init_statement = QuaProgramAssignmentStatement(
-            target=var.assignment_statement,
-            expression=to_scalar_pb_expression(init),
-            loc=_get_loc(),
-        )
-    if var is not None and update is not None:
-        update_statement = QuaProgramAssignmentStatement(
-            target=var.assignment_statement, expression=to_scalar_pb_expression(update), loc=_get_loc()
-        )
-    if cond is not None:
-        cond_expression = to_scalar_pb_expression(cond)
-    return _ForScope(init_statement, cond_expression, update_statement, loc=_get_loc())
+    for_scope = _ForScope(init_statement, cond_expression, update_statement, loc=_get_loc())
+
+    # append save statement if var is DirectStreamSourceInterface
+    if isinstance(var, DirectStreamSourceInterface):
+        for_scope.append_statement(var.get_save_statement())
+
+    return for_scope
 
 
-def for_each_(var: OneOrMore[QuaVariable[NumberT]], values: OneOrMore[Vector[NumberT]]) -> _ForEachScope:
+def for_each_(
+    var: OneOrMore[Union[QuaVariable[NumberT], DirectStreamSourceInterface[NumberT]]],
+    values: OneOrMore[Vector[NumberT]],
+) -> _ForEachScope:
     """Flow control: Iterate over array elements in QUA.
 
     It is possible to either loop over one variable, or over a tuple of variables,
@@ -389,7 +391,7 @@ def for_each_(var: OneOrMore[QuaVariable[NumberT]], values: OneOrMore[Vector[Num
         lists.
         The first list containing the values for the first variable, and so on.
     """
-    if not isinstance(var, IterableClass):
+    if not isinstance(var, Iterable):
         var = (var,)
 
     for i, v in enumerate(var):
@@ -397,11 +399,11 @@ def for_each_(var: OneOrMore[QuaVariable[NumberT]], values: OneOrMore[Vector[Num
             raise QmQuaException(f"for_each_ var {i} must be a variable")
 
     qua_expression_cond = isinstance(values, QuaNumericExpression)
-    not_iterable_cond = not isinstance(values, (IterableClass, QuaArrayVariable))
-    tuple_of_non_iterables_cond = not isinstance(values[0], (IterableClass, QuaArrayVariable))
+    not_iterable_cond = not isinstance(values, (Iterable, QuaArrayVariable))
+    tuple_of_non_iterables_cond = not isinstance(values[0], (Iterable, QuaArrayVariable))
     if qua_expression_cond or not_iterable_cond or tuple_of_non_iterables_cond:
         values = (cast(QuaArrayVariable[NumberT], values),)
-    values = cast(Tuple[QuaArrayVariable[NumberT], ...], values)
+    values = cast(tuple[QuaArrayVariable[NumberT], ...], values)
 
     if isinstance(values, Collection) and len(values) < 1:
         raise QmQuaException("values cannot be empty")
@@ -409,7 +411,7 @@ def for_each_(var: OneOrMore[QuaVariable[NumberT]], values: OneOrMore[Vector[Num
     if len(var) != len(values):
         raise QmQuaException("number of variables does not match number of array values")
 
-    arrays: List[Union[QuaArrayVariable[bool], QuaArrayVariable[int], QuaArrayVariable[float]]] = []
+    arrays: list[Union[QuaArrayVariable[bool], QuaArrayVariable[int], QuaArrayVariable[float]]] = []
     for value in values:
         if isinstance(value, QuaArrayVariable):
             arrays.append(value)
@@ -437,8 +439,13 @@ def for_each_(var: OneOrMore[QuaVariable[NumberT]], values: OneOrMore[Vector[Num
     unwrapped_arrays = [a.unwrapped for a in arrays]
 
     iterators = [(unwrapped_vars[i], ar) for i, ar in enumerate(unwrapped_arrays)]
+    for_each_scope = _ForEachScope(iterators, loc=_get_loc())
+    # append save statements for DirectStreamSourceInterface variables
+    for v in var:
+        if isinstance(v, DirectStreamSourceInterface):
+            for_each_scope.append_statement(v.get_save_statement())
 
-    return _ForEachScope(iterators, loc=_get_loc())
+    return for_each_scope
 
 
 def infinite_loop_() -> _ForScope:

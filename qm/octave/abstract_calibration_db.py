@@ -20,6 +20,15 @@ class AbstractIFCalibration(metaclass=ABCMeta):
     def get_correction(self) -> Correction:
         pass
 
+    def get_correction_args(self) -> dict[str, float]:
+        correction = self.get_correction()
+        return {
+            "v00": correction[0],
+            "v01": correction[1],
+            "v10": correction[2],
+            "v11": correction[3],
+        }
+
 
 class AbstractCalibrationDB(metaclass=ABCMeta):
     """
@@ -32,10 +41,12 @@ class AbstractCalibrationDB(metaclass=ABCMeta):
     ) -> Optional[AbstractLOCalibration]:
         """
         Get the LO calibration for a given octave channel, LO frequency, and gain.
+
         Args:
             octave_channel: The octave channel to get the calibration for.
             lo_freq: The LO frequency to get the calibration for.
             gain: The gain to get the calibration for.
+
         Returns:
             The LO calibration for the given parameters, or None if it doesn't exist.
         """
@@ -51,11 +62,13 @@ class AbstractCalibrationDB(metaclass=ABCMeta):
     ) -> Optional[AbstractIFCalibration]:
         """
         Get the IF calibration for a given octave channel, LO frequency, gain, and IF frequency.
+
         Args:
             octave_channel: The octave channel to get the calibration for.
             lo_freq: The LO frequency to get the calibration for.
             gain: The gain to get the calibration for.
             if_freq: The IF frequency to get the calibration for.
+
         Returns:
             The IF calibration for the given parameters, or None if it doesn't exist.
         """
@@ -67,10 +80,12 @@ class AbstractCalibrationDB(metaclass=ABCMeta):
     ) -> Mapping[Union[int, float], AbstractIFCalibration]:
         """
         Get IF calibration for all IF frequencies for a given octave channel, LO frequency, and gain.
+
         Args:
             octave_channel: The octave channel to get the calibration for.
             lo_freq: The LO frequency to get the calibration for.
             gain: The gain to get the calibration for.
+
         Returns:
             A dictionary of IF frequencies to their respective IF calibration, or an empty dictionary if none exist.
         """
@@ -82,6 +97,7 @@ class AbstractCalibrationDB(metaclass=ABCMeta):
     ) -> None:
         """
         Update the calibration database with the given calibration results.
+
         Args:
             result: The calibration results to update the database with.
             octave_channel: The octave channel to update the database with.

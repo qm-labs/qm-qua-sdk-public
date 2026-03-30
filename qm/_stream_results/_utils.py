@@ -1,12 +1,12 @@
 import logging
 from io import BytesIO
-from typing import Tuple, Union, BinaryIO, cast
+from typing import Tuple, Union, cast
 
 import numpy
 import numpy.typing
-from numpy.lib import format as _format
 
 from qm.type_hinting.general import NumpyArray
+from qm.utils.numpy_utils import _write_header
 from qm.api.models.jobs import JobNamedResultHeader
 from qm.exceptions import StreamProcessingDataLossError
 
@@ -25,25 +25,6 @@ def _create_results_array(count_data_written: int, header: JobNamedResultHeader,
     writer.seek(0)
     data = cast(NumpyArray, numpy.load(writer))
     return data
-
-
-def _write_header(writer: BinaryIO, shape: Tuple[int, ...], d_type: object) -> None:
-    corrected_dtype = _fix_unsupported_dtype(d_type)
-    _format.write_array_header_2_0(writer, {"descr": corrected_dtype, "fortran_order": False, "shape": shape})  # type: ignore[no-untyped-call]
-
-
-_NP_BOOL = numpy.dtype(numpy.bool_).str
-_UNSUPPORTED_DTYPE = "bool8"
-
-
-def _fix_unsupported_dtype(d_type: object) -> object:
-    # Numpy2 stopped support for bool8, so we need to convert it to a valid bool type
-    if d_type == _UNSUPPORTED_DTYPE:
-        return _NP_BOOL
-    if isinstance(d_type, list):
-        for idx1, elem in enumerate(d_type):
-            d_type[idx1] = _fix_unsupported_dtype(elem)
-    return d_type
 
 
 def _get_final_shape(count: int, shape: Tuple[int, ...]) -> Tuple[int, ...]:

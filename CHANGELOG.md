@@ -6,16 +6,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+
+## [1.3.0a1] - 2026-03-30
+
+- Requires Python >=3.9, <3.14 
+- Tested against QOP 3.7.0
+
+
+### Added
+- QOP 3.7 - Added key `lo_mode` to the MW-FEM analog input port configuration, with the options of "auto" (default) and "always_on".
+- Added support for Python 3.13
+- Added support for plotly 6 (changed requirements to be `>=5` instead of `^5.13.0`)
+- Improved safeguards in `generate_qua_script` to prevent unintended or arbitrary code execution.
+- Added `QOP` to DevicesVersion string representation returned by `qmm.version()`.
+- Introduced the wait_for_execution_timeout argument to the execute method.
+- Introduced declare_with_stream API to create qua variables with built-in implicit stream processing.
+- Added NativeIterable, NativeIterableRange, QuaIterable, and QuaIterableRange to simplify writing QUA programs containing loops.
+
+### Changed
+- Updated the `high_pass` warning message to indicate the correct behavior and marked it as a DeprecationWarning.
+- Changed the signature of `for_` and `while_` loops so they will not hold `None` Defaults. This will prevent propagation of errors due to missing arguments.
+- Increased the default qmm timeout from 60 seconds to 120 seconds.
+- Removed betterproto dependency, grpc is now compiled with protoc.
+- Updated the timeout exception message to be more descriptive.
+- Unified the various input and output stream APIs:
+    - Input streams are declared using `declare_input_stream()`.
+    - Output streams are declared using `declare_output_stream()`.
+    - Input streams can receive data using `receive_from_stream()`.
+    - Data can be sent to output streams using `send_to_stream()`.
+- Changed the signature of `declare_input_stream()` to support OPNIC streams. This is a backward-compatible change.
+
+### Fixed
+- Fixed a bug when opening a qm with the flag `"validate_with_protobuf"=True` when the config had string keys.
+- Fixed a bug in `job.get_simulated_samples()` when using OPX+ with NumPy 2
+- Update the dependency of marshmallow to avoid a vulnerability issue.
+- Fix a bug in config validation - an element that had RF inputs or outputs, but did not have an Octave, did not raise an error.
+- Fix a bug that made an element named `""` (empty string) appear in the waveform report.
+- Using `wait_until()` on a specific state will now also return if a following state is reached. E.g., `wait_until("RUNNING")` will return if the state is "PROCESSING" or "DONE".
+
+### Deprecated
+- The `declare_stream()` function is deprecated and has been replaced by `declare_output_stream()`.
+- The `declare_external_stream()` function is deprecated and has been replaced by `declare_input_stream()` and `declare_output_stream()`.
+- The `send_to_external_stream()` function is deprecated and has been replaced by `send_to_stream()`.
+- The `receive_from_external_stream()` function is deprecated and has been replaced by `receive_from_stream()`.
+
+### Removed
+- Dropped support of 4 <= protobuf < 4.25
+
+
 ## [1.2.6] - 2026-02-25
 
 - Requires Python >=3.9, <3.13
 - Tested against QOP 2.6.0, 3.6.0, 3.6.1, 3.6.2
 
+### Fixed
+- Correctly report QOP 3.6.2 version using `qmm.version_dict()`.
 
 ## [1.2.5] - 2026-01-29
 
 - Requires Python >=3.9, <3.13
-- Tested against QOP 2.6.0, 3.6.0, 3.6.1
+- Tested against QOP 2.6.0, 3.6.1
 
 ### Fixed
 - Correctly report QOP 3.6.1 version using `qmm.version_dict()`.

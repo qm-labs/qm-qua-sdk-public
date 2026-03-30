@@ -4,9 +4,8 @@ from typing import Dict, Tuple
 
 import httpx
 from httpx import Response
-from betterproto.lib.google.protobuf import Empty
+from google.protobuf.empty_pb2 import Empty
 
-from qm.utils.async_utils import run_async
 from qm.api.models.server_details import ResponseConnectionDetails
 from qm.exceptions import QmRedirectionError, QmLocationParsingError
 
@@ -40,8 +39,8 @@ def send_redirection_check(
     host: str, port: int, headers: Dict[str, str], timeout: float, async_follow_redirects: bool, async_trust_env: bool
 ) -> ResponseConnectionDetails:
     extended_headers = {"content-type": "application/grpc", "te": "trailers", **headers}
-    response = run_async(
-        _get_httpx_response(f"http://{host}:{port}", extended_headers, timeout, async_follow_redirects, async_trust_env)
+    response = _get_httpx_response(
+        f"http://{host}:{port}", extended_headers, timeout, async_follow_redirects, async_trust_env
     )
     if response.status_code == 400:
         if headers.get("any_cluster", "false") == "false":
@@ -58,11 +57,11 @@ def send_redirection_check(
     return ResponseConnectionDetails(new_host, new_port, octaves)
 
 
-async def _get_httpx_response(
+def _get_httpx_response(
     url: str, headers: Dict[str, str], timeout: float, follow_redirects: bool, trust_env: bool
 ) -> Response:
-    async with httpx.AsyncClient(
+    with httpx.Client(
         http2=True, follow_redirects=follow_redirects, http1=False, timeout=timeout, trust_env=trust_env
     ) as client:
-        response = await client.post(url, headers=headers, content=bytes(Empty()))
+        response = client.post(url, headers=headers, content=Empty().SerializeToString())
     return response

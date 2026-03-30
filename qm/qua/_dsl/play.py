@@ -5,6 +5,7 @@ from typing import Tuple, Union, Literal, Mapping
 
 from qm._loc import _get_loc
 from qm.type_hinting import NumberT
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.qua._dsl.variable_handling import declare
 from qm.qua._dsl.measure.measure import MeasurePulseType
@@ -12,19 +13,8 @@ from qm.qua._dsl._utils import _standardize_timestamp_label
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.stream_processing.stream_processing import StreamType
 from qm.qua._expressions import Scalar, QuaArrayVariable, to_scalar_pb_expression, create_qua_scalar_expression
-from qm.grpc.qua import (
-    QuaProgramChirp,
-    QuaProgramRampPulse,
-    QuaProgramChirpUnits,
-    QuaProgramAnyStatement,
-    QuaProgramAmpMultiplier,
-    QuaProgramPlayStatement,
-    QuaProgramPulseReference,
-    QuaProgramAnyScalarExpression,
-    QuaProgramQuantumElementReference,
-)
 
-PlayPulseType = Union[MeasurePulseType, QuaProgramRampPulse]
+PlayPulseType = Union[MeasurePulseType, inc_qua_pb2.QuaProgram.RampPulse]
 
 ChirpUnits = Literal[
     "Hz/nsec",
@@ -125,7 +115,7 @@ def play(
             play('pulse1' * amp(0.5), 'element1')
             play('pulse1' * amp(v1), 'element1')
             play('pulse1' * amp(0.9, v1, -v1, 0.9), 'element_iq_pair')
-            time_stream = declare_stream()
+            time_stream = declare_output_stream()
             # Supported on QOP2.2+
             play('pulse1', 'element1', duration=16, timestamp_stream='t1')
             play('pulse1', 'element1', duration=16, timestamp_stream=time_stream)
@@ -144,41 +134,40 @@ def play(
         pulse, amp = pulse
 
     loc = _get_loc()
-    play_statement = QuaProgramPlayStatement(
+    play_statement = inc_qua_pb2.QuaProgram.PlayStatement(
         loc=loc,
-        qe=QuaProgramQuantumElementReference(name=element, loc=loc),
-        target_input=target,
+        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+        targetInput=target,
     )
-    if isinstance(pulse, QuaProgramRampPulse):
-        play_statement.ramp_pulse = QuaProgramRampPulse().from_dict(pulse.to_dict())
+    if isinstance(pulse, inc_qua_pb2.QuaProgram.RampPulse):
+        play_statement.rampPulse.CopyFrom(pulse)
     else:
-        play_statement.named_pulse = QuaProgramPulseReference(name=pulse, loc=loc)
+        play_statement.namedPulse.CopyFrom(inc_qua_pb2.QuaProgram.PulseReference(name=pulse, loc=loc))
 
     if duration_ is not None:
-        play_statement.duration = QuaProgramAnyScalarExpression().from_dict(duration_.to_dict())
+        play_statement.duration.CopyFrom(duration_)
     if condition_ is not None:
-        play_statement.condition = QuaProgramAnyScalarExpression().from_dict(condition_.to_dict())
+        play_statement.condition.CopyFrom(condition_)
     if chirp_ is not None:
-        play_statement.chirp = QuaProgramChirp().from_dict(chirp_.to_dict())
+        play_statement.chirp.CopyFrom(chirp_)
         play_statement.chirp.loc = loc
     if amp is not None:
-        play_statement.amp = QuaProgramAmpMultiplier(loc=loc, v0=amp[0])
+        play_statement.amp.CopyFrom(inc_qua_pb2.QuaProgram.AmpMultiplier(loc=loc, v0=amp[0]))
         for i in range(1, 4, 1):
             if amp[i] is not None:
-                setattr(play_statement.amp, "v" + str(i), amp[i])
+                getattr(play_statement.amp, "v" + str(i)).CopyFrom(amp[i])
     if truncate_ is not None:
-        play_statement.truncate = QuaProgramAnyScalarExpression().from_dict(truncate_.to_dict())
+        play_statement.truncate.CopyFrom(truncate_)
     if timestamp_label is not None:
-        play_statement.timestamp_label = timestamp_label
-
+        play_statement.timestampLabel = timestamp_label
     _port_condition = scopes_manager.port_condition
     if _port_condition is not None:
-        play_statement.port_condition = QuaProgramAnyScalarExpression().from_dict(_port_condition.to_dict())
+        play_statement.port_condition.CopyFrom(_port_condition)
 
-    scopes_manager.append_statement(QuaProgramAnyStatement(play=play_statement))
+    scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(play=play_statement))
 
 
-def _standardize_chirp(chirp: Optional[ChirpType], continue_chirp: bool) -> Optional[QuaProgramChirp]:
+def _standardize_chirp(chirp: Optional[ChirpType], continue_chirp: bool) -> Optional[inc_qua_pb2.QuaProgram.Chirp]:
     if chirp is None:
         return None
 
@@ -194,26 +183,26 @@ def _standardize_chirp(chirp: Optional[ChirpType], continue_chirp: bool) -> Opti
         chirp_var = [int(x) for x in chirp_var]
         chirp_var = declare(int, value=chirp_var)
 
-    chirp_obj = QuaProgramChirp()
-    chirp_obj.continue_chirp = continue_chirp
+    chirp_obj = inc_qua_pb2.QuaProgram.Chirp()
+    chirp_obj.continueChirp = continue_chirp
     if chirp_times_list is not None:
         chirp_obj.times.extend(chirp_times_list)
     if isinstance(chirp_var, QuaArrayVariable):
-        chirp_obj.array_rate = chirp_var.unwrapped
+        chirp_obj.arrayRate.CopyFrom(chirp_var.unwrapped)
     else:
-        chirp_obj.scalar_rate = to_scalar_pb_expression(chirp_var)
+        chirp_obj.scalarRate.CopyFrom(to_scalar_pb_expression(chirp_var))
 
     units_mapping: Mapping[ChirpUnits, int] = {
-        "Hz/nsec": QuaProgramChirpUnits.HzPerNanoSec,
-        "GHz/sec": QuaProgramChirpUnits.HzPerNanoSec,
-        "mHz/nsec": QuaProgramChirpUnits.mHzPerNanoSec,
-        "MHz/sec": QuaProgramChirpUnits.mHzPerNanoSec,
-        "uHz/nsec": QuaProgramChirpUnits.uHzPerNanoSec,
-        "KHz/sec": QuaProgramChirpUnits.uHzPerNanoSec,
-        "nHz/nsec": QuaProgramChirpUnits.nHzPerNanoSec,
-        "Hz/sec": QuaProgramChirpUnits.nHzPerNanoSec,
-        "pHz/nsec": QuaProgramChirpUnits.pHzPerNanoSec,
-        "mHz/sec": QuaProgramChirpUnits.pHzPerNanoSec,
+        "Hz/nsec": inc_qua_pb2.QuaProgram.Chirp.Units.HzPerNanoSec,
+        "GHz/sec": inc_qua_pb2.QuaProgram.Chirp.Units.HzPerNanoSec,
+        "mHz/nsec": inc_qua_pb2.QuaProgram.Chirp.Units.mHzPerNanoSec,
+        "MHz/sec": inc_qua_pb2.QuaProgram.Chirp.Units.mHzPerNanoSec,
+        "uHz/nsec": inc_qua_pb2.QuaProgram.Chirp.Units.uHzPerNanoSec,
+        "KHz/sec": inc_qua_pb2.QuaProgram.Chirp.Units.uHzPerNanoSec,
+        "nHz/nsec": inc_qua_pb2.QuaProgram.Chirp.Units.nHzPerNanoSec,
+        "Hz/sec": inc_qua_pb2.QuaProgram.Chirp.Units.nHzPerNanoSec,
+        "pHz/nsec": inc_qua_pb2.QuaProgram.Chirp.Units.pHzPerNanoSec,
+        "mHz/sec": inc_qua_pb2.QuaProgram.Chirp.Units.pHzPerNanoSec,
     }
 
     if chirp_units in units_mapping:
@@ -223,7 +212,7 @@ def _standardize_chirp(chirp: Optional[ChirpType], continue_chirp: bool) -> Opti
     return chirp_obj
 
 
-def ramp(v: Scalar[NumberT]) -> QuaProgramRampPulse:
+def ramp(v: Scalar[NumberT]) -> inc_qua_pb2.QuaProgram.RampPulse:
     """To be used only within a [`play`][qm.qua.play] command, instead of the `operation`.
 
     It’s possible to generate a voltage ramp by using the `ramp(slope)` command.
@@ -238,5 +227,5 @@ def ramp(v: Scalar[NumberT]) -> QuaProgramRampPulse:
         v: The slope in units of `V/ns`
     """
     value = create_qua_scalar_expression(v)
-    result = QuaProgramRampPulse(value=value.unwrapped)
+    result = inc_qua_pb2.QuaProgram.RampPulse(value=value.unwrapped)
     return result

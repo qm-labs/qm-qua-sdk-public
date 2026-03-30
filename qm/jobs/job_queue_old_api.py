@@ -2,8 +2,8 @@ import logging
 from typing import List, Tuple, Optional
 
 from qm.program.program import Program
-from qm.grpc.qua_config import QuaConfig
 from qm.api.frontend_api import FrontendApi
+from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.jobs.pending_job import QmPendingJob
 from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.compiler import CompilerOptionArguments
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class QmQueue(QmQueueBase[QmPendingJob]):
     def __init__(
         self,
-        config: QuaConfig,
+        config: inc_qua_config_pb2.QuaConfig,
         quantum_machine_id: str,
         frontend_api: FrontendApi,
         capabilities: ServerCapabilities,

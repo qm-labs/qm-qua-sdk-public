@@ -1,13 +1,14 @@
+from enum import IntEnum
 from dataclasses import fields, is_dataclass
 from typing import Any, Type, Union, get_args, get_origin, get_type_hints
 
-import betterproto
+from google.protobuf.message import Message
 
+from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.utils.config_utils import get_controller_pb_config
-from qm.grpc.qua_config import QuaConfig, QuaConfigQuaConfigV1
 
 
-def fill_defaults_in_config_v1(config: QuaConfig) -> None:
+def fill_defaults_in_config_v1(config: inc_qua_config_pb2.QuaConfig) -> None:
     """
     Since proto values for the controller configuration were made optional, a subtle bug was introduced in the older
     config version (v1). When fetching the config from the gateway, it returns None for fields with default gRPC values.
@@ -20,8 +21,8 @@ def fill_defaults_in_config_v1(config: QuaConfig) -> None:
     fail.
     """
     controller_config = get_controller_pb_config(config)
-    if isinstance(controller_config, QuaConfigQuaConfigV1):
-        for _, control_devices_data in controller_config.control_devices.items():
+    if isinstance(controller_config, inc_qua_config_pb2.QuaConfig.QuaConfigV1):
+        for _, control_devices_data in controller_config.controlDevices.items():
             _fill_defaults(control_devices_data)
 
         for _, controllers_data in controller_config.controllers.items():
@@ -36,7 +37,7 @@ FIELDS_TO_EXCLUDE = [
 PRIMITIVE_TYPES = (int, float, str, bool)
 
 
-def _fill_defaults(obj: betterproto.Message) -> None:
+def _fill_defaults(obj: Message) -> None:
     """Fill default values for fields of a single message object (with recursive functionality)."""
     if not is_dataclass(obj):
         return
@@ -82,7 +83,7 @@ def _apply_to_nested(value: Any) -> None:
     if isinstance(value, PRIMITIVE_TYPES):
         # Not nested, so we skip
         pass
-    elif isinstance(value, betterproto.Message):
+    elif isinstance(value, Message):
         _fill_defaults(value)
     # Tuples and sets aren't standard in proto, but included for forward compatibility and custom extensions.
     elif isinstance(value, list) or isinstance(value, tuple) or isinstance(value, set):
@@ -99,7 +100,7 @@ def _get_default_value(typ: Type[Any]) -> Any:
     """Return the default value for the given type."""
     if typ in PRIMITIVE_TYPES:
         return typ()  # Returns the default value for each primitive type (0 for int, etc.)
-    if isinstance(typ, type) and issubclass(typ, betterproto.Enum):
+    if isinstance(typ, type) and issubclass(typ, IntEnum):
         # For enums, the first value is the default value
         return next(iter(typ))
     return None

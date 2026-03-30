@@ -1,8 +1,7 @@
 from pathlib import Path
 from typing import Set, Union, Optional, FrozenSet
 
-from qm.grpc.qua import QuaProgram
-from qm.grpc.qua_config import QuaConfig
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.api.models.capabilities import Capability
 from qm.exceptions import ProgramScopeAccessError
 from qm.program._qua_config_schema import load_config
@@ -10,7 +9,7 @@ from qm.type_hinting.config_types import FullQuaConfig
 
 
 class Program:
-    def __init__(self, program: Optional[QuaProgram] = None) -> None:
+    def __init__(self, program: Optional[inc_qua_pb2.QuaProgram] = None) -> None:
         """
         The `Program` class encapsulates a `QuaProgram` protobuf object along with additional metadata.
         It provides properties to access the program's state, including the capabilities used and
@@ -31,7 +30,7 @@ class Program:
 
     # -------- Public API (for users) --------
     @property
-    def qua_program(self) -> QuaProgram:
+    def qua_program(self) -> inc_qua_pb2.QuaProgram:
         self._ensure_not_in_scope()
         if self._program is None:
             # This should technically never occur, but since "_program" is defined as Optional in the constructor, this check is required to satisfy mypy.
@@ -52,16 +51,18 @@ class Program:
         """
         self._ensure_not_in_scope()
         loaded_config = load_config(config)
-        copy = QuaProgram().from_dict(self.qua_program.to_dict())
-        copy.config = QuaConfig().from_dict(loaded_config.to_dict())
-        return bytes(copy)
+        copy = inc_qua_pb2.QuaProgram()
+        copy.CopyFrom(self.qua_program)
+        copy.config.CopyFrom(loaded_config)
+        return copy.SerializeToString()
 
     @classmethod
     def from_protobuf(cls, binary: bytes) -> "Program":
         """
         Deserialize the program from a protobuf binary.
         """
-        program = QuaProgram().parse(binary)
+        program = inc_qua_pb2.QuaProgram()
+        program.ParseFromString(binary)
         return cls(program=program)
 
     def to_file(self, path: Union[str, Path], config: FullQuaConfig) -> None:
@@ -86,7 +87,7 @@ class Program:
     def _set_in_scope(self) -> None:
         self._is_in_scope = True
 
-    def _set_and_exit(self, program: QuaProgram, used_capabilities: Set[Capability]) -> None:
+    def _set_and_exit(self, program: inc_qua_pb2.QuaProgram, used_capabilities: Set[Capability]) -> None:
         self._program = program
         self._used_capabilities = used_capabilities
         self._is_in_scope = False

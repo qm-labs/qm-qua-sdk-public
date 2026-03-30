@@ -3,7 +3,6 @@ import logging
 from io import BytesIO
 from typing import Union, Generic, TypeVar, BinaryIO, Optional
 
-from qm.utils.async_utils import run_async
 from qm.api.v2.job_result_api import JobResultApi
 from qm.api.job_result_api import JobResultServiceApi
 from qm.utils.general_utils import run_until_with_timeout
@@ -256,14 +255,12 @@ class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
         self, header: JobNamedResultHeader, start: int, stop: int, timeout: Optional[float]
     ) -> NumpyArray:
         data_writer = BytesIO()
-        count_data_written = run_async(self._add_results_to_writer(data_writer, start, stop, timeout))
+        count_data_written = self._add_results_to_writer(data_writer, start, stop, timeout)
         return _create_results_array(count_data_written, header, data_writer)
 
-    async def _add_results_to_writer(
-        self, data_writer: BinaryIO, start: int, stop: int, timeout: Optional[float]
-    ) -> int:
+    def _add_results_to_writer(self, data_writer: BinaryIO, start: int, stop: int, timeout: Optional[float]) -> int:
         _count_data_written = 0
-        async for result in self._service.get_job_named_result(self._schema.name, start, stop - start, timeout):
+        for result in self._service.get_job_named_result(self._schema.name, start, stop - start, timeout):
             data_writer.write(result.data)
             _count_data_written += result.count_of_items
 

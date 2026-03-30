@@ -1,7 +1,7 @@
 from math import ceil
 from typing import List, Iterable
 
-from betterproto.lib.google.protobuf import Value, ListValue
+from google.protobuf.struct_pb2 import Value, ListValue
 
 from qm.type_hinting import Number
 

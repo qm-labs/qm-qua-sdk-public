@@ -3,16 +3,15 @@ import json
 import logging
 import warnings
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import field, dataclass
 from typing import Any, Dict, List, Union, Mapping, Iterable, Optional, TypedDict, Collection
 
 import marshmallow
-from octave_sdk.octave import OctaveDetails
+import packaging.version
 
-import qm.grpc as qm_pb
+import qm
 from qm.api.v2.qm_api import QmApi
 from qm.user_config import UserConfig
-from qm.grpc.qua_config import QuaConfig
 from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
 from qm.program import Program, load_config
@@ -22,6 +21,7 @@ from qm.quantum_machine import QuantumMachine
 from qm.api.models.debug_data import DebugData
 from qm.jobs.simulated_job import SimulatedJob
 from qm.logging_utils import set_logging_level
+from qm.octave_sdk.octave import OctaveDetails
 from qm.api.v2.job_api import JobApi, JobStatus
 from qm.api.server_detector import detect_server
 from qm.simulate.interface import SimulationConfig
@@ -29,21 +29,20 @@ from qm.version import __version__ as qm_qua_version
 from qm.api.job_result_api import JobResultServiceApi
 from qm.persistence import BaseStore, SimpleFileStore
 from qm.api.models.server_details import ServerDetails
+from qm.grpc.qm.pb import frontend_pb2, inc_qua_config_pb2
 from qm.utils.config_utils import get_controller_pb_config
 from qm.octave import QmOctaveConfig, AbstractCalibrationDB
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.utils.general_utils import is_debug, parse_proto_version
 from qm._octaves_container import load_config_from_calibration_db
-from qm.api.models.info import QuaMachineInfo, ImplementationInfo
 from qm.program._qua_config_schema import validate_config_capabilities
 from qm.api.simulation_api import SimulationApi, create_simulation_request
 from qm.type_hinting.config_types import FullQuaConfig, ControllerQuaConfig
-from qm.api.models.capabilities import QopCaps, Capability, ServerCapabilities
-from qm.containers.capabilities_container import create_capabilities_container
 from qm.octave.octave_manager import OctaveManager, prep_config_for_calibration
 from qm.api.v2.qmm_api import Controller, ControllerBase, QmmApiWithDeprecations
 from qm.exceptions import QmmException, ConfigSchemaError, ConfigValidationException
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
+from qm.api.models.capabilities import QopCaps, Capability, ServerCapabilities, offline_capabilities
 
 from ._stream_results import StreamsManager
 from .program._dict_to_pb_converter import DictToQuaConfigConverter
@@ -63,10 +62,10 @@ class DevicesVersion:
     controllers: Dict[str, str]
     qm_qua: str
     octaves: Dict[str, str]
+    QOP: Optional[str] = field(init=False)
 
-    @property
-    def QOP(self) -> Optional[str]:
-        return _get_qop_version(self.gateway)
+    def __post_init__(self) -> None:
+        self.QOP = _get_qop_version(self.gateway)
 
 
 SERVER_TO_QOP_VERSION_MAP = {
@@ -102,9 +101,25 @@ SERVER_TO_QOP_VERSION_MAP = {
 
 
 def _get_qop_version(server_version: str) -> Optional[str]:
+    """Convert a QOP server version string to a semantic version.
+
+    For legacy server versions, uses a hardcoded lookup map. For newer versions,
+    parses the server version string by replacing hyphens with local version
+    separators and extracting the base version.
+
+    Args:
+        server_version: The raw version string reported by the QOP server
+            (e.g. ``"2.40-144e7bb"`` or ``"3.7.0-RC1"``).
+
+    Returns:
+        The base semantic version string (e.g. ``"2.0.0"``, ``"3.7.0"``),
+        or ``None`` if the version string cannot be parsed.
+    """
     if server_version in SERVER_TO_QOP_VERSION_MAP:
         return SERVER_TO_QOP_VERSION_MAP[server_version]
-    else:
+    try:
+        return packaging.version.parse(server_version.replace("-", "+")).base_version
+    except packaging.version.InvalidVersion:
         return None
 
 
@@ -271,7 +286,7 @@ class QuantumMachinesManager:
             async_follow_redirects=async_follow_redirects,
             async_trust_env=async_trust_env,
         )
-        create_capabilities_container(server_details.qua_implementation)
+        offline_capabilities.set_from_implementation(server_details.qua_implementation)
         return server_details
 
     @property
@@ -333,7 +348,7 @@ class QuantumMachinesManager:
 
     @staticmethod
     def _get_local_proto_version() -> str:
-        version_path = Path(qm_pb.__file__).parent / "VERSION"
+        version_path = Path(qm.__file__).parent / "grpc" / "VERSION"
         return version_path.read_text().strip()
 
     def _raise_warning_for_outdated_qm_qua_version(self) -> None:
@@ -407,7 +422,13 @@ class QuantumMachinesManager:
         )
 
     def reset_data_processing(self) -> None:
-        """Stops current data processing for ALL running jobs"""
+        """
+        Stops current data processing for all running jobs.
+
+        Warning:
+            Resetting the data processing is a disruptive operation.
+            It should be used only as a recovery measure when the system becomes unresponsive due to heavy data processing, and is not intended for routine use.
+        """
         if self._api:
             self._api.reset_data_processing()
         else:
@@ -432,6 +453,7 @@ class QuantumMachinesManager:
         When opening a QuantumMachine, the physical configuration defines the physical resources (e.g., ports), idle values (e.g., DC offsets), and port configurations.
         A full configuration (containing both logical and controller configs) can also be supplied, which will be used as the program's default.
         See the documentation website for more information.
+
         Args:
             config: The config that will be used by the Quantum Machine
             close_other_machines: When set to true, any open
@@ -496,12 +518,12 @@ class QuantumMachinesManager:
 
     def _load_config(
         self, qua_config: Union[FullQuaConfig, ControllerQuaConfig], *, disable_marshmallow_validation: bool = False
-    ) -> QuaConfig:
+    ) -> inc_qua_config_pb2.QuaConfig:
         try:
             if disable_marshmallow_validation:
                 loaded_config = DictToQuaConfigConverter(self.capabilities).convert(qua_config)
             else:
-                loaded_config = load_config(qua_config)
+                loaded_config = load_config(qua_config, capabilities=self.capabilities)
             validate_config_capabilities(loaded_config, self._caps)
             return loaded_config
         except KeyError as key_error:
@@ -513,6 +535,7 @@ class QuantumMachinesManager:
         """
         Validates a qua config based on the connected server's capabilities.
         Raises an exception if the config is invalid.
+
         Args:
             qua_config: A python dict containing the qua config to validate
         """
@@ -548,6 +571,24 @@ class QuantumMachinesManager:
             config = json.loads(json1_str, object_hook=remove_nulls)
         return self.open_qm(config, close_other_machines)
 
+    def _create_simulation_request(
+        self,
+        config: FullQuaConfig,
+        program: Program,
+        simulate: SimulationConfig,
+        compiler_options: Optional[CompilerOptionArguments] = None,
+        *,
+        strict: Optional[bool] = None,
+        flags: Optional[List[str]] = None,
+    ) -> frontend_pb2.SimulationRequest:
+        """Creates a simulate request
+        Args:
+        """
+        standardized_options = standardize_compiler_params(compiler_options, strict, flags)
+        pb_config = load_config(config)
+
+        return create_simulation_request(pb_config, program, simulate, standardized_options, self._caps)
+
     def simulate(
         self,
         config: FullQuaConfig,
@@ -575,6 +616,7 @@ class QuantumMachinesManager:
 
             job = qmm.simulate(config, prog, SimulationConfig(duration=100))
             ```
+
         Args:
             config: The full QUA configuration used to simulate the program, containing both the controller and logical configurations.
             program: A QUA ``program()`` object to execute
@@ -588,16 +630,18 @@ class QuantumMachinesManager:
         """
         self._caps.validate(program.used_capabilities)
 
-        standardized_options = standardize_compiler_params(compiler_options, strict, flags)
-        pb_config = load_config(config)
-
         if self._api:
-            request = create_simulation_request(pb_config, program, simulate, standardized_options, self._caps)
+            request = self._create_simulation_request(
+                config, program, simulate, compiler_options, strict=strict, flags=flags
+            )
+
             simulated_job = self._api.simulate(
-                request.config, request.high_level_program, request.simulate, request.controller_connections
+                request.config, request.highLevelProgram, request.simulate, request.controllerConnections
             )
             return simulated_job
         else:
+            standardized_options = standardize_compiler_params(compiler_options, strict, flags)
+            pb_config = load_config(config)
             job_id, simulated_response_part = self._simulation_api.simulate(
                 pb_config, program, simulate, standardized_options, self._caps
             )
@@ -659,8 +703,10 @@ class QuantumMachinesManager:
         -- Available in QOP 2.x --
 
         Returns the result handles for a job.
+
         Args:
             job_id: The job id
+
         Returns:
             The handles that this job generated
         """
@@ -710,14 +756,20 @@ class QuantumMachinesManager:
             return list(new_response.values())
         else:
             old_response = self._frontend.get_controllers()
-            return [Controller(message.name, message.temperature) for message in old_response]
+            return [
+                Controller(message.name, message.temperature if message.HasField("temperature") else None)
+                for message in old_response
+            ]
 
     def _get_controllers_as_dict(self) -> Mapping[str, ControllerBase]:
         if self._api:
             return self._api.get_controllers()
         else:
             old_response = self._frontend.get_controllers()
-            return {message.name: Controller(message.name, message.temperature) for message in old_response}
+            return {
+                message.name: Controller(message.name, message.temperature if message.HasField("temperature") else None)
+                for message in old_response
+            }
 
     def get_devices(self) -> Devices:
         controllers = self._get_controllers_as_dict()
@@ -764,6 +816,7 @@ class QuantumMachinesManager:
             user_ids: A list of user ids
             description: Jobs' description
             status: A list of job statuses
+
         Returns:
             A list of jobs
         """
@@ -781,6 +834,7 @@ class QuantumMachinesManager:
 
         Args:
             job_id: A list of jobs ids
+
         Returns:
             The job
         """
@@ -819,5 +873,4 @@ class QuantumMachinesManager:
         elif isinstance(capabilities, ServerCapabilities):
             capabilities = capabilities.supported_capabilities
 
-        capabilities_qop_names = [cap.qop_name for cap in capabilities]
-        create_capabilities_container(QuaMachineInfo(capabilities_qop_names, ImplementationInfo("", "", "")))
+        offline_capabilities.set(capabilities)

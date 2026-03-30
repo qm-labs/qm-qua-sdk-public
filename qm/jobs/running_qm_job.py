@@ -4,7 +4,7 @@ from typing import Tuple
 
 from qm.jobs.base_job import QmBaseJob
 from qm.utils import deprecation_message
-from qm.grpc.general_messages import Matrix
+from qm.grpc.qm.pb import general_messages_pb2
 from qm.api.job_result_api import JobResultServiceApi
 from qm._report import ExecutionError, ExecutionReport
 
@@ -89,7 +89,7 @@ class RunningQmJob(QmBaseJob):
             An AcquiringStatus enum object
         """
         status = self._job_manager.is_data_acquiring(self._id)
-        return AcquiringStatus(status.value)
+        return AcquiringStatus(status)
 
     def execution_report(self) -> ExecutionReport:
         """Get runtime errors report for this job. See [Runtime errors](../Guides/error.md#runtime-errors).
@@ -129,7 +129,9 @@ class RunningQmJob(QmBaseJob):
         Returns:
             The correction matrix, after rounding to the OPX resolution.
         """
-        correction_matrix = Matrix(v00=correction[0], v01=correction[1], v10=correction[2], v11=correction[3])
+        correction_matrix = general_messages_pb2.Matrix(
+            v00=correction[0], v01=correction[1], v10=correction[2], v11=correction[3]
+        )
 
         return self._job_manager.set_element_correction(self._id, element, correction_matrix)
 

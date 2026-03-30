@@ -3,22 +3,23 @@ import types
 import logging
 import datetime
 import traceback
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Callable, Optional
 
-import betterproto
 import numpy as np
 from marshmallow import ValidationError
+from google.protobuf.message import Message
+from google.protobuf.json_format import MessageToDict, MessageToJson
 
-from qm.grpc import qua
 from qm.program import load_config
-from qm.grpc.qua_config import QuaConfig
 from qm.utils.protobuf_utils import Node
 from qm import Program, FullQuaConfig, version
-from qm.program.ConfigBuilder import convert_msg_to_config
+from qm.grpc.qm.pb.inc_qua_pb2 import QuaProgram
+from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
+from qm.api.models.capabilities import offline_capabilities
 from qm.serialization.qua_node_visitor import QuaNodeVisitor
+from qm.program._dict_to_pb_converter import DictToQuaConfigConverter
 from qm.utils.list_compression_utils import Chunk, split_list_to_chunks
 from qm.serialization.qua_serializing_visitor import QuaSerializingVisitor
-from qm.grpc.qua import QuaProgram, QuaResultAnalysis, QuaProgramCompilerOptions
 from qm.exceptions import ConfigValidationException, ConfigSerializationException, CapabilitiesNotInitializedError
 
 SERIALIZATION_VALIDATION_ERROR = "SERIALIZATION VALIDATION ERROR"
@@ -28,7 +29,6 @@ LOADED_CONFIG_ERROR = "LOADED CONFIG SERIALIZATION ERROR"
 CONFIG_ERROR = "CONFIG SERIALIZATION ERROR"
 
 SERIALIZATION_NOT_COMPLETE = "SERIALIZATION WAS NOT COMPLETE"
-
 
 logger = logging.getLogger(__name__)
 
@@ -40,18 +40,29 @@ def standardize_program_for_comparison(prog: QuaProgram) -> QuaProgram:
     2. the names of the variables, as long as the commands are the same.
     3. the order of the variables in the result analysis
     """
-    prog.result_analysis = QuaResultAnalysis().from_dict(prog.result_analysis.to_dict())
-    prog.compiler_options = QuaProgramCompilerOptions()
-    StripLocationVisitor.strip(prog)
-    RenameStreamVisitor().visit(prog)
-    prog.result_analysis.model = sorted(prog.result_analysis.model, key=str)
-    return prog
+    prog_copy = QuaProgram()
+    prog_copy.CopyFrom(prog)
+
+    StripLocationVisitor.strip(prog_copy)
+    RenameStreamVisitor().visit(prog_copy)
+
+    # Sort the model list in result analysis
+    # Note: In regular protobuf, repeated fields are lists, so we need to sort them differently
+    model_list = list(prog_copy.resultAnalysis.model)
+    model_list.sort(key=str)
+
+    # Clear and repopulate the sorted list
+    prog_copy.resultAnalysis.ClearField("model")
+    for item in model_list:
+        prog_copy.resultAnalysis.model.append(item)
+
+    return prog_copy
 
 
 def assert_programs_are_equal(prog1: QuaProgram, prog2: QuaProgram) -> None:
     prog1 = standardize_program_for_comparison(prog1)
     prog2 = standardize_program_for_comparison(prog2)
-    assert prog1.to_dict() == prog2.to_dict()
+    assert MessageToDict(prog1) == MessageToDict(prog2)
 
 
 def generate_qua_script(prog: Program, config: Optional[FullQuaConfig] = None) -> str:
@@ -64,15 +75,17 @@ def generate_qua_script(prog: Program, config: Optional[FullQuaConfig] = None) -
             proto_config = load_config(config)
         except (ConfigValidationException, ValidationError) as e:
             raise RuntimeError("Can not generate script - bad config") from e
-        except CapabilitiesNotInitializedError:
-            logger.warning("Could not generate a loaded config. Maybe there is no `QuantumMachinesManager` instance?")
+        except CapabilitiesNotInitializedError as e:
+            logger.warning(f"Could not generate a loaded config. {e}")
 
     proto_prog = prog.qua_program
     return _generate_qua_script_pb(proto_prog, proto_config, config)
 
 
 def _generate_qua_script_pb(
-    proto_prog: QuaProgram, proto_config: Optional[QuaConfig], original_config: Optional[FullQuaConfig]
+    proto_prog: QuaProgram,
+    proto_config: Optional[QuaConfig],
+    original_config: Optional[FullQuaConfig],
 ) -> str:
     extra_info = ""
     serialized_program = ""
@@ -89,7 +102,8 @@ def _generate_qua_script_pb(
     pretty_proto_config = None
     if proto_config is not None:
         try:
-            normalized_config = convert_msg_to_config(proto_config)
+            converter = DictToQuaConfigConverter(capabilities=offline_capabilities)
+            normalized_config = converter.deconvert(proto_config)
             pretty_proto_config = _print_config(normalized_config)
         except Exception as e:
             trace = traceback.format_exception(*sys.exc_info())
@@ -118,21 +132,95 @@ loaded_config = {pretty_proto_config}
 """
 
 
-def _validate_program(old_prog: QuaProgram, serialized_program: str) -> str:
+def _execute_program_safely(serialized_program: str) -> types.ModuleType:
+    """Execute serialized QUA program in a restricted environment.
+
+    This function provides defense-in-depth security by:
+    1. Restricting available builtins to prevent dangerous operations
+    2. Allowing only safe imports (qm.* and typing modules)
+    3. Blocking access to exec, eval, open, __import__, and other dangerous functions
+
+    Args:
+        serialized_program: The QUA Python code to execute
+
+    Returns:
+        The module containing the executed program (with 'prog' attribute)
+
+    Raises:
+        ImportError: If code attempts to import non-whitelisted modules
+        NameError: If code attempts to use blocked builtin functions
+        Any exceptions from the executed code itself
+    """
+    # Save reference to real import for restricted wrapper
+    # __builtins__ can be either a module or a dict depending on context
+    if isinstance(__builtins__, dict):
+        real_import = __builtins__["__import__"]
+    else:
+        real_import = __builtins__.__import__
+
+    def safe_import(
+        name: str,
+        globals: Optional[Mapping[str, Any]] = None,
+        locals: Optional[Mapping[str, Any]] = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> types.ModuleType:
+        """Only allow importing from qm.* and typing modules."""
+        if name in ("typing",) or name.startswith("qm.") or name == "qm":
+            return real_import(name, globals, locals, fromlist, level)
+        raise ImportError(f"Import of '{name}' is not allowed for security reasons")
+
+    # Create restricted environment with safe builtins
+    # Allow essential Python types and functions that are safe
+    safe_builtins = {
+        "__import__": safe_import,
+        "__build_class__": __build_class__,  # Needed for class definitions
+        # Boolean and None
+        "True": True,
+        "False": False,
+        "None": None,
+        # Basic types
+        "int": int,
+        "float": float,
+        "bool": bool,
+        "str": str,
+        "list": list,
+        "tuple": tuple,
+        "dict": dict,
+        "set": set,
+        # Utility functions
+        "all": all,
+        "any": any,
+        "hasattr": hasattr,
+        "getattr": getattr,
+        "repr": repr,
+        "type": type,
+        # Note: Dangerous functions like exec, eval, open, compile, __import__ (raw),
+        # input, file operations are intentionally omitted
+    }
+
     generated_mod = types.ModuleType("gen")
+    generated_mod.__dict__["__builtins__"] = safe_builtins
+
     # In Python 3.8 and 3.9, the tests fail with a KeyError because "gen" is missing.
     if sys.version_info < (3, 10):
         sys.modules["gen"] = generated_mod
 
-    exec(serialized_program, generated_mod.__dict__)
-    sys.modules.pop("gen", None)
+    try:
+        exec(serialized_program, generated_mod.__dict__)
+    finally:
+        sys.modules.pop("gen", None)
 
+    return generated_mod
+
+
+def _validate_program(old_prog: QuaProgram, serialized_program: str) -> str:
+    generated_mod = _execute_program_safely(serialized_program)
     new_prog = generated_mod.prog.qua_program
     try:
         assert_programs_are_equal(old_prog, new_prog)
         return ""
     except AssertionError:
-
         new_prog_str = _program_string(new_prog)
         old_prog_str = _program_string(old_prog)
         new_prog_str = new_prog_str.replace("\n", "")
@@ -168,7 +256,7 @@ def _program_string(prog: QuaProgram) -> str:
     """Will create a canonized string representation of the program"""
     strip_location_visitor = StripLocationVisitor()
     strip_location_visitor.visit(prog)
-    string = prog.to_json(2)
+    string = MessageToJson(prog, indent=2)
     return string
 
 
@@ -256,7 +344,7 @@ class StripLocationVisitor(QuaNodeVisitor):
     def _default_enter(self, node: Node) -> bool:
         if hasattr(node, "loc"):
             node.loc = "stripped"
-        return isinstance(node, betterproto.Message)
+        return isinstance(node, Message)
 
     @staticmethod
     def strip(node: Node) -> None:
@@ -279,18 +367,34 @@ class RenameStreamVisitor(QuaNodeVisitor):
         self._old_to_new_map[curr_s] = new_name
         return new_name
 
-    def visit_qm_grpc_qua_QuaProgramMeasureStatement(self, node: qua.QuaProgramMeasureStatement) -> None:
-        if node.stream_as:
-            node.stream_as = self._change_var_name(node.stream_as)
-        if node.timestamp_label:
-            node.timestamp_label = self._change_var_name(node.timestamp_label)
+    @property
+    def _node_to_visit(self) -> Mapping[type, Callable[[Any], None]]:
+        return {
+            QuaProgram.MeasureStatement: self.visit_qm_pb_inc_qua_pb2_QuaProgram_MeasureStatement,
+            QuaProgram.SaveStatement: self.visit_qm_pb_inc_qua_pb2_QuaProgram_SaveStatement,
+        }
 
-    def visit_qm_grpc_qua_QuaProgramSaveStatement(self, node: qua.QuaProgramSaveStatement) -> None:
-        if node.tag:
+    def visit_qm_pb_inc_qua_pb2_QuaProgram_MeasureStatement(self, node: QuaProgram.MeasureStatement) -> None:
+        # In regular protobuf, check if field is set before accessing
+        if node.streamAs != "":
+            node.streamAs = self._change_var_name(node.streamAs)
+        if node.timestampLabel != "":
+            node.timestampLabel = self._change_var_name(node.timestampLabel)
+
+    def visit_qm_pb_inc_qua_pb2_QuaProgram_SaveStatement(self, node: QuaProgram.SaveStatement) -> None:
+        # In regular protobuf, check if field is set before accessing
+        if node.tag != "":
             node.tag = self._change_var_name(node.tag)
 
     def _default_enter(self, node: Node) -> bool:
-        """This function is for the Value of betterproto. There is a chance we can visit the object directly"""
-        if hasattr(node, "string_value") and node.string_value and node.string_value in self._old_to_new_map:
+        """This function is for the Value of google.protobuf. There is a chance we can visit the object directly"""
+
+        if (
+            isinstance(node, Message)
+            and hasattr(node, "string_value")
+            and node.HasField("string_value")
+            and node.string_value  # Check if field is set in regular protobuf
+            and node.string_value in self._old_to_new_map
+        ):
             node.string_value = self._old_to_new_map[node.string_value]
-        return isinstance(node, betterproto.Message)
+        return isinstance(node, Message)

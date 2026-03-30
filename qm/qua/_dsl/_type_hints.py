@@ -1,11 +1,11 @@
 from typing import Union, TypeVar, Sequence
 
-from qm.grpc.qua import QuaProgramVarRefExpression, QuaProgramAnyScalarExpression
+from qm.grpc.qm.pb import inc_qua_pb2
 
 # The public name for the QuaProgramAnyScalarExpression type.
-MessageExpressionType = QuaProgramAnyScalarExpression
+MessageExpressionType = inc_qua_pb2.QuaProgram.AnyScalarExpression
 
-MessageVarType = QuaProgramVarRefExpression
+MessageVarType = inc_qua_pb2.QuaProgram.VarRefExpression
 
 T = TypeVar("T")
 OneOrMore = Union[T, Sequence[T]]

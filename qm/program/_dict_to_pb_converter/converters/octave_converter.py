@@ -1,5 +1,6 @@
 from typing import Union, Optional
 
+from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.api.models.capabilities import OPX_FEM_IDX
 from qm.program._dict_to_pb_converter.base_converter import BaseDictToPbConverter
 from qm.exceptions import InvalidOctaveParameter, ConfigValidationException, OctaveConnectionAmbiguity
@@ -13,23 +14,6 @@ from qm.type_hinting.config_types import (
     OctaveIfOutputsConfigType,
     OctaveSingleIfOutputConfigType,
 )
-from qm.grpc.qua_config import (
-    QuaConfigOctaveConfig,
-    QuaConfigOctaveIfMode,
-    QuaConfigOctaveLoopback,
-    QuaConfigAdcPortReference,
-    QuaConfigDacPortReference,
-    QuaConfigOctaveLoopbackInput,
-    QuaConfigOctaveLoSourceInput,
-    QuaConfigOctaveRfInputConfig,
-    QuaConfigOctaveRfOutputConfig,
-    QuaConfigOctaveIfOutputsConfig,
-    QuaConfigOctaveSynthesizerPort,
-    QuaConfigOctaveOutputSwitchState,
-    QuaConfigOctaveSingleIfOutputConfig,
-    QuaConfigOctaveDownconverterRfSource,
-    QuaConfigOctaveSynthesizerOutputName,
-)
 
 ALLOWED_GAINS = {x / 2 for x in range(-40, 41)}
 
@@ -37,14 +21,14 @@ IF_OUT1_DEFAULT = "out1"
 IF_OUT2_DEFAULT = "out2"
 
 
-class OctaveConverter(BaseDictToPbConverter[OctaveConfigType, QuaConfigOctaveConfig]):
-    def convert(self, input_data: OctaveConfigType) -> QuaConfigOctaveConfig:
+class OctaveConverter(BaseDictToPbConverter[OctaveConfigType, inc_qua_config_pb2.QuaConfig.Octave.Config]):
+    def convert(self, input_data: OctaveConfigType) -> inc_qua_config_pb2.QuaConfig.Octave.Config:
         return self.octave_to_pb(input_data)
 
-    def deconvert(self, output_data: QuaConfigOctaveConfig) -> OctaveConfigType:
+    def deconvert(self, output_data: inc_qua_config_pb2.QuaConfig.Octave.Config) -> OctaveConfigType:
         raise NotImplementedError("Conversion of the octave configuration to dictionary is not available.")
 
-    def octave_to_pb(self, data: OctaveConfigType) -> QuaConfigOctaveConfig:
+    def octave_to_pb(self, data: OctaveConfigType) -> inc_qua_config_pb2.QuaConfig.Octave.Config:
         connectivity = data.get("connectivity", None)
         if isinstance(connectivity, str):
             connectivity = (connectivity, OPX_FEM_IDX)
@@ -57,7 +41,7 @@ class OctaveConverter(BaseDictToPbConverter[OctaveConfigType, QuaConfigOctaveCon
         if_outputs = self._octave_if_outputs_to_pb(
             self.standardize_connectivity_for_if_out(data.get("IF_outputs", {}), connectivity)
         )
-        return QuaConfigOctaveConfig(
+        return inc_qua_config_pb2.QuaConfig.Octave.Config(
             loopbacks=loopbacks,
             rf_outputs=rf_modules,
             rf_inputs=rf_inputs,
@@ -65,13 +49,15 @@ class OctaveConverter(BaseDictToPbConverter[OctaveConfigType, QuaConfigOctaveCon
         )
 
     @staticmethod
-    def get_octave_loopbacks(data: list[LoopbackType]) -> list[QuaConfigOctaveLoopback]:
+    def get_octave_loopbacks(data: list[LoopbackType]) -> list[inc_qua_config_pb2.QuaConfig.Octave.Loopback]:
         loopbacks = [
-            QuaConfigOctaveLoopback(
-                lo_source_input=QuaConfigOctaveLoopbackInput[loopback[1]],
-                lo_source_generator=QuaConfigOctaveSynthesizerPort(
+            inc_qua_config_pb2.QuaConfig.Octave.Loopback(
+                lo_source_input=getattr(inc_qua_config_pb2.QuaConfig.Octave.LoopbackInput, loopback[1]),
+                lo_source_generator=inc_qua_config_pb2.QuaConfig.Octave.SynthesizerPort(
                     device_name=loopback[0][0],
-                    port_name=QuaConfigOctaveSynthesizerOutputName[loopback[0][1].lower()],
+                    port_name=getattr(
+                        inc_qua_config_pb2.QuaConfig.Octave.SynthesizerOutputName, loopback[0][1].lower()
+                    ),
                 ),
             )
             for loopback in data
@@ -114,7 +100,7 @@ class OctaveConverter(BaseDictToPbConverter[OctaveConfigType, QuaConfigOctaveCon
             raise ConfigValidationException(f"LO frequency {lo_freq} is out of range")
         return lo_freq
 
-    def rf_module_to_pb(self, data: OctaveRFOutputConfigType) -> QuaConfigOctaveRfOutputConfig:
+    def rf_module_to_pb(self, data: OctaveRFOutputConfigType) -> inc_qua_config_pb2.QuaConfig.Octave.RFOutputConfig:
         input_attenuators = data.get("input_attenuators", "OFF").upper()
         if input_attenuators not in {"ON", "OFF"}:
             raise ConfigValidationException("input_attenuators must be either ON or OFF")
@@ -125,56 +111,74 @@ class OctaveConverter(BaseDictToPbConverter[OctaveConfigType, QuaConfigOctaveCon
             raise ConfigValidationException(
                 f"Gain should be an integer or half-integer between -20 and 20, got {gain})"
             )
-        to_return = QuaConfigOctaveRfOutputConfig(
-            lo_frequency=self._get_lo_frequency(data),
-            lo_source=QuaConfigOctaveLoSourceInput[data.get("LO_source", "internal").lower()],
-            output_mode=QuaConfigOctaveOutputSwitchState[data.get("output_mode", "always_off").lower()],
+        output_mode = getattr(
+            inc_qua_config_pb2.QuaConfig.Octave.OutputSwitchState, data.get("output_mode", "always_off").lower()
+        )
+        lo_source = getattr(
+            inc_qua_config_pb2.QuaConfig.Octave.LOSourceInput, data.get("LO_source", "internal").lower()
+        )
+        to_return = inc_qua_config_pb2.QuaConfig.Octave.RFOutputConfig(
+            LO_frequency=self._get_lo_frequency(data),
+            LO_source=lo_source,
+            output_mode=output_mode,
             gain=gain,
             input_attenuators=input_attenuators == "ON",
         )
         if "I_connection" in data:
-            to_return.i_connection = dac_port_ref_to_pb(*_get_port_reference_with_fem(data["I_connection"]))
+            to_return.I_connection.CopyFrom(dac_port_ref_to_pb(*_get_port_reference_with_fem(data["I_connection"])))
         if "Q_connection" in data:
-            to_return.q_connection = dac_port_ref_to_pb(*_get_port_reference_with_fem(data["Q_connection"]))
+            to_return.Q_connection.CopyFrom(dac_port_ref_to_pb(*_get_port_reference_with_fem(data["Q_connection"])))
         return to_return
 
-    def rf_input_to_pb(self, data: OctaveRFInputConfigType, input_idx: int = 0) -> QuaConfigOctaveRfInputConfig:
+    def rf_input_to_pb(
+        self, data: OctaveRFInputConfigType, input_idx: int = 0
+    ) -> inc_qua_config_pb2.QuaConfig.Octave.RFInputConfig:
         input_idx_to_default_lo_source = {0: "not_set", 1: "internal", 2: "external"}  # 0 here is just for the default
-        rf_source = QuaConfigOctaveDownconverterRfSource[data.get("RF_source", "RF_in").lower()]  # type: ignore[valid-type]
-        if input_idx == 1 and rf_source != QuaConfigOctaveDownconverterRfSource.rf_in:
+        rf_source = getattr(
+            inc_qua_config_pb2.QuaConfig.Octave.DownconverterRFSource, data.get("RF_source", "RF_in").lower()
+        )
+        if input_idx == 1 and rf_source != inc_qua_config_pb2.QuaConfig.Octave.DownconverterRFSource.rf_in:
             raise InvalidOctaveParameter("Downconverter 1 must be connected to RF-in")
 
-        lo_source = QuaConfigOctaveLoSourceInput[data.get("LO_source", input_idx_to_default_lo_source[input_idx]).lower()]  # type: ignore[valid-type]
-        if input_idx == 2 and lo_source == QuaConfigOctaveLoSourceInput.internal:
+        lo_source = getattr(
+            inc_qua_config_pb2.QuaConfig.Octave.LOSourceInput,
+            data.get("LO_source", input_idx_to_default_lo_source[input_idx]).lower(),
+        )
+        if input_idx == 2 and lo_source == inc_qua_config_pb2.QuaConfig.Octave.LOSourceInput.internal:
             raise InvalidOctaveParameter("Downconverter 2 does not have internal LO")
 
-        to_return = QuaConfigOctaveRfInputConfig(
-            rf_source=rf_source,
-            lo_frequency=self._get_lo_frequency(data),
-            lo_source=lo_source,
-            if_mode_i=QuaConfigOctaveIfMode[data.get("IF_mode_I", "direct").lower()],
-            if_mode_q=QuaConfigOctaveIfMode[data.get("IF_mode_Q", "direct").lower()],
+        to_return = inc_qua_config_pb2.QuaConfig.Octave.RFInputConfig(
+            RF_source=rf_source,
+            LO_frequency=self._get_lo_frequency(data),
+            LO_source=lo_source,
+            IF_mode_I=getattr(inc_qua_config_pb2.QuaConfig.Octave.IFMode, data.get("IF_mode_I", "direct").lower()),
+            IF_mode_Q=getattr(inc_qua_config_pb2.QuaConfig.Octave.IFMode, data.get("IF_mode_Q", "direct").lower()),
         )
         return to_return
 
     @staticmethod
-    def single_if_output_to_pb(data: OctaveSingleIfOutputConfigType) -> QuaConfigOctaveSingleIfOutputConfig:
+    def single_if_output_to_pb(
+        data: OctaveSingleIfOutputConfigType,
+    ) -> inc_qua_config_pb2.QuaConfig.Octave.SingleIFOutputConfig:
         controller, fem, number = _get_port_reference_with_fem(data["port"])
-        return QuaConfigOctaveSingleIfOutputConfig(
-            port=QuaConfigAdcPortReference(controller=controller, fem=fem, number=number), name=data["name"]
+        return inc_qua_config_pb2.QuaConfig.Octave.SingleIFOutputConfig(
+            port=inc_qua_config_pb2.QuaConfig.AdcPortReference(controller=controller, fem=fem, number=number),
+            name=data["name"],
         )
 
-    def _octave_if_outputs_to_pb(self, data: OctaveIfOutputsConfigType) -> QuaConfigOctaveIfOutputsConfig:
-        inst = QuaConfigOctaveIfOutputsConfig()
+    def _octave_if_outputs_to_pb(
+        self, data: OctaveIfOutputsConfigType
+    ) -> inc_qua_config_pb2.QuaConfig.Octave.IFOutputsConfig:
+        inst = inc_qua_config_pb2.QuaConfig.Octave.IFOutputsConfig()
         if "IF_out1" in data:
-            inst.if_out1 = self.single_if_output_to_pb(data["IF_out1"])
+            inst.IF_out1.CopyFrom(self.single_if_output_to_pb(data["IF_out1"]))
         if "IF_out2" in data:
-            inst.if_out2 = self.single_if_output_to_pb(data["IF_out2"])
+            inst.IF_out2.CopyFrom(self.single_if_output_to_pb(data["IF_out2"]))
         return inst
 
 
-def dac_port_ref_to_pb(controller: str, fem: int, number: int) -> QuaConfigDacPortReference:
-    return QuaConfigDacPortReference(controller=controller, fem=fem, number=number)
+def dac_port_ref_to_pb(controller: str, fem: int, number: int) -> inc_qua_config_pb2.QuaConfig.DacPortReference:
+    return inc_qua_config_pb2.QuaConfig.DacPortReference(controller=controller, fem=fem, number=number)
 
 
 def _get_port_reference_with_fem(reference: PortReferenceType) -> StandardPort:

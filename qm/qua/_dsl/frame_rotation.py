@@ -1,19 +1,10 @@
 from typing import Union
 
 from qm._loc import _get_loc
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.api.models.capabilities import QopCaps
 from qm.qua._expressions import Scalar, to_scalar_pb_expression
 from qm.qua._scope_management.scopes_manager import scopes_manager
-from qm.grpc.qua import (
-    QuaProgramAnyStatement,
-    QuaProgramVarRefExpression,
-    QuaProgramZRotationStatement,
-    QuaProgramAnyScalarExpression,
-    QuaProgramResetFrameStatement,
-    QuaProgramArrayVarRefExpression,
-    QuaProgramQuantumElementReference,
-    QuaProgramFastFrameRotationStatement,
-)
 
 
 def frame_rotation(angle: Union[Scalar[float]], *elements: str) -> None:
@@ -39,7 +30,7 @@ def frame_rotation(angle: Union[Scalar[float]], *elements: str) -> None:
             all of their oscillators' phases will be shifted
 
     """
-    if isinstance(angle, (QuaProgramArrayVarRefExpression, QuaProgramVarRefExpression)):
+    if isinstance(angle, (inc_qua_pb2.QuaProgram.ArrayVarRefExpression, inc_qua_pb2.QuaProgram.VarRefExpression)):
         raise TypeError(f"angle cannot be of type {type(angle)}")
     frame_rotation_2pi(angle * 0.15915494309189535, *elements)
 
@@ -67,11 +58,11 @@ def frame_rotation_2pi(angle: Scalar[float], *elements: str) -> None:
     """
     loc = _get_loc()
     for element in elements:
-        statement = QuaProgramAnyStatement(
-            z_rotation=QuaProgramZRotationStatement(
+        statement = inc_qua_pb2.QuaProgram.AnyStatement(
+            zRotation=inc_qua_pb2.QuaProgram.ZRotationStatement(
                 loc=loc,
-                value=QuaProgramAnyScalarExpression().from_dict(to_scalar_pb_expression(angle).to_dict()),
-                qe=QuaProgramQuantumElementReference(name=element, loc=loc),
+                value=to_scalar_pb_expression(angle),
+                qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
             )
         )
         scopes_manager.append_statement(statement)
@@ -90,10 +81,10 @@ def reset_frame(*elements: str) -> None:
     """
     loc = _get_loc()
     for element in elements:
-        statement = QuaProgramAnyStatement(
-            reset_frame=QuaProgramResetFrameStatement(
+        statement = inc_qua_pb2.QuaProgram.AnyStatement(
+            resetFrame=inc_qua_pb2.QuaProgram.ResetFrameStatement(
                 loc=loc,
-                qe=QuaProgramQuantumElementReference(name=element, loc=loc),
+                qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
             )
         )
         scopes_manager.append_statement(statement)
@@ -125,12 +116,12 @@ def fast_frame_rotation(cosine: Scalar[float], sine: Scalar[float], *elements: s
     scopes_manager.program_scope.add_used_capability(QopCaps.fast_frame_rotation)
     loc = _get_loc()
     for element in elements:
-        statement = QuaProgramAnyStatement(
-            fast_frame_rotation=QuaProgramFastFrameRotationStatement(
+        statement = inc_qua_pb2.QuaProgram.AnyStatement(
+            fastFrameRotation=inc_qua_pb2.QuaProgram.FastFrameRotationStatement(
                 loc=loc,
                 cosine=to_scalar_pb_expression(cosine),
                 sine=to_scalar_pb_expression(sine),
-                qe=QuaProgramQuantumElementReference(name=element, loc=loc),
+                qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
             )
         )
         scopes_manager.append_statement(statement)

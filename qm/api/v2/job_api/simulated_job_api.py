@@ -1,34 +1,20 @@
 from collections import defaultdict
 from typing import Dict, List, Union, Optional, Sequence
 
-import betterproto
-from betterproto.lib.std.google.protobuf import Struct
+from google.protobuf.struct_pb2 import Struct
 
 from qm.api.v2.job_api import JobApi
-from qm.utils.async_utils import run_async
+from qm.grpc.qm.grpc.v2 import job_api_pb2
 from qm.waveform_report import WaveformReport
 from qm.utils.config_utils import get_fem_config
-from qm.grpc.frontend import SimulatedResponsePart
+from qm.utils.protobuf_utils import which_one_of
 from qm.jobs.simulated_job import extract_struct_value
 from qm.api.models.server_details import ConnectionDetails
+from qm.grpc.qm.pb import frontend_pb2, inc_qua_config_pb2
 from qm.api.v2.job_api.job_api import JobApiWithDeprecations
 from qm.exceptions import QopResponseError, QMSimulationError
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm._stream_results import SimulatorSamples, SimulatorControllerSamples
-from qm.grpc.qua_config import (
-    QuaConfigControllerDec,
-    QuaConfigOctoDacFemDec,
-    QuaConfigMicrowaveFemDec,
-    QuaConfigAdcPortReference,
-)
-from qm.grpc.v2 import (
-    PullSamplesRequest,
-    GetWaveformReportRequest,
-    PullSamplesResponsePullSamplesResponseSuccess,
-    PullSamplesResponsePullSamplesResponseSuccessLf,
-    PullSamplesResponsePullSamplesResponseSuccessMw,
-    PullSamplesResponsePullSamplesResponseSuccessMode,
-)
 
 
 class SimulatedJobApi(JobApi):
@@ -36,7 +22,7 @@ class SimulatedJobApi(JobApi):
         self,
         connection_details: ConnectionDetails,
         job_id: str,
-        simulated_response: Optional[SimulatedResponsePart],
+        simulated_response: Optional[frontend_pb2.SimulatedResponsePart],
         capabilities: ServerCapabilities,
     ) -> None:
         super().__init__(connection_details, job_id, capabilities)
@@ -46,19 +32,21 @@ class SimulatedJobApi(JobApi):
         # during the creation of the SimulatedJobApi. This if statement is checking this case.
         # TODO: Remove the support for this flow in QOP 3.6
         if not capabilities.supports(QopCaps.waveform_report_endpoint) and simulated_response:
-            self._waveform_report = self._build_waveform_report(simulated_response.waveform_report)
+            self._waveform_report = self._build_waveform_report(simulated_response.waveformReport)
 
     def _build_waveform_report(self, raw_waveform_report: Struct) -> WaveformReport:
         return WaveformReport.from_dict(extract_struct_value(raw_waveform_report), self.id)
 
     def _get_raw_waveform_report_from_api(self) -> Struct:
-        request = GetWaveformReportRequest(self.id)
+        request = job_api_pb2.GetWaveformReportRequest(job_id=self.id)
         try:
-            response = self._run(self._stub.get_waveform_report(request, timeout=self._timeout))
+            success: job_api_pb2.GetWaveformReportResponse.GetWaveformReportSuccess = self._run(
+                self._stub.GetWaveformReport, request, timeout=self._timeout
+            )
         except QopResponseError as e:
             raise QMSimulationError("Error while getting waveform report from API. Error: " + str(e))
 
-        return response.waveform_report
+        return success.waveformReport
 
     def get_simulated_waveform_report(self) -> WaveformReport:
         if self._waveform_report is None:
@@ -67,14 +55,16 @@ class SimulatedJobApi(JobApi):
 
         return self._waveform_report
 
-    async def _pull_simulator_samples(
+    def _pull_simulator_samples(
         self, include_analog: bool, include_digital: bool
-    ) -> Dict[str, List[PullSamplesResponsePullSamplesResponseSuccess]]:
-        request = PullSamplesRequest(self._id, include_analog, include_digital)
+    ) -> Dict[str, List[job_api_pb2.PullSamplesResponse.PullSamplesResponseSuccess]]:
+        request = job_api_pb2.PullSamplesRequest(
+            job_id=self._id, include_analog=include_analog, include_digital=include_digital
+        )
         bare_results = defaultdict(list)
-        async for result in self._run_async_iterator(self._stub.pull_samples, request, timeout=self._timeout):
-            _, response = betterproto.which_one_of(result, "response_oneof")
-            if isinstance(response, PullSamplesResponsePullSamplesResponseSuccess):
+        for result in self._stub.PullSamples(request, timeout=self._timeout):
+            _, response = which_one_of(result, "response_oneof")
+            if isinstance(response, job_api_pb2.PullSamplesResponse.PullSamplesResponseSuccess):
                 bare_results[response.controller].append(response)
             else:
                 raise QMSimulationError("Error while pulling samples")
@@ -83,7 +73,7 @@ class SimulatedJobApi(JobApi):
     def get_simulated_samples(self, include_analog: bool = True, include_digital: bool = True) -> SimulatorSamples:
         config = self._get_pb_config()
 
-        results_by_controller = run_async(self._pull_simulator_samples(include_analog, include_digital))
+        results_by_controller = self._pull_simulator_samples(include_analog, include_digital)
         controller_to_samples = {}
         for controller, responses in results_by_controller.items():
             analog: Dict[str, Sequence[Union[float, complex]]] = {}
@@ -92,16 +82,18 @@ class SimulatedJobApi(JobApi):
             for response in responses:
                 fem_config = get_fem_config(
                     config,
-                    QuaConfigAdcPortReference(controller=controller, fem=response.fem_id, number=response.port_id),
+                    inc_qua_config_pb2.QuaConfig.AdcPortReference(
+                        controller=controller, fem=response.fem_id, number=response.port_id
+                    ),
                 )
                 key = f"{response.fem_id}-{response.port_id}"
-                if response.mode == PullSamplesResponsePullSamplesResponseSuccessMode.ANALOG:
-                    if isinstance(fem_config, QuaConfigControllerDec):
+                if response.mode == job_api_pb2.PullSamplesResponse.PullSamplesResponseSuccess.Mode.ANALOG:
+                    if isinstance(fem_config, inc_qua_config_pb2.QuaConfig.ControllerDec):
                         analog_sampling_rate[key] = 1e9
-                    elif isinstance(fem_config, QuaConfigOctoDacFemDec):
+                    elif isinstance(fem_config, inc_qua_config_pb2.QuaConfig.OctoDacFemDec):
                         analog_sampling_rate[key] = 2e9
-                    elif isinstance(fem_config, QuaConfigMicrowaveFemDec):
-                        sampling_rate = fem_config.analog_outputs[response.port_id].sampling_rate
+                    elif isinstance(fem_config, inc_qua_config_pb2.QuaConfig.MicrowaveFemDec):
+                        sampling_rate = fem_config.analogOutputs[response.port_id].samplingRate
                         assert (
                             sampling_rate is not None
                         )  # Mypy thinks it can be None, but it can't really (sampling_rate has a default value)
@@ -111,10 +103,10 @@ class SimulatedJobApi(JobApi):
                         raise QMSimulationError(f"Unknown FEM type: {fem_config}")
 
                     samples = response.double_data
-                    _, data = betterproto.which_one_of(samples, "output")
-                    if isinstance(data, PullSamplesResponsePullSamplesResponseSuccessMw):
-                        analog[f"{key}-{data.duc_id}"] = [x + 1j * y for x, y in zip(data.i, data.q)]
-                    elif isinstance(data, PullSamplesResponsePullSamplesResponseSuccessLf):
+                    _, data = which_one_of(samples, "output")
+                    if isinstance(data, job_api_pb2.PullSamplesResponse.PullSamplesResponseSuccess.mw):
+                        analog[f"{key}-{data.ducId}"] = [x + 1j * y for x, y in zip(data.I, data.Q)]
+                    elif isinstance(data, job_api_pb2.PullSamplesResponse.PullSamplesResponseSuccess.lf):
                         analog[key] = data.items
                 else:
                     digital[key] = response.boolean_data.data[0].item

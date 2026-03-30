@@ -4,16 +4,10 @@ from typing import Union, Generic
 import numpy
 
 from qm.api.frontend_api import FrontendApi
+from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.elements.element_outputs import ElementOutput
 from qm.elements.up_converted_input import UpconvertedInputNewApi
 from qm.elements.element_inputs import ElementInput, ElementInputGRPCType
-from qm.grpc.qua_config import (
-    QuaConfigMixInputs,
-    QuaConfigElementDec,
-    QuaConfigSingleInput,
-    QuaConfigMultipleInputs,
-    QuaConfigSingleInputCollection,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +16,7 @@ class Element(Generic[ElementInputGRPCType]):
     def __init__(
         self,
         name: str,
-        config: QuaConfigElementDec,
+        config: inc_qua_config_pb2.QuaConfig.ElementDec,
         api: FrontendApi,
         machine_id: str,
         element_input: ElementInput[ElementInputGRPCType],
@@ -48,27 +42,27 @@ class Element(Generic[ElementInputGRPCType]):
         freq = float(freq)
         logger.debug(f"Setting element '{self._name}' intermediate frequency to '{freq}'.")
         self._frontend.set_intermediate_frequency(self._id, self._name, freq)
-        self._config.intermediate_frequency_double = float(freq) if self._set_frequency_as_double else 0.0
-        self._config.intermediate_frequency = int(freq)
+        self._config.intermediateFrequencyDouble = float(freq) if self._set_frequency_as_double else 0.0
+        self._config.intermediateFrequency.value = int(freq)
 
     @property
     def intermediate_frequency(self) -> float:
-        sign: int = (-1) ** self._config.intermediate_frequency_negative
+        sign: int = (-1) ** self._config.intermediateFrequencyNegative
         if self._set_frequency_as_double:
-            freq = self._config.intermediate_frequency_double
+            freq = self._config.intermediateFrequencyDouble
         else:
-            freq = float(self._config.intermediate_frequency or 0)
+            freq = float(self._config.intermediateFrequency.value or 0)
         return sign * freq
 
     def get_output_digital_delay(self, digital_input_name: str) -> int:
         try:
-            return self._config.digital_inputs[digital_input_name].delay
+            return self._config.digitalInputs[digital_input_name].delay
         except KeyError:
             raise Exception(f"Digital input for {digital_input_name} was not found.")
 
     def get_output_digital_buffer(self, digital_input_name: str) -> int:
         try:
-            return self._config.digital_inputs[digital_input_name].buffer
+            return self._config.digitalInputs[digital_input_name].buffer
         except KeyError:
             raise Exception(f"Digital buffer for {digital_input_name} was not found.")
 
@@ -79,7 +73,7 @@ class Element(Generic[ElementInputGRPCType]):
             raise Exception("delay must be an int")
         logger.debug(f"Setting delay of digital port '{digital_input}' on element '{self._name}' to '{delay}'")
         self._frontend.set_output_digital_delay(self._id, self._name, digital_input, delay)
-        self._config.digital_inputs[digital_input].delay = delay
+        self._config.digitalInputs[digital_input].delay = delay
 
     def set_output_digital_buffer(self, digital_input: str, buffer: int) -> None:
         if not isinstance(digital_input, str):
@@ -88,7 +82,7 @@ class Element(Generic[ElementInputGRPCType]):
             raise Exception("buffer must be an int.")
         logger.debug(f"Setting buffer of digital port '{digital_input}' on element '{self._name}' to '{buffer}'")
         self._frontend.set_output_digital_buffer(self._id, self._name, digital_input, buffer)
-        self._config.digital_inputs[digital_input].buffer = buffer
+        self._config.digitalInputs[digital_input].buffer = buffer
 
     def set_input_dc_offset(self, output: str, offset: float) -> None:
         logger.debug(f"Setting DC offset of output '{output}' on element '{self._name}' to '{offset}'.")
@@ -103,18 +97,18 @@ class Element(Generic[ElementInputGRPCType]):
 
     @property
     def time_of_flight(self) -> int:
-        return self._config.time_of_flight or 0
+        return self._config.timeOfFlight.value or 0
 
     @property
     def smearing(self) -> int:
-        return self._config.smearing or 0
+        return self._config.smearing.value or 0
 
 
-class NewApiUpconvertedElement(Element[QuaConfigMixInputs]):
+class NewApiUpconvertedElement(Element[inc_qua_config_pb2.QuaConfig.MixInputs]):
     def __init__(
         self,
         name: str,
-        config: QuaConfigElementDec,
+        config: inc_qua_config_pb2.QuaConfig.ElementDec,
         element_input: UpconvertedInputNewApi,
         element_output: ElementOutput,
         set_frequency_as_double: bool,
@@ -147,9 +141,9 @@ class NewApiUpconvertedElement(Element[QuaConfigMixInputs]):
 
 
 AllElements = Union[
-    Element[QuaConfigSingleInput],
-    Element[QuaConfigMixInputs],
-    Element[QuaConfigSingleInputCollection],
-    Element[QuaConfigMultipleInputs],
+    Element[inc_qua_config_pb2.QuaConfig.SingleInput],
+    Element[inc_qua_config_pb2.QuaConfig.MixInputs],
+    Element[inc_qua_config_pb2.QuaConfig.SingleInputCollection],
+    Element[inc_qua_config_pb2.QuaConfig.MultipleInputs],
     Element[None],
 ]

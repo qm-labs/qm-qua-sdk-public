@@ -1,20 +1,11 @@
 from typing import Tuple, Union, Optional
 
-from betterproto.lib.std.google.protobuf import Empty
+from google.protobuf.empty_pb2 import Empty
 
 from qm._loc import _get_loc
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._expressions import Scalar, QuaVariable, to_scalar_pb_expression
-from qm.grpc.qua import (
-    QuaProgramAnyStatement,
-    QuaProgramWaitStatement,
-    QuaProgramAlignStatement,
-    QuaProgramPauseStatement,
-    QuaProgramAnyScalarExpression,
-    QuaProgramQuantumElementReference,
-    QuaProgramWaitForTriggerStatement,
-    QuaProgramWaitForTriggerStatementElementOutput,
-)
 
 
 def pause() -> None:
@@ -22,8 +13,8 @@ def pause() -> None:
 
     The quantum machines freezes on its current output state.
     """
-    statement = QuaProgramPauseStatement(loc=_get_loc(), qes=[])
-    scopes_manager.append_statement(QuaProgramAnyStatement(pause=statement))
+    statement = inc_qua_pb2.QuaProgram.PauseStatement(loc=_get_loc(), qes=[])
+    scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(pause=statement))
 
 
 def wait(duration: Scalar[int], *elements: str) -> None:
@@ -49,12 +40,14 @@ def wait(duration: Scalar[int], *elements: str) -> None:
         experiments, the actual wait time should always be verified with a simulator.
     """
     loc = _get_loc()
-    statement = QuaProgramWaitStatement(
+    time = inc_qua_pb2.QuaProgram.AnyScalarExpression()
+    time.CopyFrom(to_scalar_pb_expression(duration))
+    statement = inc_qua_pb2.QuaProgram.WaitStatement(
         loc=loc,
-        time=QuaProgramAnyScalarExpression().from_dict(to_scalar_pb_expression(duration).to_dict()),
-        qe=[QuaProgramQuantumElementReference(name=element, loc=loc) for element in elements],
+        time=time,
+        qe=[inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc) for element in elements],
     )
-    scopes_manager.append_statement(QuaProgramAnyStatement(wait=statement))
+    scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(wait=statement))
 
 
 def wait_for_trigger(
@@ -90,29 +83,29 @@ def wait_for_trigger(
     time_tag_target_pb = None if time_tag_target is None else time_tag_target.unwrapped.variable
 
     loc = _get_loc()
-    statement = QuaProgramAnyStatement(
-        wait_for_trigger=QuaProgramWaitForTriggerStatement(
+    statement = inc_qua_pb2.QuaProgram.AnyStatement(
+        waitForTrigger=inc_qua_pb2.QuaProgram.WaitForTriggerStatement(
             loc=loc,
-            qe=[QuaProgramQuantumElementReference(name=element, loc=loc)],
+            qe=[inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc)],
         )
     )
 
     if pulse_to_play is not None:
-        statement.wait_for_trigger.pulse_to_play.name = pulse_to_play
+        statement.waitForTrigger.pulseToPlay.name = pulse_to_play
     if trigger_element is not None:
         if isinstance(trigger_element, tuple):
             el, out = trigger_element
-            statement.wait_for_trigger.element_output = QuaProgramWaitForTriggerStatementElementOutput(
-                element=el, output=out
+            statement.waitForTrigger.elementOutput.CopyFrom(
+                inc_qua_pb2.QuaProgram.WaitForTriggerStatement.ElementOutput(element=el, output=out)
             )
         else:
-            statement.wait_for_trigger.element_output = QuaProgramWaitForTriggerStatementElementOutput(
-                element=trigger_element
+            statement.waitForTrigger.elementOutput.CopyFrom(
+                inc_qua_pb2.QuaProgram.WaitForTriggerStatement.ElementOutput(element=trigger_element)
             )
     else:
-        statement.wait_for_trigger.global_trigger = Empty()
+        statement.waitForTrigger.globalTrigger.CopyFrom(Empty())
     if time_tag_target_pb is not None:
-        statement.wait_for_trigger.time_tag_target = time_tag_target_pb
+        statement.waitForTrigger.timeTagTarget.CopyFrom(time_tag_target_pb)
 
     scopes_manager.append_statement(statement)
 
@@ -129,8 +122,8 @@ def align(*elements: str) -> None:
         *elements (str): a single element, multiple elements, or none
     """
     loc = _get_loc()
-    statement = QuaProgramAlignStatement(
+    statement = inc_qua_pb2.QuaProgram.AlignStatement(
         loc=loc,
-        qe=[QuaProgramQuantumElementReference(name=element, loc=loc) for element in elements],
+        qe=[inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc) for element in elements],
     )
-    scopes_manager.append_statement(QuaProgramAnyStatement(align=statement))
+    scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(align=statement))

@@ -3,7 +3,7 @@ from typing import Any, List, Sized, Union
 from marshmallow import Schema, ValidationError, fields, post_load
 from marshmallow_polyfield import PolyField  # type: ignore[import-untyped]
 
-from qm.grpc.frontend import WaveformOverride, ExecutionOverrides
+from qm.grpc.qm.pb import frontend_pb2
 from qm.type_hinting.execution_overrides import ExecutionOverridesType
 
 
@@ -31,13 +31,13 @@ class ExecutionOverridesSchema(Schema):
     )
 
     @post_load(pass_many=False)
-    def build(self, data: ExecutionOverridesType, **kwargs: Any) -> ExecutionOverrides:
+    def build(self, data: ExecutionOverridesType, **kwargs: Any) -> frontend_pb2.ExecutionOverrides:
         result = {}
 
         waveforms = data.get("waveforms", {})
 
         for k, v in waveforms.items():
             samples = v if isinstance(v, list) else [v]
-            result[k] = WaveformOverride(samples=samples)
+            result[k] = frontend_pb2.WaveformOverride(samples=samples)
 
-        return ExecutionOverrides(waveforms=result)
+        return frontend_pb2.ExecutionOverrides(waveforms=result)

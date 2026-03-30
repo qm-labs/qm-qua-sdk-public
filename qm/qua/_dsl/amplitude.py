@@ -1,7 +1,7 @@
 from typing import Tuple, Optional, overload
 
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
-from qm.grpc.qua import QuaProgramAnyScalarExpression
 from qm.qua._dsl._type_hints import MessageExpressionType
 from qm.qua._expressions import Scalar, to_scalar_pb_expression
 
@@ -18,10 +18,10 @@ AmpValuesType = Tuple[
 class _PulseAmp:
     def __init__(
         self,
-        v1: QuaProgramAnyScalarExpression,
-        v2: Optional[QuaProgramAnyScalarExpression],
-        v3: Optional[QuaProgramAnyScalarExpression],
-        v4: Optional[QuaProgramAnyScalarExpression],
+        v1: inc_qua_pb2.QuaProgram.AnyScalarExpression,
+        v2: Optional[inc_qua_pb2.QuaProgram.AnyScalarExpression],
+        v3: Optional[inc_qua_pb2.QuaProgram.AnyScalarExpression],
+        v4: Optional[inc_qua_pb2.QuaProgram.AnyScalarExpression],
     ):
         if v1 is None:
             raise QmQuaException("amp can be one value or a matrix of 4")
@@ -100,7 +100,7 @@ def amp(
             the `pulse` associated with the `operation`.
     """
 
-    def _cast_number(v: Optional[Scalar[float]]) -> Optional[QuaProgramAnyScalarExpression]:
+    def _cast_number(v: Optional[Scalar[float]]) -> Optional[inc_qua_pb2.QuaProgram.AnyScalarExpression]:
         if v is None:
             return None
         return to_scalar_pb_expression(v)

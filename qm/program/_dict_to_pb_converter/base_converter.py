@@ -2,13 +2,14 @@ from copy import copy
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Type, Generic, Mapping, TypeVar, Optional, Collection, cast
 
-import betterproto
+from google.protobuf.message import Message
 
 from qm.exceptions import ConfigValidationException
+from qm.utils.protobuf_utils import assign_to_proto
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 
 InputType = TypeVar("InputType", bound=Mapping[str, Any])
-OutputType = TypeVar("OutputType", bound=betterproto.Message)
+OutputType = TypeVar("OutputType", bound=Message)
 T = TypeVar("T", bound=Mapping[str, Any])
 
 
@@ -55,12 +56,12 @@ class BaseDictToPbConverter(Generic[InputType, OutputType], ABC):
 
     def _set_pb_attr_config_v2(
         self,
-        item: betterproto.Message,
+        item: Message,
         value: Any,
         v1_attr: str,
         v2_attr: str,
         allow_nones: bool = False,
-        create_container: Optional[Type[betterproto.Message]] = None,
+        create_container: Optional[Type[Message]] = None,
     ) -> None:
         if not hasattr(item, v1_attr) or not hasattr(item, v2_attr):
             raise AttributeError(f"Either {v1_attr} or {v2_attr} do not exist in {item}")
@@ -75,12 +76,17 @@ class BaseDictToPbConverter(Generic[InputType, OutputType], ABC):
                 container_message = create_container()
                 setattr(item, v2_attr, container_message)
 
-            if not hasattr(container_message, "value"):
-                raise AttributeError(f"{v2_attr} does not have a 'value' attribute")
-
-            container_message.value = value
+            if value is not None:
+                if not hasattr(container_message, "value"):
+                    raise AttributeError(f"{v2_attr} does not have a 'value' attribute")
+                assign_to_proto(container_message, "value", value)
+            else:
+                item.ClearField(v2_attr)
         else:
-            setattr(item, v1_attr, value)
+            if value:
+                assign_to_proto(item, v1_attr, value)
+            else:
+                item.ClearField(v1_attr)
 
     @staticmethod
     def _validate_required_fields(config: Mapping[str, Any], fields: List[str], parent_field: str) -> None:
@@ -92,7 +98,7 @@ class BaseDictToPbConverter(Generic[InputType, OutputType], ABC):
     def _validate_unsupported_params(
         data: Collection[str],
         unsupported_params: Collection[str],
-        supported_params: Collection[str],
+        supported_params: Collection[str] = (),
         supported_from: Optional[str] = None,
         supported_until: Optional[str] = None,
     ) -> None:
@@ -104,7 +110,8 @@ class BaseDictToPbConverter(Generic[InputType, OutputType], ABC):
             else:
                 raise ValueError("Either 'supported_from' or 'supported_until' must be provided.")
 
-            raise ConfigValidationException(
-                f"The configuration keys {unsupported_params} are {unsupported_message}. "
-                f"Use the keys {supported_params} instead."
-            )
+            error_message = f"The configuration keys {unsupported_params} are {unsupported_message}."
+            if supported_params:
+                error_message += f" Use the keys {supported_params} instead."
+
+            raise ConfigValidationException(error_message)

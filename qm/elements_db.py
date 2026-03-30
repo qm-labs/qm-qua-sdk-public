@@ -1,8 +1,8 @@
-from typing import Dict, Union, Optional, overload
-
-import betterproto
+from typing import Dict, Union, Optional, MutableMapping, overload
 
 from qm.api.frontend_api import FrontendApi
+from qm.grpc.qm.pb import inc_qua_config_pb2
+from qm.utils.protobuf_utils import which_one_of
 from qm._octaves_container import OctavesContainer
 from qm.octave.octave_config import QmOctaveConfig
 from qm.utils.config_utils import get_logical_pb_config
@@ -17,16 +17,6 @@ from qm.elements.element_inputs import (
     MultipleInputs,
     ElementInputGRPCType,
     SingleInputCollection,
-)
-from qm.grpc.qua_config import (
-    QuaConfig,
-    QuaConfigMixInputs,
-    QuaConfigElementDec,
-    QuaConfigSingleInput,
-    QuaConfigMultipleInputs,
-    QuaConfigGeneralPortReference,
-    QuaConfigSingleInputCollection,
-    QuaConfigMicrowaveInputPortReference,
 )
 
 
@@ -48,7 +38,7 @@ class ElementsDB(Dict[str, AllElements]):
 
 
 def init_elements(
-    pb_config: QuaConfig,
+    pb_config: inc_qua_config_pb2.QuaConfig,
     frontend_api: FrontendApi,
     machine_id: str,
     capabilities: ServerCapabilities,
@@ -58,11 +48,12 @@ def init_elements(
     _octave_container = OctavesContainer(pb_config, capabilities, octave_config)
     logical_config = get_logical_pb_config(pb_config)
     for name, element_config in logical_config.elements.items():
-        _, element_inputs = betterproto.which_one_of(element_config, "element_inputs_one_of")
+        _, element_inputs = which_one_of(element_config, "element_inputs_one_of")
         input_inst = _get_element_input(
             element_config, element_inputs, name, frontend_api, machine_id, _octave_container
         )
-        rf_output = _get_element_rf_output(element_config.rf_outputs, _octave_container)
+
+        rf_output = _get_element_rf_output(element_config.RFOutputs, _octave_container)
 
         elements[name] = Element(
             name=name,
@@ -78,7 +69,7 @@ def init_elements(
 
 @overload
 def _get_element_input(
-    element_config: QuaConfigElementDec,
+    element_config: inc_qua_config_pb2.QuaConfig.ElementDec,
     element_inputs: None,
     name: str,
     frontend_api: FrontendApi,
@@ -90,8 +81,8 @@ def _get_element_input(
 
 @overload
 def _get_element_input(
-    element_config: QuaConfigElementDec,
-    element_inputs: QuaConfigMixInputs,
+    element_config: inc_qua_config_pb2.QuaConfig.ElementDec,
+    element_inputs: inc_qua_config_pb2.QuaConfig.MixInputs,
     name: str,
     frontend_api: FrontendApi,
     machine_id: str,
@@ -102,8 +93,8 @@ def _get_element_input(
 
 @overload
 def _get_element_input(
-    element_config: QuaConfigElementDec,
-    element_inputs: QuaConfigSingleInput,
+    element_config: inc_qua_config_pb2.QuaConfig.ElementDec,
+    element_inputs: inc_qua_config_pb2.QuaConfig.SingleInput,
     name: str,
     frontend_api: FrontendApi,
     machine_id: str,
@@ -114,8 +105,8 @@ def _get_element_input(
 
 @overload
 def _get_element_input(
-    element_config: QuaConfigElementDec,
-    element_inputs: QuaConfigMultipleInputs,
+    element_config: inc_qua_config_pb2.QuaConfig.ElementDec,
+    element_inputs: inc_qua_config_pb2.QuaConfig.MultipleInputs,
     name: str,
     frontend_api: FrontendApi,
     machine_id: str,
@@ -126,8 +117,8 @@ def _get_element_input(
 
 @overload
 def _get_element_input(
-    element_config: QuaConfigElementDec,
-    element_inputs: QuaConfigSingleInputCollection,
+    element_config: inc_qua_config_pb2.QuaConfig.ElementDec,
+    element_inputs: inc_qua_config_pb2.QuaConfig.SingleInputCollection,
     name: str,
     frontend_api: FrontendApi,
     machine_id: str,
@@ -138,8 +129,8 @@ def _get_element_input(
 
 @overload
 def _get_element_input(
-    element_config: QuaConfigElementDec,
-    element_inputs: QuaConfigMicrowaveInputPortReference,
+    element_config: inc_qua_config_pb2.QuaConfig.ElementDec,
+    element_inputs: inc_qua_config_pb2.QuaConfig.MicrowaveInputPortReference,
     name: str,
     frontend_api: FrontendApi,
     machine_id: str,
@@ -149,7 +140,7 @@ def _get_element_input(
 
 
 def _get_element_input(
-    element_config: QuaConfigElementDec,
+    element_config: inc_qua_config_pb2.QuaConfig.ElementDec,
     element_inputs: ElementInputGRPCType,
     name: str,
     frontend_api: FrontendApi,
@@ -158,21 +149,22 @@ def _get_element_input(
 ) -> Union[NoInput, MixInputs, SingleInput, MultipleInputs, SingleInputCollection, MicrowaveInput]:
     if element_inputs is None:
         return NoInput(name, element_inputs, frontend_api, machine_id)
-    if isinstance(element_inputs, QuaConfigMixInputs):
+    if isinstance(element_inputs, inc_qua_config_pb2.QuaConfig.MixInputs):
         return octave_container.create_mix_inputs(element_config, name, frontend_api, machine_id)
-    if isinstance(element_inputs, QuaConfigSingleInput):
+    if isinstance(element_inputs, inc_qua_config_pb2.QuaConfig.SingleInput):
         return SingleInput(name, element_inputs, frontend_api, machine_id)
-    if isinstance(element_inputs, QuaConfigMultipleInputs):
+    if isinstance(element_inputs, inc_qua_config_pb2.QuaConfig.MultipleInputs):
         return MultipleInputs(name, element_inputs, frontend_api, machine_id)
-    if isinstance(element_inputs, QuaConfigSingleInputCollection):
+    if isinstance(element_inputs, inc_qua_config_pb2.QuaConfig.SingleInputCollection):
         return SingleInputCollection(name, element_inputs, frontend_api, machine_id)
-    if isinstance(element_inputs, QuaConfigMicrowaveInputPortReference):
+    if isinstance(element_inputs, inc_qua_config_pb2.QuaConfig.MicrowaveInputPortReference):
         return MicrowaveInput(name, element_inputs, frontend_api, machine_id)
     raise UnknownElementType(f"Element {name} is of unknown type - {type(element_inputs)}.")
 
 
 def _get_element_rf_output(
-    rf_outputs: Dict[str, QuaConfigGeneralPortReference], octave_container: OctavesContainer
+    rf_outputs: MutableMapping[str, inc_qua_config_pb2.QuaConfig.GeneralPortReference],
+    octave_container: OctavesContainer,
 ) -> ElementOutput:
     downconverter = octave_container.get_downconverter(rf_outputs)
     if downconverter is not None:  # I prefer isinstace, but this allows for easier testing
@@ -186,7 +178,7 @@ class UpconvertedElementsDB(Dict[str, NewApiUpconvertedElement]):
 
 
 def init_octave_elements(
-    pb_config: QuaConfig,
+    pb_config: inc_qua_config_pb2.QuaConfig,
     capabilities: ServerCapabilities,
     octave_config: Optional[QmOctaveConfig],
 ) -> UpconvertedElementsDB:
@@ -194,11 +186,11 @@ def init_octave_elements(
     _octave_container = OctavesContainer(pb_config, capabilities, octave_config)
 
     for name, element_config in get_logical_pb_config(pb_config).elements.items():
-        _, element_inputs = betterproto.which_one_of(element_config, "element_inputs_one_of")
-        if isinstance(element_inputs, QuaConfigMixInputs):
+        _, element_inputs = which_one_of(element_config, "element_inputs_one_of")
+        if isinstance(element_inputs, inc_qua_config_pb2.QuaConfig.MixInputs):
             input_inst = _octave_container.create_new_api_upconverted_input(element_config, name)
             if input_inst is not None:
-                rf_output = _get_element_rf_output(element_config.rf_outputs, _octave_container)
+                rf_output = _get_element_rf_output(element_config.RFOutputs, _octave_container)
                 elements[name] = NewApiUpconvertedElement(
                     name=name,
                     config=element_config,

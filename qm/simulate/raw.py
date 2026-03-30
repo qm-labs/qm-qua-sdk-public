@@ -1,15 +1,13 @@
 from typing import List, Tuple, cast
 
+from qm.grpc.qm.pb import frontend_pb2
 from qm.api.models.capabilities import ServerCapabilities
 from qm.simulate.interface import SimulatorInterface, SupportedConnectionTypes
-from qm.grpc.frontend import (
-    SimulationRequest,
-    ExecutionRequestSimulateSimulationInterfaceRawInterface,
-    ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections,
-)
 
 
-class RawInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections]):
+class RawInterface(
+    SimulatorInterface[frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.RawInterface.Connections]
+):
     """Creates a raw interface for use in [qm.simulate.interface.SimulationConfig][].
     A raw interface defines samples that will be inputted into the OPX inputs.
 
@@ -33,7 +31,7 @@ class RawInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInterfac
     @classmethod
     def _validate_and_standardize_single_connection(
         cls, connection: SupportedConnectionTypes, fem_number_in_simulator: int
-    ) -> ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections:
+    ) -> frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.RawInterface.Connections:
         if not isinstance(connection, tuple):
             raise Exception("each connection must be of type tuple")
         if len(connection) == 4:
@@ -41,27 +39,29 @@ class RawInterface(SimulatorInterface[ExecutionRequestSimulateSimulationInterfac
                 connection, [str, int, str, list], "(from_controller, from_fem, from_port, to_samples)"
             )
             tuple_4 = cast(Tuple[str, int, int, List[float]], connection)
-            return ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections(
-                from_controller=tuple_4[0], from_fem=tuple_4[1], from_port=tuple_4[2], to_samples=tuple_4[3]
+            return frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.RawInterface.Connections(
+                fromController=tuple_4[0], fromFem=tuple_4[1], fromPort=tuple_4[2], toSamples=tuple_4[3]
             )
         if len(connection) == 3:
             cls._validate_connection_type(connection, [str, int, list], "(from_controller, from_port, to_samples)")
             tuple_3 = cast(Tuple[str, int, List[float]], connection)
-            return ExecutionRequestSimulateSimulationInterfaceRawInterfaceConnections(
-                from_controller=tuple_3[0],
-                from_fem=fem_number_in_simulator,
-                from_port=tuple_3[1],
-                to_samples=tuple_3[2],
+            return frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.RawInterface.Connections(
+                fromController=tuple_3[0],
+                fromFem=fem_number_in_simulator,
+                fromPort=tuple_3[1],
+                toSamples=tuple_3[2],
             )
         raise Exception("connection should be tuple of length of 3 or 4")
 
     def update_simulate_request(
-        self, request: SimulationRequest, capabilities: ServerCapabilities
-    ) -> SimulationRequest:
-        request.simulate.simulation_interface.raw = ExecutionRequestSimulateSimulationInterfaceRawInterface(
-            noise_power=self.noisePower,
-            connections=self._validate_and_standardize_connections(
-                self._raw_connections, capabilities.fem_number_in_simulator
-            ),
+        self, request: frontend_pb2.SimulationRequest, capabilities: ServerCapabilities
+    ) -> frontend_pb2.SimulationRequest:
+        request.simulate.simulationInterface.raw.CopyFrom(
+            frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.RawInterface(
+                noisePower=self.noisePower,
+                connections=self._validate_and_standardize_connections(
+                    self._raw_connections, capabilities.fem_number_in_simulator
+                ),
+            )
         )
         return request

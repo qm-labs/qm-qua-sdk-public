@@ -1,8 +1,8 @@
 from typing import Type
 
-from qm.grpc.v2 import JobServiceStub
 from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.api.models.server_details import ConnectionDetails
+from qm.grpc.qm.grpc.v2.job_api_pb2_grpc import JobServiceStub
 
 
 class JobGenericApi(BaseApiV2[JobServiceStub]):

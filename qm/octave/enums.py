@@ -1,5 +1,6 @@
-from octave_sdk.octave import IFMode, ClockInfo
-from octave_sdk import (
+from qm.octave_sdk.octave import IFMode, ClockInfo
+from qm.utils.deprecation_utils import throw_warning
+from qm.octave_sdk import (
     ClockType,
     OctaveOutput,
     RFOutputMode,
@@ -8,8 +9,6 @@ from octave_sdk import (
     RFInputLOSource,
     RFInputRFSource,
 )
-
-from qm.utils.deprecation_utils import throw_warning
 
 __all__ = [
     "RFInputRFSource",
@@ -25,7 +24,7 @@ __all__ = [
 
 throw_warning(
     "Octave enums should be directly imported from the octave_sdk "
-    "(IFMode, and ClockInfo are imported from octave_sdk.octave), this file (qm.octave.enums)"
+    "(IFMode, and ClockInfo are imported from qm.octave_sdk.octave), this file (qm.octave.enums)"
     "will be removed in the next version",
     category=DeprecationWarning,
 )

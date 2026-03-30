@@ -1,26 +1,17 @@
-from typing import Optional
+import warnings
 
-from dependency_injector import providers, containers
-
-from qm.api.models.info import QuaMachineInfo
-from qm.api.models.capabilities import ServerCapabilities
+from qm.utils import deprecation_message
 
 
-class CapabilitiesContainer(containers.DeclarativeContainer):
-    config = providers.Configuration()
-
-    capabilities = providers.Singleton(ServerCapabilities.build, qua_implementation=config.qua_implementation)
-
-
-def create_capabilities_container(
-    qua_implementation: Optional[QuaMachineInfo],
-) -> CapabilitiesContainer:
-    container = CapabilitiesContainer()
-    container.config.qua_implementation.from_value(qua_implementation)
-    container.wire(
-        modules=[
-            "qm.program._qua_config_schema",
-            "qm.program.ConfigBuilder",
-        ],
+def create_capabilities_container(qua_implementation: None) -> None:
+    """This is here just to check if the CI passes, SW-validation imports this function and call it with None"""
+    # TODO - tell validation to remove this call
+    warnings.warn(
+        deprecation_message(
+            "create_capabilities_container",
+            "1.2.4",
+            "1.2.5",
+            "This function does nothing, and will be removed in the next version. Please remove it",
+        )
     )
-    return container
+    return None

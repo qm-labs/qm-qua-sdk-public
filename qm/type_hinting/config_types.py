@@ -64,6 +64,8 @@ class AnalogOutputPortConfigTypeOctoDac(TypedDict, total=False):
     sampling_rate: float
     upsampling_mode: Literal["mw", "pulse"]
     output_mode: Literal["direct", "amplified"]
+    min_voltage_limit: Optional[Number]
+    max_voltage_limit: Optional[Number]
 
 
 class LfFemConfigType(TypedDict, total=False):
@@ -84,6 +86,7 @@ class MwFemAnalogInputPortConfigType(TypedDict, total=False):
     shareable: bool
     band: Band
     downconverter_frequency: float
+    lo_mode: Literal["auto", "always_on"]
 
 
 class MwUpconverterConfigType(TypedDict, total=False):

@@ -4,29 +4,23 @@ from io import BytesIO
 from typing import Any, Dict, Union, BinaryIO, Callable, Optional
 
 import numpy
-import betterproto
 import numpy.typing
-from numpy.lib import format as _format
-from betterproto.lib.google.protobuf import Value, Struct
+from google.protobuf.struct_pb2 import Value, Struct
 
 from qm.utils import deprecation_message
-from qm.utils.async_utils import run_async
+from qm.grpc.qm.grpc.v2 import job_api_pb2
 from qm.api.frontend_api import FrontendApi
 from qm.exceptions import QMSimulationError
 from qm.waveform_report import WaveformReport
 from qm.type_hinting.general import NumpyArray
+from qm.utils.numpy_utils import _write_header
 from qm.api.simulation_api import SimulationApi
 from qm.jobs.running_qm_job import RunningQmJob
-from qm.grpc.frontend import SimulatedResponsePart
+from qm.grpc.qm.pb import frontend_pb2, job_results_pb2
 from qm.api.models.capabilities import ServerCapabilities
 from qm.simulate._simulator_samples import SimulatorSamples
-from qm.grpc.v2 import PullSamplesResponsePullSamplesResponseSuccess
+from qm.utils.protobuf_utils import which_one_of, serialized_on_wire
 from qm.waveform_report._type_hints import AnalogOutputsType, DigitalOutputsType, WaveformInPortsType
-from qm.grpc.results_analyser import (
-    SimulatorSamplesResponse,
-    SimulatorSamplesResponseData,
-    SimulatorSamplesResponseHeader,
-)
 
 
 class SimulatorOutput:
@@ -37,7 +31,7 @@ class SimulatorOutput:
 
 
 def extract_value(value: Value) -> Any:
-    name, one_of = betterproto.which_one_of(value, "kind")
+    name, one_of = which_one_of(value, "kind")
     if name in VALUE_MAPPING:
         return VALUE_MAPPING[name](one_of)
 
@@ -65,20 +59,20 @@ class SimulatedJob(RunningQmJob):
         job_id: str,
         frontend_api: FrontendApi,
         capabilities: ServerCapabilities,
-        simulated_response: SimulatedResponsePart,
+        simulated_response: frontend_pb2.SimulatedResponsePart,
     ):
         super().__init__(job_id, "", frontend_api, capabilities)
         self._waveform_report: Optional[WaveformReport] = None
 
         self._simulated_analog_outputs: AnalogOutputsType = {"waveforms": None}
         self._simulated_digital_outputs: DigitalOutputsType = {"waveforms": None}
-        if betterproto.serialized_on_wire(simulated_response.analog_outputs):
-            self._simulated_analog_outputs = extract_struct_value(simulated_response.analog_outputs)
-        if betterproto.serialized_on_wire(simulated_response.digital_outputs):
-            self._simulated_digital_outputs = extract_struct_value(simulated_response.digital_outputs)
-        if betterproto.serialized_on_wire(simulated_response.waveform_report):
+        if serialized_on_wire(simulated_response.analogOutputs):
+            self._simulated_analog_outputs = extract_struct_value(simulated_response.analogOutputs)
+        if serialized_on_wire(simulated_response.digitalOutputs):
+            self._simulated_digital_outputs = extract_struct_value(simulated_response.digitalOutputs)
+        if serialized_on_wire(simulated_response.waveformReport):
             self._waveform_report = WaveformReport.from_dict(
-                extract_struct_value(simulated_response.waveform_report), self.id
+                extract_struct_value(simulated_response.waveformReport), self.id
             )
         if simulated_response.errors:
             raise QMSimulationError("\n".join(simulated_response.errors))
@@ -92,6 +86,7 @@ class SimulatedJob(RunningQmJob):
     def get_simulated_waveform_report(self) -> Optional[WaveformReport]:
         """
         Get this Job's Waveform report.
+
         Returns:
             The waveform report. `None` will be returned in case of an error.
         """
@@ -164,10 +159,10 @@ class SimulatedJob(RunningQmJob):
         )
         return self._simulated_digital_outputs["waveforms"]
 
-    async def _pull_simulator_samples(
+    def _pull_simulator_samples(
         self, include_analog: bool, include_digital: bool, writer: BinaryIO, data_writer: BinaryIO
     ) -> None:
-        async for result in self._simulation_api.pull_simulator_samples(self._id, include_analog, include_digital):
+        for result in self._simulation_api.pull_simulator_samples(self._id, include_analog, include_digital):
             if result.ok:
                 _write_simulator_result(result, writer, data_writer)
             else:
@@ -177,7 +172,7 @@ class SimulatedJob(RunningQmJob):
         writer = BytesIO()
         data_writer = BytesIO()
 
-        run_async(self._pull_simulator_samples(include_analog, include_digital, writer, data_writer))
+        self._pull_simulator_samples(include_analog, include_digital, writer, data_writer)
         return _build_np_array(writer, data_writer)
 
     def get_simulated_samples(self, include_analog: bool = True, include_digital: bool = True) -> SimulatorSamples:
@@ -239,21 +234,14 @@ class SimulatedJob(RunningQmJob):
 
 
 def _write_simulator_result(
-    result: Union[SimulatorSamplesResponse, PullSamplesResponsePullSamplesResponseSuccess],
+    result: Union[job_results_pb2.SimulatorSamplesResponse, job_api_pb2.PullSamplesResponse.PullSamplesResponseSuccess],
     writer: BinaryIO,
     data_writer: BinaryIO,
 ) -> None:
-    _, value = betterproto.which_one_of(result, "body")
-    if isinstance(value, SimulatorSamplesResponseHeader):
-        _format.write_array_header_2_0(  # type: ignore[no-untyped-call]
-            writer,
-            {
-                "descr": _json.loads(value.simple_d_type),
-                "fortran_order": False,
-                "shape": (value.count_of_items,),
-            },
-        )
-    elif isinstance(value, SimulatorSamplesResponseData):
+    _, value = which_one_of(result, "body")
+    if isinstance(value, job_results_pb2.SimulatorSamplesResponse.Header):
+        _write_header(writer, (value.countOfItems,), _json.loads(value.simpleDType))
+    elif isinstance(value, job_results_pb2.SimulatorSamplesResponse.Data):
         data_writer.write(value.data)
     else:
         raise QMSimulationError("Error while pulling samples")

@@ -3,7 +3,7 @@ import dataclasses
 from typing import Set, Optional, FrozenSet, Collection
 
 from qm.api.models.info import QuaMachineInfo
-from qm.exceptions import UnsupportedCapabilitiesError
+from qm.exceptions import UnsupportedCapabilitiesError, CapabilitiesNotInitializedError
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,6 +58,8 @@ class QopCaps:
     multiple_streams_fetching = Capability("qm.multiple_streams_fetching", "3.5")
     external_stream = Capability("qm.external_stream", "3.5", name_in_exception="declaring an external stream")
     device_temperatures = Capability("qm.device_temperatures", "3.6")
+    port_voltage_limits = Capability("qm.port_voltage_limits", "3.7")
+    lo_mode = Capability("qm.lo_mode", "3.7")
 
     @staticmethod
     def get_all() -> Set[Capability]:
@@ -124,3 +126,34 @@ class ServerCapabilities:
             supported_capabilities.update(QopCaps.qop2_caps())
 
         return cls(supported_capabilities)
+
+
+class _OfflineCapabilities(ServerCapabilities):
+    """
+    This class allows us to use some of the conversions to protobuf and QUA script generation also when user is not connected to the QOP.
+    Before this class existed, the data was stored in a singleton that was kept after the user disconnected from the QOP.
+    In the future, there is a chance we won't need this class, as the models will be independent of the capabilities.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(frozenset())
+        self._is_set = False
+
+    def supports(self, capability: Capability) -> bool:
+        if not self._is_set:
+            raise CapabilitiesNotInitializedError
+        return super().supports(capability)
+
+    def set(self, capabilities: Collection[Capability]) -> None:
+        self._supported_capabilities = frozenset(capabilities)
+        self._is_set = True
+
+    def set_from_implementation(self, implementation: Optional[QuaMachineInfo] = None) -> None:
+        """Since we want to keep a single instance of this class, we don't want to use the build function that returns a new instance"""
+        tmp = ServerCapabilities.build(implementation)
+        self.set(tmp.supported_capabilities)
+
+
+offline_capabilities = (
+    _OfflineCapabilities()
+)  # "offline" is a bit misleading as this is used in some functions as the current capabilities.

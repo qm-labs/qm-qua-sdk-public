@@ -2,7 +2,8 @@ from typing import Optional
 
 from qm.api.models.capabilities import QopCaps
 from qm.qua._scope_management.scopes_manager import scopes_manager
-from qm.qua._dsl.stream_processing.stream_processing import StreamType, ResultStreamSource, declare_stream
+from qm.qua._dsl.stream_processing.stream_processing import StreamType, ResultStreamSource
+from qm.qua._dsl.streams.output_streams.declare_output_stream import declare_output_stream
 
 
 def _standardize_timestamp_label(timestamp_stream: Optional[StreamType]) -> Optional[str]:
@@ -21,7 +22,7 @@ def _declare_save(tag: str, add_legacy_timestamp: bool = False) -> ResultStreamS
     program_scope = scopes_manager.program_scope
     result_object = program_scope.declared_streams.get(tag, None)
     if result_object is None:
-        result_object = declare_stream()
+        result_object = declare_output_stream()
         program_scope.add_stream_declaration(tag, result_object)
 
         if add_legacy_timestamp:

@@ -8,12 +8,13 @@ import numpy as np
 
 from qm._loc import _get_loc
 from qm.type_hinting import NumberT
-from qm.exceptions import QmQuaException
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.qua._dsl._utils import _declare_save
 from qm.qua._dsl._type_hints import OneOrMore
+from qm.exceptions import QmQuaException, SaveToAdcTraceException
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.stream_processing.stream_processing import ResultStreamSource
-from qm.grpc.qua import QuaProgramAnyStatement, QuaProgramSaveStatement, QuaProgramAssignmentStatement
+from qm.qua._dsl.stream_processing.direct_stream_processing_interface import DirectStreamSourceInterface
 from qm.qua._expressions import (
     NSize,
     QuaIO,
@@ -195,79 +196,6 @@ def declare(
     return result
 
 
-@overload
-def declare_input_stream(t: type[NumberT], name: str) -> QuaVariableInputStream[NumberT]:
-    ...
-
-
-@overload
-def declare_input_stream(t: type[NumberT], name: str, value: Literal[None], size: int) -> QuaArrayInputStream[NumberT]:
-    ...
-
-
-@overload
-def declare_input_stream(t: type[NumberT], name: str, *, size: int) -> QuaArrayInputStream[NumberT]:
-    ...
-
-
-@overload
-def declare_input_stream(
-    t: type[NumberT], name: str, value: Union[int, bool, float]
-) -> QuaVariableInputStream[NumberT]:
-    ...
-
-
-@overload
-def declare_input_stream(
-    t: type[NumberT], name: str, value: Sequence[Union[int, bool, float]]
-) -> QuaArrayInputStream[NumberT]:
-    ...
-
-
-def declare_input_stream(
-    t: type[NumberT],
-    name: str,
-    value: Optional[OneOrMore[Union[int, bool, float]]] = None,
-    size: Optional[int] = None,
-) -> Union[QuaVariableInputStream[NumberT], QuaArrayInputStream[NumberT]]:
-    """Declare a QUA variable or a QUA vector to be used as an input stream from the job to the QUA program.
-
-    Declaration is performed by declaring a python variable with the return value of this function.
-
-    Declaration is similar to the normal QUA variable declaration. See [qm.qua.declare][] for available
-    parameters.
-
-    See [Input streams](../../Guides/features.md#input-streams) for more information.
-
-    -- Available from QOP 2.0 --
-
-    Example:
-        ```python
-        tau = declare_input_stream(int)
-        ...
-        advance_input_stream(tau)
-        play('operation', 'element', duration=tau)
-        ```
-    """
-    if name is None:
-        raise QmQuaException("input stream declared without a name")
-
-    scope = scopes_manager.program_scope
-    var = f"input_stream_{name}"
-
-    if var in scope.declared_input_streams:
-        raise QmQuaException("input stream already declared")
-
-    params = _standardize_value_and_size(value, size)
-
-    scope.add_input_stream_declaration(var)
-    result = params.create_input_stream(var, t)
-
-    scope.add_var_declaration(result.declaration_statement)
-
-    return result
-
-
 def _declare_struct_array_variable(
     t: type[NumberT],
     size: int,
@@ -290,14 +218,37 @@ def _declare_struct_array_variable(
 
 
 def declare_struct(struct_t: type[StructT]) -> StructT:
+    """
+    Declare a QUA struct instance inside the current QUA program.
+
+    ``struct_t`` must be a type decorated with [qm.qua.qua_struct][].
+    The returned object contains QUA array members that can be assigned, sent to an OPNIC stream with
+    [qm.qua.send_to_stream][], or used as the receive target for [qm.qua.receive_from_stream][].
+
+    Example:
+        ```python
+        @qua_struct
+        class Packet:
+            data: QuaArray[int, 1]
+
+        with program():
+            packet = declare_struct(Packet)
+        ```
+
+    Args:
+        struct_t (type[StructT]): The QUA struct type to instantiate.
+
+    Returns:
+        StructT: A QUA struct instance of the requested type.
+    """
     scope = scopes_manager.program_scope
     scope.struct_index += 1
     name = f"s{scope.struct_index}"
 
     struct_reference = QuaStructReference(name)
 
-    return struct_t(
-        _struct_reference=struct_reference,  # type: ignore[call-arg]
+    return struct_t(  # type: ignore[call-arg]
+        _struct_reference=struct_reference,
         **{
             member_name: factory.create(struct_reference)
             for member_name, factory in struct_t.__members_initializers__.items()
@@ -305,7 +256,10 @@ def declare_struct(struct_t: type[StructT]) -> StructT:
     )
 
 
-def assign(var: Union[QuaArrayCell[NumberT], QuaVariable[NumberT], QuaIO], _exp: Union[Scalar[NumberT], QuaIO]) -> None:
+def assign(
+    var: Union[QuaArrayCell[NumberT], QuaVariable[NumberT], QuaIO],
+    _exp: Union[Scalar[NumberT], QuaIO],
+) -> None:
     """Set the value of a given QUA variable, a QUA array cell or an IO to the value of a given expression.
 
     Args:
@@ -320,19 +274,44 @@ def assign(var: Union[QuaArrayCell[NumberT], QuaVariable[NumberT], QuaIO], _exp:
             play('pulse1' * amp(v1), 'element1')
         ```
     """
-    statement = QuaProgramAssignmentStatement(
+    statement = inc_qua_pb2.QuaProgram.AssignmentStatement(
         loc=_get_loc(), target=var.assignment_statement, expression=to_scalar_pb_expression(_exp)
     )
-    scopes_manager.append_statement(QuaProgramAnyStatement(assign=statement))
+    scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(assign=statement))
+    if isinstance(var, DirectStreamSourceInterface):
+        var.save()
 
 
-def save(var: ScalarOfAnyType, stream_or_tag: Union[str, "ResultStreamSource"]) -> None:
+def _get_save_statement(
+    var: ScalarOfAnyType, stream_or_tag: Union[str, ResultStreamSource]
+) -> inc_qua_pb2.QuaProgram.AnyStatement:
+    if isinstance(stream_or_tag, str):
+        result_obj = _declare_save(stream_or_tag, add_legacy_timestamp=True)
+    else:
+        result_obj = stream_or_tag
+
+    if result_obj.is_adc_trace is True:  # Both None (unset) and False are fine
+        raise SaveToAdcTraceException("adc_trace can't be used in save")
+    # On a save operation, we set `is_adc_trace` to False if it was previously None.
+    # This effectively marks the stream as a non-ADC stream, which affects how it is handled by other commands
+    # such as `measure`.
+    result_obj.is_adc_trace = False
+
+    statement = inc_qua_pb2.QuaProgram.SaveStatement(
+        loc=_get_loc(), source=create_qua_scalar_expression(var).save_statement, tag=result_obj.get_var_name()
+    )
+    return inc_qua_pb2.QuaProgram.AnyStatement(save=statement)
+
+
+def save(var: ScalarOfAnyType, stream_or_tag: Union[str, ResultStreamSource]) -> None:
     """Stream a QUA variable, a QUA array cell, or a constant scalar.
     the variable is streamed and not immediately saved (see [Stream processing](../../Guides/stream_proc.md#stream-processing)).
-    In case ``result_or_tag`` is a string, the data will be immediately saved to a result handle under the same name.
+    In case ``stream_or_tag`` is a string, the data will be immediately saved to a result handle under the same name.
 
     If result variable is used, it can be used in results analysis scope see [stream_processing][qm.qua.stream_processing]
     if string tag is used, it will let you receive result with [qm.QmJob.result_handles][qm.jobs.running_qm_job.RunningQmJob.result_handles].
+    Saving to a declared client output stream is equivalent to [qm.qua.send_to_stream][] for scalar values:
+    ``save(value, stream)`` and ``send_to_stream(stream, value)`` produce the same client-stream items.
     The type of the variable determines the stream datatype, according to the following rule:
 
     - int -> int64
@@ -373,17 +352,7 @@ def save(var: ScalarOfAnyType, stream_or_tag: Union[str, "ResultStreamSource"]) 
         stream_or_tag (Union[str, stream variable]): A stream variable
             or string tag name to save the value under
     """
-    if isinstance(stream_or_tag, str):
-        result_obj = _declare_save(stream_or_tag, add_legacy_timestamp=True)
-    else:
-        result_obj = stream_or_tag
-
-    if result_obj.is_adc_trace:
-        raise QmQuaException("adc_trace can't be used in save")
-    statement = QuaProgramSaveStatement(
-        loc=_get_loc(), source=create_qua_scalar_expression(var).save_statement, tag=result_obj.get_var_name()
-    )
-    scopes_manager.append_statement(QuaProgramAnyStatement(save=statement))
+    scopes_manager.append_statement(_get_save_statement(var, stream_or_tag))
 
 
 def advance_input_stream(

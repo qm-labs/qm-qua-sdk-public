@@ -3,14 +3,10 @@ import warnings
 from typing import Any, List, Type, Tuple, Union, TypeVar, Callable, Optional, Sequence, overload
 
 from qm._loc import _get_loc
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.type_hinting.general import NumberT
 from qm.qua._dsl.variable_handling import assign, declare
 from qm.utils import deprecation_message, get_iterable_elements_datatype
-from qm.grpc.qua import (
-    QuaProgramAnyScalarExpression,
-    QuaProgramLibFunctionExpression,
-    QuaProgramLibFunctionExpressionArgument,
-)
 from qm.qua._expressions import (
     Scalar,
     Vector,
@@ -39,7 +35,9 @@ def _create_qua_vector_expression(value: Vector[NumberT]) -> QuaArrayVariable[Nu
     return declare(data_type, value=value)
 
 
-def _standardize_args(*args: Union[ScalarOfAnyType, VectorOfAnyType]) -> List[QuaProgramLibFunctionExpressionArgument]:
+def _standardize_args(
+    *args: Union[ScalarOfAnyType, VectorOfAnyType]
+) -> List[inc_qua_pb2.QuaProgram.LibFunctionExpression.Argument]:
     standardized_args = []
 
     for arg in args:
@@ -47,10 +45,10 @@ def _standardize_args(*args: Union[ScalarOfAnyType, VectorOfAnyType]) -> List[Qu
         if isinstance(arg, (Sequence, QuaArrayVariable)):
             if isinstance(arg, Sequence):
                 arg = _create_qua_vector_expression(arg)
-            standardized_args.append(QuaProgramLibFunctionExpressionArgument(array=arg.unwrapped))
+            standardized_args.append(inc_qua_pb2.QuaProgram.LibFunctionExpression.Argument(array=arg.unwrapped))
         else:
             arg = create_qua_scalar_expression(arg)
-            standardized_args.append(QuaProgramLibFunctionExpressionArgument(scalar=arg.unwrapped))
+            standardized_args.append(inc_qua_pb2.QuaProgram.LibFunctionExpression.Argument(scalar=arg.unwrapped))
 
     return standardized_args
 
@@ -62,9 +60,9 @@ def __create_output_expression(
 ) -> QuaLibFunctionOutput[NumberT]:
     standardized_args = _standardize_args(*args)
     lib_name, func_name = _get_func_lib_and_name(function)
-    any_scalar_expression = QuaProgramAnyScalarExpression(
-        lib_function=QuaProgramLibFunctionExpression(
-            function_name=func_name, arguments=standardized_args, library_name=lib_name, loc=_get_loc()
+    any_scalar_expression = inc_qua_pb2.QuaProgram.AnyScalarExpression(
+        libFunction=inc_qua_pb2.QuaProgram.LibFunctionExpression(
+            functionName=func_name, arguments=standardized_args, libraryName=lib_name, loc=_get_loc()
         )
     )
     return QuaLibFunctionOutput(any_scalar_expression, output_type)

@@ -1,20 +1,11 @@
 import logging
 
-import betterproto
-
 from qm.jobs.qm_job import QmJob
+from qm.grpc.qm.pb import frontend_pb2
 from qm.jobs.base_job import QmBaseJob
 from qm.utils import run_until_with_timeout
+from qm.utils.protobuf_utils import which_one_of
 from qm.exceptions import JobCancelledError, ErrorJobStateError, UnknownJobStateError
-from qm.grpc.frontend import (
-    JobExecutionStatus,
-    JobExecutionStatusError,
-    JobExecutionStatusLoading,
-    JobExecutionStatusPending,
-    JobExecutionStatusRunning,
-    JobExecutionStatusCanceled,
-    JobExecutionStatusCompleted,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +27,9 @@ class QmPendingJob(QmBaseJob):
             ```
         """
         status = self._job_manager.get_job_execution_status(self._id, self._machine_id)
-        _, status_inst = betterproto.which_one_of(status, "status")
-        if isinstance(status_inst, JobExecutionStatusPending):
-            return status.pending.position_in_queue
+        _, status_inst = which_one_of(status, "status")
+        if isinstance(status_inst, frontend_pb2.JobExecutionStatus.Pending):
+            return status.pending.positionInQueue
 
         logger.warning(f"Job {self.id} is not pending, therefor it does not have a position in queue")
         return INVALID_QUEUE_POSITION
@@ -58,21 +49,23 @@ class QmPendingJob(QmBaseJob):
         """
 
         def on_iteration() -> bool:
-            status: JobExecutionStatus = self._job_manager.get_job_execution_status(self._id, self._machine_id)
-            value = betterproto.which_one_of(status, "status")[1]
-            if isinstance(value, (JobExecutionStatusRunning, JobExecutionStatusCompleted)):
+            status: frontend_pb2.JobExecutionStatus = self._job_manager.get_job_execution_status(
+                self._id, self._machine_id
+            )
+            value = which_one_of(status, "status")[1]
+            if isinstance(value, (frontend_pb2.JobExecutionStatus.Running, frontend_pb2.JobExecutionStatus.Completed)):
                 return True
 
-            if isinstance(value, (JobExecutionStatusPending, JobExecutionStatusLoading)):
+            if isinstance(value, (frontend_pb2.JobExecutionStatus.Pending, frontend_pb2.JobExecutionStatus.Loading)):
                 return False
 
-            if isinstance(value, JobExecutionStatusError):
+            if isinstance(value, frontend_pb2.JobExecutionStatus.Error):
                 raise ErrorJobStateError(
                     f"job {self._id} encountered an error",
-                    error_list=[value.string_value for value in value.error_messages.values],
+                    error_list=[value.string_value for value in value.errorMessages.values],
                 )
 
-            elif isinstance(value, JobExecutionStatusCanceled):
+            elif isinstance(value, frontend_pb2.JobExecutionStatus.Canceled):
                 raise JobCancelledError(f"job {self._id} was cancelled")
 
             else:

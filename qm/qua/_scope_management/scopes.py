@@ -2,36 +2,26 @@ from types import TracebackType
 from dataclasses import dataclass
 from typing import Any, List, Type, Tuple, Generic, Literal, Optional, Sequence
 
-from betterproto.lib.google.protobuf import Any as BetterAny
+from google.protobuf.any_pb2 import Any as PbAny
 
 from qm.type_hinting import NumberT
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._expressions import Scalar, QuaScalar, to_scalar_pb_expression
-from qm.qua._scope_management._core_scopes import _LeadingScope, _FollowingScope
-from qm.grpc.qua import (
-    QuaProgramElseIf,
-    QuaProgramIfStatement,
-    QuaProgramAnyStatement,
-    QuaProgramForStatement,
-    QuaProgramForEachStatement,
-    QuaProgramVarRefExpression,
-    QuaProgramAnyScalarExpression,
-    QuaProgramAssignmentStatement,
-    QuaProgramStatementsCollection,
-    QuaProgramArrayVarRefExpression,
-    QuaProgramStrictTimingStatement,
-    QuaProgramArbitraryContextStatement,
-    QuaProgramForEachStatementVariableWithValues,
-)
+from qm.qua._scope_management._core_scopes import _LoopScope, _LeadingScope, _FollowingScope
 
 
-class _ForScope(_LeadingScope):
+class _ForScope(_LoopScope):
+    """
+    _ForScope: A loop scope for a loop statement support both `for_` and `while_` loops.
+    """
+
     def __init__(
         self,
-        init: Optional[QuaProgramAssignmentStatement],
-        condition: Optional[QuaProgramAnyScalarExpression],
-        update: Optional[QuaProgramAssignmentStatement],
+        init: Optional[inc_qua_pb2.QuaProgram.AssignmentStatement],
+        condition: Optional[inc_qua_pb2.QuaProgram.AnyScalarExpression],
+        update: Optional[inc_qua_pb2.QuaProgram.AssignmentStatement],
         loc: str,
     ):
         super().__init__(loc)
@@ -39,37 +29,42 @@ class _ForScope(_LeadingScope):
         self._condition = condition
         self._update = update
 
-    def _create_statement(self) -> QuaProgramAnyStatement:
-        init = [QuaProgramAnyStatement(assign=self._init)] if self._init else []
-        update = [QuaProgramAnyStatement(assign=self._update)] if self._update else []
-        statement = QuaProgramForStatement(
-            init=QuaProgramStatementsCollection(statements=init),
-            update=QuaProgramStatementsCollection(statements=update),
-            body=QuaProgramStatementsCollection(statements=self._statements),
+    def _create_statement(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
+        init = [inc_qua_pb2.QuaProgram.AnyStatement(assign=self._init)] if self._init else []
+        update = [inc_qua_pb2.QuaProgram.AnyStatement(assign=self._update)] if self._update else []
+        statement = inc_qua_pb2.QuaProgram.ForStatement(
+            init=inc_qua_pb2.QuaProgram.StatementsCollection(statements=init),
+            update=inc_qua_pb2.QuaProgram.StatementsCollection(statements=update),
+            body=inc_qua_pb2.QuaProgram.StatementsCollection(statements=self._statements),
         )
         if self._condition:
-            statement.condition = self._condition
-        return QuaProgramAnyStatement(for_=statement)
+            statement.condition.CopyFrom(self._condition)
+        any_statement = inc_qua_pb2.QuaProgram.AnyStatement()
+        getattr(any_statement, "for").CopyFrom(statement)
+        return any_statement
 
 
-class _ForEachScope(_LeadingScope):
+class _ForEachScope(_LoopScope):
     def __init__(
         self,
-        iterators: Sequence[Tuple[QuaProgramVarRefExpression, QuaProgramArrayVarRefExpression]],
+        iterators: Sequence[
+            Tuple[inc_qua_pb2.QuaProgram.VarRefExpression, inc_qua_pb2.QuaProgram.ArrayVarRefExpression]
+        ],
         loc: str,
     ) -> None:
         super().__init__(loc)
         self._iterators = iterators
 
-    def _create_statement(self) -> QuaProgramAnyStatement:
-        statement = QuaProgramForEachStatement(
+    def _create_statement(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
+        statement = inc_qua_pb2.QuaProgram.ForEachStatement(
             iterator=[
-                QuaProgramForEachStatementVariableWithValues(variable=var, array=arr) for var, arr in self._iterators
+                inc_qua_pb2.QuaProgram.ForEachStatement.VariableWithValues(variable=var, array=arr)
+                for var, arr in self._iterators
             ],
-            body=QuaProgramStatementsCollection(statements=self._statements),
+            body=inc_qua_pb2.QuaProgram.StatementsCollection(statements=self._statements),
             loc=self._loc,
         )
-        return QuaProgramAnyStatement(for_each=statement)
+        return inc_qua_pb2.QuaProgram.AnyStatement(forEach=statement)
 
 
 class _IfScope(_LeadingScope):
@@ -78,18 +73,20 @@ class _IfScope(_LeadingScope):
         self._condition = condition
         self._unsafe = unsafe
 
-    def _create_statement(self) -> QuaProgramAnyStatement:
-        statement = QuaProgramIfStatement(
+    def _create_statement(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
+        statement = inc_qua_pb2.QuaProgram.IfStatement(
             condition=to_scalar_pb_expression(self._condition),
             unsafe=self._unsafe,
-            body=QuaProgramStatementsCollection(statements=self._statements),
+            body=inc_qua_pb2.QuaProgram.StatementsCollection(statements=self._statements),
             loc=self._loc,
         )
-        return QuaProgramAnyStatement(if_=statement)
+        any_statement = inc_qua_pb2.QuaProgram.AnyStatement()
+        getattr(any_statement, "if").CopyFrom(statement)
+        return any_statement
 
 
 class _ElifScope(_FollowingScope):
-    def __init__(self, condition: Scalar[bool], if_statement: QuaProgramIfStatement, loc: str):
+    def __init__(self, condition: Scalar[bool], if_statement: inc_qua_pb2.QuaProgram.IfStatement, loc: str):
         super().__init__()
         self._condition = condition
         self._if_statement = if_statement
@@ -98,30 +95,32 @@ class _ElifScope(_FollowingScope):
     def _add_to_leading_scope(self) -> None:
         self._if_statement.elseifs.append(self._create_elif_statement())
 
-    def _create_elif_statement(self) -> QuaProgramElseIf:
-        return QuaProgramElseIf(
+    def _create_elif_statement(self) -> inc_qua_pb2.QuaProgram.ElseIf:
+        return inc_qua_pb2.QuaProgram.ElseIf(
             loc=self._loc,
             condition=to_scalar_pb_expression(self._condition),
-            body=QuaProgramStatementsCollection(statements=self._statements),
+            body=inc_qua_pb2.QuaProgram.StatementsCollection(statements=self._statements),
         )
 
 
 class _ElseScope(_FollowingScope):
-    def __init__(self, if_statement: QuaProgramIfStatement):
+    def __init__(self, if_statement: inc_qua_pb2.QuaProgram.IfStatement):
         super().__init__()
         self._if_statement = if_statement
 
     def _add_to_leading_scope(self) -> None:
-        self._if_statement.else_ = QuaProgramStatementsCollection(statements=self._statements)
+        getattr(self._if_statement, "else").CopyFrom(
+            inc_qua_pb2.QuaProgram.StatementsCollection(statements=self._statements)
+        )
 
 
 class _StrictTimingScope(_LeadingScope):
-    def _create_statement(self) -> QuaProgramAnyStatement:
-        statement = QuaProgramStrictTimingStatement(
-            body=QuaProgramStatementsCollection(statements=self._statements),
+    def _create_statement(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
+        statement = inc_qua_pb2.QuaProgram.StrictTimingStatement(
+            body=inc_qua_pb2.QuaProgram.StatementsCollection(statements=self._statements),
             loc=self._loc,
         )
-        return QuaProgramAnyStatement(strict_timing=statement)
+        return inc_qua_pb2.QuaProgram.AnyStatement(strictTiming=statement)
 
 
 class _SwitchScope(_LeadingScope, Generic[NumberT]):
@@ -132,9 +131,9 @@ class _SwitchScope(_LeadingScope, Generic[NumberT]):
         self._expression: QuaScalar[NumberT] = expression
         self._unsafe = unsafe
         self.cases: List[_CaseData[NumberT]] = []
-        self.default: List[QuaProgramAnyStatement] = []
+        self.default: List[inc_qua_pb2.QuaProgram.AnyStatement] = []
 
-    def _create_statement(self) -> QuaProgramAnyStatement:
+    def _create_statement(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
         if not self.cases:
             raise QmQuaException(
                 "Expecting scope with body. Expecting switch scope with body. "
@@ -147,24 +146,26 @@ class _SwitchScope(_LeadingScope, Generic[NumberT]):
         first_condition = conditions[0]
 
         else_ifs = [
-            QuaProgramElseIf(
+            inc_qua_pb2.QuaProgram.ElseIf(
                 condition=cond,
-                body=QuaProgramStatementsCollection(statements=case.statements),
+                body=inc_qua_pb2.QuaProgram.StatementsCollection(statements=case.statements),
                 loc=self._loc,
             )
             for cond, case in zip(conditions[1:], self.cases[1:])
         ]
-        statement = QuaProgramIfStatement(
+        statement = inc_qua_pb2.QuaProgram.IfStatement(
             condition=first_condition,
-            body=QuaProgramStatementsCollection(statements=first_case.statements),
+            body=inc_qua_pb2.QuaProgram.StatementsCollection(statements=first_case.statements),
             unsafe=self._unsafe,
             elseifs=else_ifs,
-            else_=QuaProgramStatementsCollection(statements=self.default),
             loc=self._loc,
         )
-        return QuaProgramAnyStatement(if_=statement)
+        getattr(statement, "else").CopyFrom(inc_qua_pb2.QuaProgram.StatementsCollection(statements=self.default))
+        any_statement = inc_qua_pb2.QuaProgram.AnyStatement()
+        getattr(any_statement, "if").CopyFrom(statement)
+        return any_statement
 
-    def append_statement(self, statement: QuaProgramAnyStatement) -> None:
+    def append_statement(self, statement: inc_qua_pb2.QuaProgram.AnyStatement) -> None:
         raise QmQuaException(
             "Switch scope can only contain 'case' and 'default' blocks. Direct statements are not allowed (Expecting scope with body.)."
         )
@@ -173,7 +174,7 @@ class _SwitchScope(_LeadingScope, Generic[NumberT]):
 @dataclass
 class _CaseData(Generic[NumberT]):
     value: QuaScalar[NumberT]
-    statements: List[QuaProgramAnyStatement]
+    statements: List[inc_qua_pb2.QuaProgram.AnyStatement]
 
 
 class _CaseScope(_FollowingScope, Generic[NumberT]):
@@ -203,7 +204,7 @@ class _PortConditionScope:
     scope manager through dedicated 'set' functions.
     """
 
-    def __init__(self, expression: QuaProgramAnyScalarExpression):
+    def __init__(self, expression: inc_qua_pb2.QuaProgram.AnyScalarExpression):
         self._expression = expression
 
     def __enter__(self) -> None:
@@ -221,17 +222,17 @@ class _ArbitraryScope(_LeadingScope):
         self,
         loc: str,
         name: str,
-        data: Optional[BetterAny],
+        data: Optional[PbAny],
     ):
         super().__init__(loc)
         self._name = name
         self._data = data
 
-    def _create_statement(self) -> QuaProgramAnyStatement:
-        statement = QuaProgramArbitraryContextStatement(
+    def _create_statement(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
+        statement = inc_qua_pb2.QuaProgram.ArbitraryContextStatement(
             loc=self._loc,
             name=self._name,
             data=self._data,
-            body=QuaProgramStatementsCollection(statements=self._statements),
+            body=inc_qua_pb2.QuaProgram.StatementsCollection(statements=self._statements),
         )
-        return QuaProgramAnyStatement(arbitrary_context=statement)
+        return inc_qua_pb2.QuaProgram.AnyStatement(arbitraryContext=statement)

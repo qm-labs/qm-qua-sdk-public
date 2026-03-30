@@ -303,13 +303,13 @@ class Event:
         return ret
 
     @classmethod
-    def from_job_dict(cls, dict_description: EventType) -> "Event":
+    def from_job_dict(cls, dict_description: EventType, element: str) -> "Event":
         return cls(
             name=dict_description["eventMessage"],
             timestamp=int(dict_description["timestamp"]),
             controller=dict_description["sourcePulser"]["controllerName"],
             fem=int(dict_description["sourcePulser"].get("femId", 0)) + 1,
-            element=dict_description["quantumElement"],
+            element=element,
             is_i=dict_description["sourcePulserIqInfo"]["isI"],
             is_q=dict_description["sourcePulserIqInfo"]["isQ"],
         )
@@ -371,9 +371,23 @@ class WaveformReport:
             analog_waveforms=[PlayedAnalogWaveform.from_job_dict(awf) for awf in d["analogWaveforms"]],
             digital_waveforms=[PlayedDigitalWaveform.from_job_dict(dwf) for dwf in d["digitalWaveforms"]],
             adc_acquisitions=[AdcAcquisition.from_job_dict(acq) for acq in d.get("adcAcquisitions", [])],
-            events=[Event.from_job_dict(event) for event in d.get("events", []) if Event.is_supported(event)],
+            events=cls._create_events_from_dict(d),
             job_id=job_id,
         )
+
+    @staticmethod
+    def _create_events_from_dict(d: WaveformReportType) -> List[Event]:
+        data = d.get("events", [])
+        events = []
+        for event in data:
+            if Event.is_supported(event):
+                if isinstance(event["quantumElement"], str):
+                    events.append(Event.from_job_dict(event, event["quantumElement"]))
+                else:
+                    for element in event["quantumElement"]:
+                        events.append(Event.from_job_dict(event, element))
+
+        return events
 
     @property
     def waveforms(self) -> Sequence[PlayedWaveform]:

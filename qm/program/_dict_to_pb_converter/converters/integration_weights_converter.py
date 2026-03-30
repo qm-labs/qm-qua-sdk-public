@@ -1,35 +1,41 @@
 import numbers
 from typing import List, Tuple, Union, cast
 
+from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.exceptions import ConfigValidationException
 from qm.utils.list_compression_utils import split_list_to_chunks
 from qm.type_hinting.config_types import IntegrationWeightConfigType
 from qm.program._dict_to_pb_converter.base_converter import BaseDictToPbConverter
-from qm.grpc.qua_config import QuaConfigIntegrationWeightDec, QuaConfigIntegrationWeightSample
 
 
-class IntegrationWeightsConverter(BaseDictToPbConverter[IntegrationWeightConfigType, QuaConfigIntegrationWeightDec]):
-    def convert(self, input_data: IntegrationWeightConfigType) -> QuaConfigIntegrationWeightDec:
+class IntegrationWeightsConverter(
+    BaseDictToPbConverter[IntegrationWeightConfigType, inc_qua_config_pb2.QuaConfig.IntegrationWeightDec]
+):
+    def convert(self, input_data: IntegrationWeightConfigType) -> inc_qua_config_pb2.QuaConfig.IntegrationWeightDec:
         return self.integration_weights_to_pb(input_data)
 
     @staticmethod
-    def integration_weights_to_pb(data: IntegrationWeightConfigType) -> QuaConfigIntegrationWeightDec:
-        iw = QuaConfigIntegrationWeightDec(
+    def integration_weights_to_pb(
+        data: IntegrationWeightConfigType,
+    ) -> inc_qua_config_pb2.QuaConfig.IntegrationWeightDec:
+        iw = inc_qua_config_pb2.QuaConfig.IntegrationWeightDec(
             cosine=build_iw_sample(data["cosine"]),
             sine=build_iw_sample(data["sine"]),
         )
         return iw
 
-    def deconvert(self, output_data: QuaConfigIntegrationWeightDec) -> IntegrationWeightConfigType:
+    def deconvert(self, output_data: inc_qua_config_pb2.QuaConfig.IntegrationWeightDec) -> IntegrationWeightConfigType:
         return {
             "cosine": [(s.value, s.length) for s in output_data.cosine],
             "sine": [(s.value, s.length) for s in output_data.sine],
         }
 
 
-def build_iw_sample(data: Union[List[Tuple[float, int]], List[float]]) -> List[QuaConfigIntegrationWeightSample]:
+def build_iw_sample(
+    data: Union[List[Tuple[float, int]], List[float]]
+) -> List[inc_qua_config_pb2.QuaConfig.IntegrationWeightSample]:
     clean_data = _standardize_iw_data(data)
-    return [QuaConfigIntegrationWeightSample(value=s[0], length=int(s[1])) for s in clean_data]
+    return [inc_qua_config_pb2.QuaConfig.IntegrationWeightSample(value=s[0], length=int(s[1])) for s in clean_data]
 
 
 def _standardize_iw_data(data: Union[List[Tuple[float, int]], List[float]]) -> List[Tuple[float, int]]:

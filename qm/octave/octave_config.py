@@ -4,14 +4,13 @@ import warnings
 import dataclasses
 from typing import Any, Dict, List, Tuple, Union, Generic, TypeVar, Optional
 
-from octave_sdk import OctaveOutput, OctaveLOSource
-
 from qm.utils import SERVICE_HEADER_NAME
 from qm.type_hinting.general import PathLike
 from qm.exceptions import OctaveConnectionError
 from qm.api.models.capabilities import OPX_FEM_IDX
 from qm.octave.calibration_db import CalibrationDB
 from qm.type_hinting.config_types import StandardPort
+from qm.octave_sdk import OctaveOutput, OctaveLOSource
 from qm.api.models.server_details import ConnectionDetails
 from qm.octave.abstract_calibration_db import AbstractCalibrationDB
 

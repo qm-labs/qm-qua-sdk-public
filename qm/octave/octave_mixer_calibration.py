@@ -6,36 +6,20 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Union, Literal, Optional, cast
 
 import numpy as np
-from octave_sdk import Octave, RFInputLOSource
-from octave_sdk._errors import InvalidLoSource
-from octave_sdk._octave_client import OctaveClient
-from octave_sdk.octave import UnableToSetFrequencyError
-from octave_sdk.grpc.quantummachines.octave.api.v1 import (
-    SynthUpdate,
-    OctaveModule,
-    SingleUpdate,
-    RfUpConvUpdate,
-    ModuleReference,
-    IfDownConvUpdate,
-    RfDownConvUpdate,
-    IfDownConvUpdateMode,
-    SynthUpdateMainOutput,
-    IfDownConvUpdateChannel,
-    RfDownConvUpdateLoInput,
-    RfDownConvUpdateRfInput,
-    IfDownConvUpdateCoupling,
-    SynthUpdateSecondaryOutput,
-    SynthUpdateSynthOutputPower,
-    RfUpConvUpdateFastSwitchMode,
-)
+from google.protobuf.wrappers_pb2 import BoolValue, UInt32Value
 
 from qm import QmPendingJob
 from qm.program import Program
 from qm.jobs.qm_job import QmJob
 from qm.api.v2.job_api import JobApi
+from qm.grpc.octave.v1 import api_pb2
 from qm.elements.element import Element
+from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.jobs.running_qm_job import RunningQmJob
-from qm.grpc.qua_config import QuaConfigMixInputs
+from qm.octave_sdk import Octave, RFInputLOSource
+from qm.octave_sdk._errors import InvalidLoSource
+from qm.octave_sdk._octave_client import OctaveClient
+from qm.octave_sdk.octave import UnableToSetFrequencyError
 from qm.elements.up_converted_input import UpconvertedInput
 from qm.api.v2.job_api.element_input_api import MixInputsApi
 from qm.exceptions import QmQuaException, CantCalibrateElementError
@@ -207,7 +191,7 @@ class NoCalibrationElements(QmQuaException):
 
 @dataclass
 class _StateRestoreParams:
-    octave_updates: list[SingleUpdate]
+    octave_updates: list[api_pb2.SingleUpdate]
     lo_frequency: float
     i_offset: float
     q_offset: float
@@ -447,18 +431,22 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
     def _set_octave_for_calibration(
         self, output_channel_index: int, params: AutoCalibrationParams, element_input: UpconvertedInput
     ) -> _StateRestoreParams:
-        current_state = self._low_level_client.aquire_modules(
+        current_state = self._low_level_client.acquire_modules(
             modules=[
-                ModuleReference(type=OctaveModule.RF_UPCONVERTER, index=1),
-                ModuleReference(type=OctaveModule.RF_UPCONVERTER, index=2),
-                ModuleReference(type=OctaveModule.RF_UPCONVERTER, index=3),
-                ModuleReference(type=OctaveModule.RF_UPCONVERTER, index=4),
-                ModuleReference(type=OctaveModule.RF_UPCONVERTER, index=5),
-                ModuleReference(type=OctaveModule.RF_DOWNCONVERTER, index=CALIBRATION_INPUT),
-                ModuleReference(type=OctaveModule.IF_DOWNCONVERTER, index=CALIBRATION_INPUT),
-                ModuleReference(type=OctaveModule.SYNTHESIZER, index=4),
-                ModuleReference(type=OctaveModule.RF_DOWNCONVERTER, index=OTHER_INPUT),
-                ModuleReference(type=OctaveModule.IF_DOWNCONVERTER, index=OTHER_INPUT),
+                api_pb2.ModuleReference(type=api_pb2.OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=1),
+                api_pb2.ModuleReference(type=api_pb2.OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=2),
+                api_pb2.ModuleReference(type=api_pb2.OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=3),
+                api_pb2.ModuleReference(type=api_pb2.OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=4),
+                api_pb2.ModuleReference(type=api_pb2.OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER, index=5),
+                api_pb2.ModuleReference(
+                    type=api_pb2.OctaveModule.OCTAVE_MODULE_RF_DOWNCONVERTER, index=CALIBRATION_INPUT
+                ),
+                api_pb2.ModuleReference(
+                    type=api_pb2.OctaveModule.OCTAVE_MODULE_IF_DOWNCONVERTER, index=CALIBRATION_INPUT
+                ),
+                api_pb2.ModuleReference(type=api_pb2.OctaveModule.OCTAVE_MODULE_SYNTHESIZER, index=4),
+                api_pb2.ModuleReference(type=api_pb2.OctaveModule.OCTAVE_MODULE_RF_DOWNCONVERTER, index=OTHER_INPUT),
+                api_pb2.ModuleReference(type=api_pb2.OctaveModule.OCTAVE_MODULE_IF_DOWNCONVERTER, index=OTHER_INPUT),
             ]
         ).state.updates
 
@@ -470,8 +458,8 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         for upconverter_index in (1, 2, 3, 4, 5):
             upconverter_state = current_state[upconverter_index - 1].rf_up_conv
             state_restore_updates.append(
-                SingleUpdate(
-                    rf_up_conv=RfUpConvUpdate(
+                api_pb2.SingleUpdate(
+                    rf_up_conv=api_pb2.RFUpConvUpdate(
                         index=upconverter_index,
                         enabled=upconverter_state.enabled,
                         mixer_output_attn=upconverter_state.mixer_output_attn,
@@ -484,80 +472,74 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         restore_lo_frequency = element_input.lo_frequency
 
         if params.external_loopback:
-            rf_input = RfDownConvUpdateRfInput.RF_INPUT_MAIN
+            rf_input = api_pb2.RFDownConvUpdate.RFInput.RF_INPUT_MAIN
         else:
             rf_input = {
-                1: RfDownConvUpdateRfInput.RF_INPUT_DEBUG_1,
-                2: RfDownConvUpdateRfInput.RF_INPUT_DEBUG_2,
-                3: RfDownConvUpdateRfInput.RF_INPUT_DEBUG_3,
-                4: RfDownConvUpdateRfInput.RF_INPUT_DEBUG_4,
-                5: RfDownConvUpdateRfInput.RF_INPUT_DEBUG_5,
+                1: api_pb2.RFDownConvUpdate.RFInput.RF_INPUT_DEBUG_1,
+                2: api_pb2.RFDownConvUpdate.RFInput.RF_INPUT_DEBUG_2,
+                3: api_pb2.RFDownConvUpdate.RFInput.RF_INPUT_DEBUG_3,
+                4: api_pb2.RFDownConvUpdate.RFInput.RF_INPUT_DEBUG_4,
+                5: api_pb2.RFDownConvUpdate.RFInput.RF_INPUT_DEBUG_5,
             }[output_channel_index]
 
         # Shut down all the over up-converters while doing the calibration
         updates = [
-            SingleUpdate(
-                rf_down_conv=RfDownConvUpdate(
+            api_pb2.SingleUpdate(
+                rf_down_conv=api_pb2.RFDownConvUpdate(
                     index=CALIBRATION_INPUT,
-                    enabled=True,
-                    lo_input=(
-                        RfDownConvUpdateLoInput.LO_INPUT_1 if params.use_main_lo else RfDownConvUpdateLoInput.LO_INPUT_2
-                    ),
+                    enabled=BoolValue(value=True),
+                    lo_input=api_pb2.RFDownConvUpdate.LOInput.LO_INPUT_1
+                    if params.use_main_lo
+                    else api_pb2.RFDownConvUpdate.LOInput.LO_INPUT_2,
                     rf_input=rf_input,
                 )
             ),
-            SingleUpdate(
-                rf_down_conv=RfDownConvUpdate(
+            api_pb2.SingleUpdate(
+                rf_down_conv=api_pb2.RFDownConvUpdate(
                     index=OTHER_INPUT,
-                    enabled=False,
-                    lo_input=RfDownConvUpdateLoInput.LO_INPUT_1,
-                    rf_input=RfDownConvUpdateRfInput.RF_INPUT_DISCONNECT,
+                    enabled=BoolValue(value=False),
+                    lo_input=api_pb2.RFDownConvUpdate.LOInput.LO_INPUT_1,
+                    rf_input=api_pb2.RFDownConvUpdate.RFInput.RF_INPUT_DISCONNECT,
                 )
             ),
-            SingleUpdate(
-                synth=SynthUpdate(
+            api_pb2.SingleUpdate(
+                synth=api_pb2.SynthUpdate(
                     index=4,
-                    gain=0xFFFF,
-                    synth_output_power=SynthUpdateSynthOutputPower.SYNTH_OUTPUT_POWER_POS5DB,
-                    main_output=(
-                        SynthUpdateMainOutput.MAIN_OUTPUT_MAIN
-                        if params.use_main_lo
-                        else SynthUpdateMainOutput.MAIN_OUTPUT_OFF
-                    ),
-                    secondary_output=SynthUpdateSecondaryOutput.SECONDARY_OUTPUT_OFF,
+                    gain=UInt32Value(value=0xFFFF),
+                    synth_output_power=api_pb2.SynthUpdate.SynthOutputPower.SYNTH_OUTPUT_POWER_POS5DB,
+                    main_output=api_pb2.SynthUpdate.MainOutput.MAIN_OUTPUT_MAIN
+                    if params.use_main_lo
+                    else api_pb2.SynthUpdate.MainOutput.MAIN_OUTPUT_OFF,
+                    secondary_output=api_pb2.SynthUpdate.SecondaryOutput.SECONDARY_OUTPUT_OFF,
                 )
             ),
-            SingleUpdate(
-                if_down_conv=IfDownConvUpdate(
+            api_pb2.SingleUpdate(
+                if_down_conv=api_pb2.IFDownConvUpdate(
                     index=CALIBRATION_INPUT,
-                    channel1=IfDownConvUpdateChannel(
-                        mode=(
-                            IfDownConvUpdateMode.MODE_BYPASS
-                            if params.dconv_quadrature != DConvQuadrature.I
-                            else IfDownConvUpdateMode.MODE_OFF
-                        ),
-                        coupling=IfDownConvUpdateCoupling.COUPLING_AC,
+                    channel1=api_pb2.IFDownConvUpdate.Channel(
+                        mode=api_pb2.IFDownConvUpdate.Mode.MODE_BYPASS
+                        if params.dconv_quadrature != DConvQuadrature.I
+                        else api_pb2.IFDownConvUpdate.Mode.MODE_OFF,
+                        coupling=api_pb2.IFDownConvUpdate.Coupling.COUPLING_AC,
                     ),
-                    channel2=IfDownConvUpdateChannel(
-                        mode=(
-                            IfDownConvUpdateMode.MODE_BYPASS
-                            if params.dconv_quadrature != DConvQuadrature.Q
-                            else IfDownConvUpdateMode.MODE_OFF
-                        ),
-                        coupling=IfDownConvUpdateCoupling.COUPLING_AC,
+                    channel2=api_pb2.IFDownConvUpdate.Channel(
+                        mode=api_pb2.IFDownConvUpdate.Mode.MODE_BYPASS
+                        if params.dconv_quadrature != DConvQuadrature.Q
+                        else api_pb2.IFDownConvUpdate.Mode.MODE_OFF,
+                        coupling=api_pb2.IFDownConvUpdate.Coupling.COUPLING_AC,
                     ),
                 )
             ),
-            SingleUpdate(
-                if_down_conv=IfDownConvUpdate(
+            api_pb2.SingleUpdate(
+                if_down_conv=api_pb2.IFDownConvUpdate(
                     index=OTHER_INPUT,
-                    channel1=IfDownConvUpdateChannel(
-                        mode=IfDownConvUpdateMode.MODE_OFF,
-                        coupling=IfDownConvUpdateCoupling.COUPLING_AC,
+                    channel1=api_pb2.IFDownConvUpdate.Channel(
+                        mode=api_pb2.IFDownConvUpdate.Mode.MODE_OFF,
+                        coupling=api_pb2.IFDownConvUpdate.Coupling.COUPLING_AC,
                     ),
-                    channel2=IfDownConvUpdateChannel(
-                        mode=IfDownConvUpdateMode.MODE_OFF,
-                        coupling=IfDownConvUpdateCoupling.COUPLING_AC,
+                    channel2=api_pb2.IFDownConvUpdate.Channel(
+                        mode=api_pb2.IFDownConvUpdate.Mode.MODE_OFF,
+                        coupling=api_pb2.IFDownConvUpdate.Coupling.COUPLING_AC,
                     ),
                 )
             ),
@@ -565,22 +547,22 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
         for index in (1, 2, 3, 4, 5):
             if index != output_channel_index:
                 updates.append(
-                    SingleUpdate(
-                        rf_up_conv=RfUpConvUpdate(
+                    api_pb2.SingleUpdate(
+                        rf_up_conv=api_pb2.RFUpConvUpdate(
                             index=index,
-                            mixer_output_attn=63,
-                            power_amp_attn=63,
-                            fast_switch_mode=RfUpConvUpdateFastSwitchMode.FAST_SWITCH_MODE_OFF,
+                            mixer_output_attn=UInt32Value(value=63),
+                            power_amp_attn=UInt32Value(value=63),
+                            fast_switch_mode=api_pb2.RFUpConvUpdate.FastSwitchMode.FAST_SWITCH_MODE_OFF,
                         )
                     )
                 )
             else:
                 updates.append(
-                    SingleUpdate(
-                        rf_up_conv=RfUpConvUpdate(
+                    api_pb2.SingleUpdate(
+                        rf_up_conv=api_pb2.RFUpConvUpdate(
                             index=index,
-                            fast_switch_mode=RfUpConvUpdateFastSwitchMode.FAST_SWITCH_MODE_OFF,
-                            enabled=True,
+                            fast_switch_mode=api_pb2.RFUpConvUpdate.FastSwitchMode.FAST_SWITCH_MODE_OFF,
+                            enabled=BoolValue(value=True)
                             # YR - I added the enabled update to make the assertion down the code pass
                         )
                     )
@@ -679,7 +661,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
 
     def calibrate(
         self,
-        element: Element[QuaConfigMixInputs],
+        element: Element[inc_qua_config_pb2.QuaConfig.MixInputs],
         lo_if_dict: Mapping[float, Sequence[float]],
         params: AutoCalibrationParams,
     ) -> MixerCalibrationResults:

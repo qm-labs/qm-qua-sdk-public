@@ -1,4 +1,4 @@
-from typing import Any, Set, Dict, List, Optional, TypedDict
+from typing import Any, Set, Dict, List, Union, Optional, TypedDict
 
 
 class PulserLocationType(TypedDict, total=False):
@@ -71,7 +71,7 @@ class EventType(TypedDict, total=False):
     eventValues: List[
         Any
     ]  # Type is unclear—only encountered empty lists so far, so couldn't determine the actual contents
-    quantumElement: str
+    quantumElement: Union[str, list[str]]
     sourcePulser: PulserLocationType
     sourcePulserIqInfo: IqInfoType
     timestamp: float

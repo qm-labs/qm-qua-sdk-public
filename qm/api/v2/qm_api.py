@@ -14,6 +14,7 @@ from typing import (
     Sequence,
     Generator,
     TypedDict,
+    MutableSequence,
     cast,
     overload,
 )
@@ -21,24 +22,24 @@ from typing import (
 from qm.type_hinting import Number
 from qm.utils import LOG_LEVEL_MAP
 from qm.octave import QmOctaveConfig
-from qm.grpc.qua_config import QuaConfig
 from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.program import Program, load_config
-from qm.grpc.compiler import CompilerMessage
 from qm.elements_db import init_octave_elements
-from qm.grpc.frontend import SimulatedResponsePart
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
-from qm.grpc.qm_manager import ConfigValidationMessage
+from qm.grpc.qm.grpc.v2 import qm_api_pb2, qmm_api_pb2
 from qm.api.models.server_details import ConnectionDetails
 from qm.utils.config_utils import get_controller_pb_config
+from qm.utils.protobuf_utils import proto_repeated_to_list
 from qm.api.simulation_api import create_simulation_request
+from qm.grpc.qm.grpc.v2.qm_api_pb2_grpc import QmServiceStub
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.elements.up_converted_input import UpconvertedInputNewApi
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.program._dict_to_pb_converter import DictToQuaConfigConverter
 from qm.program._fill_defaults_in_config_v1 import fill_defaults_in_config_v1
 from qm.octave.qm_octave import QmOctaveForNewApi, create_dc_offset_octave_update
+from qm.grpc.qm.pb import compiler_pb2, frontend_pb2, qm_manager_pb2, inc_qua_config_pb2
 from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, transfer_statuses_to_enum
 from qm.type_hinting.config_types import FullQuaConfig, MixerConfigType, LogicalQuaConfig, ControllerQuaConfig
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params, get_request_compiler_options
@@ -57,32 +58,18 @@ from qm.exceptions import (
     FailedToExecuteJobException,
     UnsupportedCapabilitiesError,
 )
-from qm.grpc.v2 import (
-    QmServiceStub,
-    JobsQueryParams,
-    RemoveJobsRequest,
-    UpdateConfigRequest,
-    QmServiceCloseRequest,
-    QmServiceCompileRequest,
-    QmServiceGetJobsRequest,
-    QmServiceSimulateRequest,
-    QmServiceGetConfigRequest,
-    QmServiceAddToQueueRequest,
-    ResetDigitalFiltersRequest,
-    QmServiceAddCompiledToQueueRequest,
-)
 
 logger = logging.getLogger(__name__)
 
 
-def _log_messages(messages: List[CompilerMessage]) -> None:
+def _log_messages(messages: MutableSequence[compiler_pb2.CompilerMessage]) -> None:
     for message in messages:
         logger.log(LOG_LEVEL_MAP[message.level], message.message)
 
 
 class ErrorResponseWithConfigValidationErrors(Protocol):
-    config_validation_errors: List[ConfigValidationMessage]
-    messages: List[CompilerMessage]
+    config_validation_errors: List[qm_manager_pb2.ConfigValidationMessage]
+    messages: List[compiler_pb2.CompilerMessage]
 
 
 def get_formatted_errors(error: ErrorResponseWithConfigValidationErrors) -> str:
@@ -144,7 +131,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
         capabilities: ServerCapabilities,
         octave_config: Optional[QmOctaveConfig],
         octave_manager: OctaveManager,
-        pb_config: Optional[QuaConfig] = None,
+        pb_config: Optional[inc_qua_config_pb2.QuaConfig] = None,
     ) -> None:
         # todo - remove _pb_config when octave config is in the GW
         super().__init__(connection_details)
@@ -171,7 +158,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
 
     def _convert_config_param_to_pb(
         self, config: Optional[Union[FullQuaConfig, LogicalQuaConfig]], function_name: str
-    ) -> Optional[QuaConfig]:
+    ) -> Optional[inc_qua_config_pb2.QuaConfig]:
         """
         Validates the config_v2 capability and converts the config to proto format.
         """
@@ -192,7 +179,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
 
     def _load_config_with_exception_handling(
         self, config: Union[FullQuaConfig, ControllerQuaConfig, LogicalQuaConfig], function_name: str
-    ) -> QuaConfig:
+    ) -> inc_qua_config_pb2.QuaConfig:
         try:
             return load_config(config, init_mode=False, octave_already_configured=self._octave_already_configured)
         except OctaveUnsupportedOnUpdate as e:
@@ -211,8 +198,8 @@ class QmApi(BaseApiV2[QmServiceStub]):
             config: The physical config
         """
         config_pb = self._load_config_with_exception_handling(config, self.update_config.__name__)
-        request = UpdateConfigRequest(quantum_machine_id=self._id, config=config_pb)
-        self._run(self._stub.update_config(request, timeout=self._timeout))
+        request = qm_api_pb2.UpdateConfigRequest(quantum_machine_id=self._id, config=config_pb)
+        self._run(self._stub.UpdateConfig, request, timeout=self._timeout)
 
     def get_jobs(
         self,
@@ -229,23 +216,24 @@ class QmApi(BaseApiV2[QmServiceStub]):
             user_ids: A list of user ids
             description: Jobs' description
             status: A list of job statuses
+
         Returns:
             A list of jobs
         """
-        query_params = JobsQueryParams(
+        query_params = qmm_api_pb2.JobsQueryParams(
             quantum_machine_ids=[self._id],
             job_ids=list(job_ids),
             user_ids=list(user_ids),
             description=description,
             status=transfer_statuses_to_enum(status),
         )
-        request = QmServiceGetJobsRequest(query=query_params)
-        response = self._run(self._stub.get_jobs(request, timeout=self._timeout))
+        request = qm_api_pb2.QmServiceGetJobsRequest(query=query_params)
+        response: qmm_api_pb2.GetJobsSuccess = self._run(self._stub.GetJobs, request, timeout=self._timeout)
         return [JobData.from_grpc(j) for j in response.jobs]
 
-    def _get_pb_config(self) -> QuaConfig:
-        request = QmServiceGetConfigRequest(quantum_machine_id=self._id)
-        response = self._run(self._stub.get_config(request, timeout=self._timeout))
+    def _get_pb_config(self) -> inc_qua_config_pb2.QuaConfig:
+        request = qm_api_pb2.QmServiceGetConfigRequest(quantum_machine_id=self._id)
+        response: qm_api_pb2.GetConfigSuccess = self._run(self._stub.GetConfig, request, timeout=self._timeout)
         config = response.config
         fill_defaults_in_config_v1(config)
         return config
@@ -293,27 +281,33 @@ class QmApi(BaseApiV2[QmServiceStub]):
 
         if compiler_options is None:
             compiler_options = CompilerOptionArguments()
-        program.qua_program.compiler_options = get_request_compiler_options(compiler_options)
-        request = QmServiceCompileRequest(
+        program.qua_program.compilerOptions.CopyFrom(get_request_compiler_options(compiler_options))
+        request = qm_api_pb2.QmServiceCompileRequest(
             quantum_machine_id=self._id, high_level_program=program.qua_program, config=pb_config
         )
         with handle_qop_error(CompilationException("Compilation failed")):
-            response = self._run(self._stub.compile(request, timeout=self._timeout))
+            response: qm_api_pb2.CompileResponse.CompilationSuccess = self._run(
+                self._stub.Compile, request, timeout=self._timeout
+            )
 
         _log_messages(response.messages)
         return response.program_id
 
     def _add_compiled(self, program_id: str) -> JobApi:
-        request = QmServiceAddCompiledToQueueRequest(quantum_machine_id=self._id, program_id=program_id)
-        response = self._run(self._stub.add_compiled_to_queue(request, timeout=self._timeout))
+        request = qm_api_pb2.QmServiceAddCompiledToQueueRequest(quantum_machine_id=self._id, program_id=program_id)
+        response: qm_api_pb2.AddCompiledToQueueResponse.AddCompiledToQueueResponseSuccess = self._run(
+            self._stub.AddCompiledToQueue, request, timeout=self._timeout
+        )
         return self._get_job(response.job_id)
 
-    def _add_program(self, program: Program, config: Optional[QuaConfig]) -> JobApi:
-        request = QmServiceAddToQueueRequest(
+    def _add_program(self, program: Program, config: Optional[inc_qua_config_pb2.QuaConfig]) -> JobApi:
+        request = qm_api_pb2.QmServiceAddToQueueRequest(
             quantum_machine_id=self._id, high_level_program=program.qua_program, config=config
         )
         with handle_qop_error(FailedToExecuteJobException("Failed to execute program")):
-            response = self._run(self._stub.add_to_queue(request, timeout=self._timeout))
+            response: qm_api_pb2.AddToQueueResponse.AddToQueueResponseSuccess = self._run(
+                self._stub.AddToQueue, request, timeout=self._timeout
+            )
 
         _log_messages(response.messages)
         return self._get_job(response.job_id)
@@ -349,6 +343,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
                 The configuration used with the program. The logical config is required if it was not supplied to the `QuantumMachine`.
                 A full configuration (containing both logical and controller configs), can be used to override the default `QuantumMachine` settings.
             compiler_options: Optional arguments for compilation
+
         Returns:
             A job object
         """
@@ -366,7 +361,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
 
             if compiler_options is None:
                 compiler_options = CompilerOptionArguments()
-            program.qua_program.compiler_options = get_request_compiler_options(compiler_options)
+            program.qua_program.compilerOptions.CopyFrom(get_request_compiler_options(compiler_options))
             job = self._add_program(program, pb_config)
 
         logger.info(f"Program added to queue. Job id: {job.id}")
@@ -378,6 +373,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
 
         Args:
             job_id: A list of jobs ids
+
         Returns:
             The job
         """
@@ -394,9 +390,42 @@ class QmApi(BaseApiV2[QmServiceStub]):
     def _get_job(self, job_id: str) -> JobApi:
         return JobApi(self.connection_details, job_id, self._caps)
 
-    def _get_simulated_job(self, job_id: str, simulated: Union[SimulatedResponsePart, None] = None) -> SimulatedJobApi:
+    def _get_simulated_job(
+        self, job_id: str, simulated: Union[frontend_pb2.SimulatedResponsePart, None] = None
+    ) -> SimulatedJobApi:
         return self.SIMULATED_JOB_CLASS(
             self.connection_details, job_id, simulated_response=simulated, capabilities=self._caps
+        )
+
+    def _create_simulate_request(
+        self,
+        program: Program,
+        simulate: SimulationConfig,
+        compiler_options: Optional[CompilerOptionArguments] = None,
+        *,
+        config: Optional[Union[FullQuaConfig, LogicalQuaConfig]] = None,
+        strict: Optional[bool] = None,
+        flags: Optional[List[str]] = None,
+    ) -> qm_api_pb2.QmServiceSimulateRequest:
+        """
+        Creates a simulate request.
+        """
+        standardized_compiler_options = standardize_compiler_params(compiler_options, strict, flags)
+        pb_config = self._convert_config_param_to_pb(config, self.simulate.__name__)
+
+        # We put self._get_pb_config() as the value for the config argument of create_simulation_request(), just
+        # because we had to fill in something so it would work. We are not going to use that value, since in the new
+        # request the config could be None. This is why when building the request we use the "pb_config" variable
+        # instead of the "standard_request.config".
+        standard_request = create_simulation_request(
+            self._get_pb_config(), program, simulate, standardized_compiler_options, self._caps
+        )
+        return qm_api_pb2.QmServiceSimulateRequest(
+            quantum_machine_id=self._id,
+            high_level_program=standard_request.highLevelProgram,
+            simulate=standard_request.simulate,
+            controller_connections=standard_request.controllerConnections,
+            config=pb_config,
         )
 
     def simulate(
@@ -425,32 +454,18 @@ class QmApi(BaseApiV2[QmServiceStub]):
                 A full configuration (containing both logical and controller configs), can be used to override the default `QuantumMachine` settings.
             strict: This parameter is deprecated, please use `compiler_options`
             flags: This parameter is deprecated, please use `compiler_options`
+
         Returns:
             A ``QmJob`` object (see Job API).
         """
         self._caps.validate(program.used_capabilities)
 
-        standardized_compiler_options = standardize_compiler_params(compiler_options, strict, flags)
-        pb_config = self._convert_config_param_to_pb(config, self.simulate.__name__)
-
-        # We put self._get_pb_config() as the value for the config argument of create_simulation_request(), just
-        # because we had to fill in something so it would work. We are not going to use that value, since in the new
-        # request the config could be None. This is why when building the request we use the "pb_config" variable
-        # instead of the "standard_request.config".
-        standard_request = create_simulation_request(
-            self._get_pb_config(), program, simulate, standardized_compiler_options, self._caps
-        )
-        request = QmServiceSimulateRequest(
-            quantum_machine_id=self._id,
-            high_level_program=standard_request.high_level_program,
-            simulate=standard_request.simulate,
-            controller_connections=standard_request.controller_connections,
-            config=pb_config,
-        )
         logger.info("Simulating program.")
-
+        request = self._create_simulate_request(
+            program, simulate, compiler_options, config=config, strict=strict, flags=flags
+        )
         with handle_simulation_error():
-            response = self._run(self._stub.simulate(request, timeout=self._timeout))
+            response: qmm_api_pb2.SimulationSuccess = self._run(self._stub.Simulate, request, timeout=self._timeout)
 
         _log_messages(response.messages)
 
@@ -477,6 +492,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
                 The configuration used with the program. The logical config is required if it was not supplied to the `QuantumMachine`.
                 A full configuration (containing both logical and controller configs), can be used to override the default `QuantumMachine` settings.
             compiler_options: Optional arguments for compilation.
+
         Returns:
             A ``QmJob`` object (see Job API).
         """
@@ -498,24 +514,29 @@ class QmApi(BaseApiV2[QmServiceStub]):
             user_ids: A list of user ids
             description: Jobs' description
             status: A list of job statuses
+
         Returns:
             A list of the removed jobs ids
         """
-        query_params = JobsQueryParams(
+        query_params = qmm_api_pb2.JobsQueryParams(
             quantum_machine_ids=[self._id],
             job_ids=list(job_ids),
             user_ids=list(user_ids),
             description=description,
             status=transfer_statuses_to_enum(status),
         )
-        response = self._run(self._stub.remove_jobs(RemoveJobsRequest(query_params), timeout=self._timeout))
-        return response.removed_job_ids
+        response: qm_api_pb2.RemoveJobsResponse.RemoveJobsResponseSuccess = self._run(
+            self._stub.RemoveJobs, qm_api_pb2.RemoveJobsRequest(query=query_params), timeout=self._timeout
+        )
+        return proto_repeated_to_list(response.removed_job_ids)
 
     def close(self) -> None:
         """
         Closes the quantum machine.
         """
-        self._run(self._stub.close(QmServiceCloseRequest(quantum_machine_id=self._id), timeout=self._timeout))
+        self._run(
+            self._stub.Close, qm_api_pb2.QmServiceCloseRequest(quantum_machine_id=self._id), timeout=self._timeout
+        )
 
     def get_queue_count(self) -> int:
         """
@@ -651,9 +672,9 @@ class QmApi(BaseApiV2[QmServiceStub]):
             )
 
         self._run(
-            self._stub.reset_digital_filters(
-                ResetDigitalFiltersRequest(quantum_machine_id=self._id), timeout=self._timeout
-            )
+            self._stub.ResetDigitalFilters,
+            qm_api_pb2.ResetDigitalFiltersRequest(quantum_machine_id=self._id),
+            timeout=self._timeout,
         )
 
 

@@ -18,7 +18,7 @@ from typing import (
 )
 
 from qm.type_hinting import NumberT
-from qm.grpc.qua import QuaProgramVarDeclaration
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.type_hinting.general import DataclassProtocol
 from qm.qua._dsl.variable_handling import _declare_struct_array_variable
 from qm.exceptions import ReservedFieldNameError, InvalidQuaArraySubclassError
@@ -42,7 +42,7 @@ class StructArrayFactory(Generic[NumberT]):
         )
 
     @property
-    def underlying_declaration(self) -> QuaProgramVarDeclaration:
+    def underlying_declaration(self) -> inc_qua_pb2.QuaProgram.VarDeclaration:
         # This function is called before 'create', so the real struct member declaration isn't available yet.
         # We do not really need a real declaration, only the 'metadata' of the struct array - type, size and position in struct.
         return QuaStructArrayVariable(
@@ -52,7 +52,7 @@ class StructArrayFactory(Generic[NumberT]):
 
 class _QuaStruct(DataclassProtocol, Protocol):
     __members_initializers__: Mapping[str, StructArrayFactory[Any]]
-    __underlying_declarations__: List[QuaProgramVarDeclaration]
+    __underlying_declarations__: List[inc_qua_pb2.QuaProgram.VarDeclaration]
     struct_reference: QuaStructReference
 
 
@@ -62,19 +62,52 @@ _T = TypeVar("_T")
 @dataclass_transform()
 @overload
 def qua_struct(_cls: Union[Type[_T], None]) -> Type[_T]:
+    """
+    Decorate a class as a QUA struct.
+
+    Args:
+        _cls (type[_T] | None): The class to decorate.
+    """
     ...
 
 
 @dataclass_transform()
 @overload
 def qua_struct() -> Callable[[Type[_T]], Type[_T]]:
+    """
+    Return a decorator that marks a class as a QUA struct.
+
+    This form is equivalent to using ``@qua_struct`` directly.
+    """
     ...
 
 
 @dataclass_transform()
 def qua_struct(_cls: Union[Type[_T], None] = None) -> Union[Callable[[Type[_T]], Type[_T]], Type[_T]]:
     """
-    Decorator to define a QUA struct.
+    Decorate a class as a QUA struct.
+
+    A QUA struct defines the packet schema used by OPNIC input and output streams.
+    Each annotated field becomes a QUA array member in the packet, and every field must use
+    the form ``QuaArray[element_type, size]``. Even a single scalar packet value must be declared
+    as a size-1 array, for example ``QuaArray[int, 1]``.
+
+    After decorating the class, create QUA struct instances inside a QUA program with
+    [qm.qua.declare_struct][]. Use those instances with [qm.qua.receive_from_stream][] and
+    [qm.qua.send_to_stream][].
+
+    See [OPNIC Hybrid Link](../../Guides/OPNIC_Guide.md) for end-to-end examples.
+
+    Example:
+        ```python
+        @qua_struct
+        class Packet:
+            data: QuaArray[int, 1]
+            flags: QuaArray[bool, 2]
+        ```
+
+    Args:
+        _cls (type[_T] | None): The class to decorate. If omitted, returns a decorator.
     """
 
     def validate_field_type(annotation: Any) -> None:

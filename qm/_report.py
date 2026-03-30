@@ -2,11 +2,8 @@ from enum import Enum
 from typing import List, Union
 from dataclasses import dataclass
 
-from qm.grpc.results_analyser import GetJobErrorsResponseError, GetJobErrorsResponseExecutionErrorSeverity
-from qm.grpc.v2 import (
-    GetJobErrorsResponseGetJobErrorsResponseSuccessError,
-    GetJobErrorsResponseGetJobErrorsResponseSuccessExecutionErrorSeverity,
-)
+from qm.grpc.qm.pb import job_results_pb2
+from qm.grpc.qm.grpc.v2 import job_api_pb2
 
 
 class ExecutionErrorSeverity(Enum):
@@ -25,29 +22,33 @@ class ExecutionError:
 
     @classmethod
     def create_from_grpc_message(
-        cls, error: Union[GetJobErrorsResponseError, GetJobErrorsResponseGetJobErrorsResponseSuccessError]
+        cls,
+        error: Union[
+            job_results_pb2.GetJobErrorsResponse.Error,
+            job_api_pb2.GetJobErrorsResponse.GetJobErrorsResponseSuccess.Error,
+        ],
     ) -> "ExecutionError":
         return cls(
-            error_code=error.error_code,
+            error_code=error.errorCode,
             message=error.message,
-            severity=cls._parse_severity(error.error_severity),
+            severity=cls._parse_severity(error.errorSeverity),
         )
 
     @staticmethod
     def _parse_severity(
-        error_severity: Union[
-            GetJobErrorsResponseExecutionErrorSeverity,
-            GetJobErrorsResponseGetJobErrorsResponseSuccessExecutionErrorSeverity,
+        error_severity: Union[  # type: ignore[name-defined]
+            job_results_pb2.GetJobErrorsResponse.ExecutionErrorSeverity.ValueType,
+            job_api_pb2.GetJobErrorsResponse.GetJobErrorsResponseSuccess.ExecutionErrorSeverity.ValueType,
         ],
     ) -> ExecutionErrorSeverity:
         if error_severity in {
-            GetJobErrorsResponseExecutionErrorSeverity.WARNING,
-            GetJobErrorsResponseGetJobErrorsResponseSuccessExecutionErrorSeverity.WARNING,
+            job_results_pb2.GetJobErrorsResponse.ExecutionErrorSeverity.WARNING,
+            job_api_pb2.GetJobErrorsResponse.GetJobErrorsResponseSuccess.ExecutionErrorSeverity.WARNING,
         }:
             return ExecutionErrorSeverity.Warn
         elif error_severity in {
-            GetJobErrorsResponseExecutionErrorSeverity.ERROR,
-            GetJobErrorsResponseGetJobErrorsResponseSuccessExecutionErrorSeverity.ERROR,
+            job_results_pb2.GetJobErrorsResponse.ExecutionErrorSeverity.ERROR,
+            job_api_pb2.GetJobErrorsResponse.GetJobErrorsResponseSuccess.ExecutionErrorSeverity.ERROR,
         }:
             return ExecutionErrorSeverity.Error
         raise TypeError(f"No severity level: {error_severity}")

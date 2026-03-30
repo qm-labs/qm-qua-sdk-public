@@ -1,17 +1,8 @@
 from qm._loc import _get_loc
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.qua._expressions import Scalar, to_scalar_pb_expression
 from qm.qua._scope_management.scopes_manager import scopes_manager
-from qm.grpc.qua import (
-    QuaProgramCorrection,
-    QuaProgramAnyStatement,
-    QuaProgramAnyScalarExpression,
-    QuaProgramSetDcOffsetStatement,
-    QuaProgramQuantumElementReference,
-    QuaProgramUpdateFrequencyStatement,
-    QuaProgramUpdateCorrectionStatement,
-    QuaProgramUpdateFrequencyStatementUnits,
-)
 
 
 def update_frequency(
@@ -50,19 +41,19 @@ def update_frequency(
         ```
     """
     try:
-        units_enum = QuaProgramUpdateFrequencyStatementUnits[units]  # type: ignore[valid-type, type-arg]
+        units_enum = getattr(inc_qua_pb2.QuaProgram.UpdateFrequencyStatement.Units, units)
     except KeyError:
         raise QmQuaException(f'unknown units "{units}"')
 
     loc = _get_loc()
-    statement = QuaProgramUpdateFrequencyStatement(
+    statement = inc_qua_pb2.QuaProgram.UpdateFrequencyStatement(
         loc=loc,
-        qe=QuaProgramQuantumElementReference(name=element, loc=loc),
+        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
         units=units_enum,
-        keep_phase=keep_phase,
-        value=QuaProgramAnyScalarExpression().from_dict(to_scalar_pb_expression(new_frequency).to_dict()),
+        keepPhase=keep_phase,
+        value=to_scalar_pb_expression(new_frequency),
     )
-    scopes_manager.append_statement(QuaProgramAnyStatement(update_frequency=statement))
+    scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(updateFrequency=statement))
 
 
 def update_correction(
@@ -102,17 +93,17 @@ def update_correction(
         ```
     """
     loc = _get_loc()
-    statement = QuaProgramUpdateCorrectionStatement(
+    statement = inc_qua_pb2.QuaProgram.UpdateCorrectionStatement(
         loc=loc,
-        qe=QuaProgramQuantumElementReference(name=element, loc=loc),
-        correction=QuaProgramCorrection(
+        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+        correction=inc_qua_pb2.QuaProgram.Correction(
             c0=to_scalar_pb_expression(c00),
             c1=to_scalar_pb_expression(c01),
             c2=to_scalar_pb_expression(c10),
             c3=to_scalar_pb_expression(c11),
         ),
     )
-    scopes_manager.append_statement(QuaProgramAnyStatement(update_correction=statement))
+    scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(updateCorrection=statement))
 
 
 def set_dc_offset(element: str, element_input: str, offset: Scalar[float]) -> None:
@@ -130,10 +121,10 @@ def set_dc_offset(element: str, element_input: str, offset: Scalar[float]) -> No
         offset: The offset to set
     """
     loc = _get_loc()
-    statement = QuaProgramSetDcOffsetStatement(
+    statement = inc_qua_pb2.QuaProgram.SetDcOffsetStatement(
         loc=loc,
-        qe=QuaProgramQuantumElementReference(name=element, loc=loc),
-        qe_input_reference=element_input,
+        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+        qeInputReference=element_input,
         offset=to_scalar_pb_expression(offset),
     )
-    scopes_manager.append_statement(QuaProgramAnyStatement(set_dc_offset=statement))
+    scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(setDcOffset=statement))

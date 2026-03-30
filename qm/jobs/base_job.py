@@ -2,21 +2,14 @@ import datetime
 import warnings
 from typing import List, Optional
 
-import betterproto
-
 from qm.type_hinting import Value
+from qm.grpc.qm.pb import frontend_pb2
 from qm.exceptions import QmQuaException
 from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
 from qm.api.job_manager_api import create_job_manager_from_api
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
-from qm.grpc.frontend import (
-    JobExecutionStatus,
-    JobExecutionStatusLoading,
-    JobExecutionStatusPending,
-    JobExecutionStatusRunning,
-    JobExecutionStatusCompleted,
-)
+from qm.utils.protobuf_utils import which_one_of, timestamp_to_datetime
 
 
 class QmBaseJob:
@@ -39,28 +32,28 @@ class QmBaseJob:
         self._initialize_from_job_status()
 
     def _initialize_from_job_status(self) -> None:
-        status: JobExecutionStatus = self._job_manager.get_job_execution_status(self._id, self._machine_id)
-        _, job_state = betterproto.which_one_of(status, "status")
+        status: frontend_pb2.JobExecutionStatus = self._job_manager.get_job_execution_status(self._id, self._machine_id)
+        _, job_state = which_one_of(status, "status")
 
         if isinstance(
             job_state,
             (
-                JobExecutionStatusPending,
-                JobExecutionStatusRunning,
-                JobExecutionStatusCompleted,
-                JobExecutionStatusLoading,
+                frontend_pb2.JobExecutionStatus.Pending,
+                frontend_pb2.JobExecutionStatus.Running,
+                frontend_pb2.JobExecutionStatus.Completed,
+                frontend_pb2.JobExecutionStatus.Loading,
             ),
         ):
-            self._added_user_id = job_state.added_by
-            self._time_added = job_state.time_added
+            self._added_user_id = job_state.addedBy
+            self._time_added = timestamp_to_datetime(job_state.timeAdded)
 
     @property
     def status(self) -> str:
         """Returns the status of the job, one of the following strings:
         "unknown", "pending", "running", "completed", "canceled", "loading", "error"
         """
-        status: JobExecutionStatus = self._job_manager.get_job_execution_status(self._id, self._machine_id)
-        name, _ = betterproto.which_one_of(status, "status")
+        status: frontend_pb2.JobExecutionStatus = self._job_manager.get_job_execution_status(self._id, self._machine_id)
+        name, _ = which_one_of(status, "status")
         return name
 
     @property

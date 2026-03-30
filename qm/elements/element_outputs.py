@@ -1,7 +1,7 @@
 from typing import Optional
 
-from octave_sdk.octave import RFInput
-from octave_sdk import IFMode, RFInputLOSource, RFInputRFSource
+from qm.octave_sdk.octave import RFInput
+from qm.octave_sdk import IFMode, RFInputLOSource, RFInputRFSource
 
 
 class ElementOutput:

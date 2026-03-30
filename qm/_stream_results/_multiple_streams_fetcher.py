@@ -3,7 +3,6 @@ from io import BytesIO
 from collections import defaultdict
 from typing import Dict, Tuple, Union, Literal, Mapping, BinaryIO, Optional, Collection
 
-from qm.utils.async_utils import run_async
 from qm.type_hinting.general import NumpyArray
 from qm.api.v2.job_result_api import JobResultApi
 from qm.api.models.jobs import JobResultItemSchema, JobNamedResultHeader
@@ -56,9 +55,8 @@ class MultipleStreamsFetcher:
         timeout: Optional[float],
     ) -> Mapping[str, NumpyArray]:
         name_to_writer = {n: BytesIO() for n in name_to_slice}
-        name_to_count_data_written = run_async(
-            self._add_results_to_writers(name_to_slice, name_to_writer, timeout=timeout)
-        )
+        name_to_count_data_written = self._add_results_to_writers(name_to_slice, name_to_writer, timeout=timeout)
+
         name_to_array = {
             n: _create_results_array(
                 name_to_count_data_written[n],
@@ -94,14 +92,14 @@ class MultipleStreamsFetcher:
             name_to_header[name] = header
         return name_to_slice, name_to_header
 
-    async def _add_results_to_writers(
+    def _add_results_to_writers(
         self,
         name_to_slice: Mapping[str, slice],
         name_to_writer: Mapping[str, BinaryIO],
         timeout: Optional[float],
     ) -> Mapping[str, int]:
         name_to_count_data_written: Dict[str, int] = defaultdict(int)
-        async for result in self._service.get_job_named_results(name_to_slice, timeout=timeout):
+        for result in self._service.get_job_named_results(name_to_slice, timeout=timeout):
             data_writer = name_to_writer[result.output_name]
             data_writer.write(result.data)
             name_to_count_data_written[result.output_name] += result.count_of_items

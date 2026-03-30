@@ -1,10 +1,10 @@
 import uuid
 import warnings
-from typing import Dict, Union, Optional
-
-import betterproto
+from typing import Union, Optional, MutableMapping
 
 from qm.utils import deprecation_message
+from qm.grpc.qm.pb import inc_qua_config_pb2
+from qm.utils.protobuf_utils import which_one_of
 from qm.api.models.capabilities import OPX_FEM_IDX, QopCaps, ServerCapabilities
 from qm.program._dict_to_pb_converter.base_converter import BaseDictToPbConverter
 from qm.program._dict_to_pb_converter.converters.pulse_converter import PulseConverter
@@ -20,37 +20,17 @@ from qm.program._dict_to_pb_converter.converters.control_device_converter.contro
     ControlDeviceConverter,
 )
 from qm.exceptions import (
+    NoMatchingOctavePort,
     ConfigValidationException,
     OctaveUnsupportedOnUpdate,
     ConfigurationLockedByOctave,
-    CapabilitiesNotInitializedError,
     ElementInputConnectionAmbiguity,
     ElementOutputConnectionAmbiguity,
-)
-from qm.grpc.qua_config import (
-    QuaConfig,
-    QuaConfigMatrix,
-    QuaConfigMixerDec,
-    QuaConfigDeviceDec,
-    QuaConfigMixInputs,
-    QuaConfigElementDec,
-    QuaConfigQuaConfigV1,
-    QuaConfigQuaConfigV2,
-    QuaConfigOctaveConfig,
-    QuaConfigControllerDec,
-    QuaConfigLogicalConfig,
-    QuaConfigCorrectionEntry,
-    QuaConfigMultipleOutputs,
-    QuaConfigControllerConfig,
-    QuaConfigDigitalWaveformDec,
-    QuaConfigOctaveRfOutputConfig,
-    QuaConfigDigitalWaveformSample,
-    QuaConfigMicrowaveOutputPortReference,
 )
 
 
 class DictToQuaConfigConverter(
-    BaseDictToPbConverter[Union[FullQuaConfig, ControllerQuaConfig, LogicalQuaConfig], QuaConfig]
+    BaseDictToPbConverter[Union[FullQuaConfig, ControllerQuaConfig, LogicalQuaConfig], inc_qua_config_pb2.QuaConfig]
 ):
     def __init__(
         self, capabilities: ServerCapabilities, init_mode: bool = True, octave_already_configured: bool = False
@@ -64,13 +44,12 @@ class DictToQuaConfigConverter(
         self.iw_converter = IntegrationWeightsConverter(capabilities, init_mode)
         self.mixer_correction_converter = MixerCorrectionConverter(capabilities, init_mode)
         self.oscillator_converter = OscillatorConverter(capabilities, init_mode)
-
         self.octave_already_configured = octave_already_configured
 
     def convert(
         self,
         input_data: Union[FullQuaConfig, ControllerQuaConfig, LogicalQuaConfig],
-    ) -> QuaConfig:
+    ) -> inc_qua_config_pb2.QuaConfig:
         self.run_preload_validations(input_data, self.octave_already_configured)
 
         pb_config = self.set_config_wrapper()
@@ -79,55 +58,62 @@ class DictToQuaConfigConverter(
 
         def set_controllers() -> None:
             for k, v in input_data["controllers"].items():  # type: ignore[typeddict-item]
-                controller_config.control_devices[k] = self.control_device_converter.convert(v)
+                controller_config.controlDevices[k].CopyFrom(self.control_device_converter.convert(v))
             # Controllers attribute is supported only in config v1
-            if self.all_controllers_are_opx(controller_config.control_devices) and isinstance(
-                controller_config, QuaConfigQuaConfigV1
+            if self.all_controllers_are_opx(controller_config.controlDevices) and isinstance(
+                controller_config, inc_qua_config_pb2.QuaConfig.QuaConfigV1
             ):
-                for _k, _v in controller_config.control_devices.items():
+                for _k, _v in controller_config.controlDevices.items():
                     controller_inst = get_fem_config_instance(_v.fems[OPX_FEM_IDX])
-                    if not isinstance(controller_inst, QuaConfigControllerDec):
+                    if not isinstance(controller_inst, inc_qua_config_pb2.QuaConfig.ControllerDec):
                         raise ValueError("This should not happen")
-                    controller_config.controllers[_k] = controller_inst
+                    controller_config.controllers[_k].CopyFrom(controller_inst)
 
         def set_octaves() -> None:
             for k, v in input_data.get("octaves", {}).items():  # type: ignore[attr-defined]
-                controller_config.octaves[k] = self.octave_converter.convert(v)
+                controller_config.octaves[k].CopyFrom(self.octave_converter.convert(v))
 
         def set_elements() -> None:
             for k, v in input_data["elements"].items():  # type: ignore[typeddict-item]
                 try:
-                    logical_config.elements[k] = self.element_converter.convert(v)
+                    logical_config.elements[k].CopyFrom(self.element_converter.convert(v))
                 except StickyElementIsNotSupported:
                     raise ConfigValidationException(f"Server does not support digital sticky used in element " f"'{k}'")
 
         def set_pulses() -> None:
             for k, v in input_data["pulses"].items():  # type: ignore[typeddict-item]
-                logical_config.pulses[k] = self.pulse_converter.convert(v)
+                logical_config.pulses[k].CopyFrom(self.pulse_converter.convert(v))
 
         def set_waveforms() -> None:
             for k, v in input_data["waveforms"].items():  # type: ignore[typeddict-item]
-                logical_config.waveforms[k] = self.waveform_converter.convert(v)
+                logical_config.waveforms[k].CopyFrom(self.waveform_converter.convert(v))
 
         def set_digital_waveforms() -> None:
             for k, v in input_data["digital_waveforms"].items():  # type: ignore[typeddict-item]
-                logical_config.digital_waveforms[k] = QuaConfigDigitalWaveformDec(
-                    samples=[QuaConfigDigitalWaveformSample(value=bool(s[0]), length=s[1]) for s in v["samples"]]
+                logical_config.digitalWaveforms[k].CopyFrom(
+                    inc_qua_config_pb2.QuaConfig.DigitalWaveformDec(
+                        samples=[
+                            inc_qua_config_pb2.QuaConfig.DigitalWaveformSample(value=bool(s[0]), length=s[1])
+                            for s in v["samples"]
+                        ]
+                    )
                 )
 
         def set_integration_weights() -> None:
             for k, v in input_data["integration_weights"].items():  # type: ignore[typeddict-item]
-                logical_config.integration_weights[k] = self.iw_converter.convert(v)
+                logical_config.integrationWeights[k].CopyFrom(self.iw_converter.convert(v))
 
         def set_mixers() -> None:
             for k, v in input_data["mixers"].items():  # type: ignore[typeddict-item]
-                controller_config.mixers[k] = QuaConfigMixerDec(
-                    correction=[self.mixer_correction_converter.convert(u) for u in v]
+                controller_config.mixers[k].CopyFrom(
+                    inc_qua_config_pb2.QuaConfig.MixerDec(
+                        correction=[self.mixer_correction_converter.convert(u) for u in v]
+                    )
                 )
 
         def set_oscillators() -> None:
             for k, v in input_data["oscillators"].items():  # type: ignore[typeddict-item]
-                logical_config.oscillators[k] = self.oscillator_converter.convert(v)
+                logical_config.oscillators[k].CopyFrom(self.oscillator_converter.convert(v))
 
         key_to_action = {
             "version": lambda: None,
@@ -160,11 +146,6 @@ class DictToQuaConfigConverter(
         config: Union[FullQuaConfig, ControllerQuaConfig, LogicalQuaConfig],
         octave_already_configured: bool = False,
     ) -> None:
-        # When the capabilities aren't initialized, the capabilities argument is of type 'Provide' instead of 'ServerCapabilities'.
-        # This is only relevant for qua_config_schema.py, where the capabilities are provided by the container.
-        if not isinstance(self._capabilities, ServerCapabilities):
-            raise CapabilitiesNotInitializedError
-
         if not self._init_mode:
             # With these two validations, we ensure any configuration that relates to Octave is done in init mode.
             # Or in other words, Octave doesn't support 'send program with config'.
@@ -181,28 +162,31 @@ class DictToQuaConfigConverter(
                     "To resolve this, either avoid using Octaves, or ensure all logical configuration is completed when opening the QM."
                 )
 
-    def set_config_wrapper(self) -> QuaConfig:
-        pb_config = QuaConfig()
+    def set_config_wrapper(self) -> inc_qua_config_pb2.QuaConfig:
+        pb_config = inc_qua_config_pb2.QuaConfig()
 
         if self._capabilities.supports(QopCaps.config_v2):
-            pb_config.v2 = QuaConfigQuaConfigV2(
-                controller_config=QuaConfigControllerConfig(), logical_config=QuaConfigLogicalConfig()
+            pb_config.v2.CopyFrom(
+                inc_qua_config_pb2.QuaConfig.QuaConfigV2(
+                    controller_config=inc_qua_config_pb2.QuaConfig.ControllerConfig(),
+                    logical_config=inc_qua_config_pb2.QuaConfig.LogicalConfig(),
+                )
             )
         else:
-            pb_config.v1_beta = QuaConfigQuaConfigV1()
+            pb_config.v1beta.CopyFrom(inc_qua_config_pb2.QuaConfig.QuaConfigV1())
 
         return pb_config
 
     @staticmethod
-    def all_controllers_are_opx(control_devices: Dict[str, QuaConfigDeviceDec]) -> bool:
+    def all_controllers_are_opx(control_devices: MutableMapping[str, inc_qua_config_pb2.QuaConfig.DeviceDec]) -> bool:
         for device_config in control_devices.values():
             for fem_config in device_config.fems.values():
-                _, controller_inst = betterproto.which_one_of(fem_config, "fem_type_one_of")
-                if not isinstance(controller_inst, QuaConfigControllerDec):
+                _, controller_inst = which_one_of(fem_config, "fem_type_one_of")
+                if not isinstance(controller_inst, inc_qua_config_pb2.QuaConfig.ControllerDec):
                     return False
         return True
 
-    def apply_post_load_setters(self, pb_config: QuaConfig) -> None:
+    def apply_post_load_setters(self, pb_config: inc_qua_config_pb2.QuaConfig) -> None:
         # In config_v2, elements can be defined independently of mixers.
         # This breaks the existing logic, which automatically assigns default mixers and octave values based on the elements.
         # As a result, users of config_v2 that rely on these autocompleted values need to manually add them, or use the old flow (sending full config in init mode).
@@ -214,138 +198,164 @@ class DictToQuaConfigConverter(
             self.set_non_existing_mixers_in_mix_input_elements(pb_config)
 
     @staticmethod
-    def set_octave_upconverter_connection_to_elements(pb_config: QuaConfig) -> None:
+    def set_octave_upconverter_connection_to_elements(pb_config: inc_qua_config_pb2.QuaConfig) -> None:
+        octaves_config = get_controller_pb_config(pb_config).octaves
+        elements_config = get_logical_pb_config(pb_config).elements
+
+        for element_name, element in elements_config.items():
+            for rf_input in element.RFInputs.values():
+                device = octaves_config.get(rf_input.device_name)
+                if not device:
+                    raise NoMatchingOctavePort(
+                        f"Octave `{rf_input.device_name}` that is connected to the element `{element_name}` (input) was not found"
+                    )
+                upconverter_config = device.rf_outputs.get(rf_input.port)
+                if not upconverter_config:
+                    raise NoMatchingOctavePort(
+                        f"Port {rf_input.port} of octave `{rf_input.device_name}` that is connected to the element `{element_name}` (input) was not found"
+                    )
+
+                _, element_input = which_one_of(element, "element_inputs_one_of")
+                if element_input is not None:
+                    raise ElementInputConnectionAmbiguity("Ambiguous definition of element input")
+
+                element.mixInputs.CopyFrom(
+                    inc_qua_config_pb2.QuaConfig.MixInputs(
+                        I=upconverter_config.I_connection, Q=upconverter_config.Q_connection
+                    )
+                )
+
+    def set_lo_frequency_to_mix_input_elements_that_are_connected_to_octave(
+        self, pb_config: inc_qua_config_pb2.QuaConfig
+    ) -> None:
         octaves_config = get_controller_pb_config(pb_config).octaves
         elements_config = get_logical_pb_config(pb_config).elements
 
         for element in elements_config.values():
-            for rf_input in element.rf_inputs.values():
-                if rf_input.device_name in octaves_config:
-                    if rf_input.port in octaves_config[rf_input.device_name].rf_outputs:
-                        _, element_input = betterproto.which_one_of(element, "element_inputs_one_of")
-                        if element_input is not None:
-                            raise ElementInputConnectionAmbiguity("Ambiguous definition of element input")
-
-                        upconverter_config = octaves_config[rf_input.device_name].rf_outputs[rf_input.port]
-                        element.mix_inputs = QuaConfigMixInputs(
-                            i=upconverter_config.i_connection, q=upconverter_config.q_connection
-                        )
-
-    def set_lo_frequency_to_mix_input_elements_that_are_connected_to_octave(self, pb_config: QuaConfig) -> None:
-        octaves_config = get_controller_pb_config(pb_config).octaves
-        elements_config = get_logical_pb_config(pb_config).elements
-
-        for element in elements_config.values():
-            _, element_input = betterproto.which_one_of(element, "element_inputs_one_of")
-            if isinstance(element_input, QuaConfigMixInputs):
+            _, element_input = which_one_of(element, "element_inputs_one_of")
+            if isinstance(element_input, inc_qua_config_pb2.QuaConfig.MixInputs):
                 rf_output = self._get_rf_output_for_octave(element, octaves_config)
                 if rf_output is None:
                     continue
 
-                if element_input.lo_frequency not in {0, int(rf_output.lo_frequency)}:
+                if element_input.loFrequency not in {0, int(rf_output.LO_frequency)}:
                     raise ConfigValidationException(
                         "LO frequency mismatch. The frequency stated in the element is different from "
                         "the one stated in the Octave, remove the one in the element."
                     )
-                element_input.lo_frequency = int(rf_output.lo_frequency)
+                element_input.loFrequency = int(rf_output.LO_frequency)
                 if self._capabilities.supports_double_frequency:
-                    element_input.lo_frequency_double = rf_output.lo_frequency
+                    element_input.loFrequencyDouble = rf_output.LO_frequency
 
     @staticmethod
     def _get_rf_output_for_octave(
-        element: QuaConfigElementDec, octaves: Dict[str, QuaConfigOctaveConfig]
-    ) -> Optional[QuaConfigOctaveRfOutputConfig]:
-        if element.rf_inputs:
-            element_rf_input = list(element.rf_inputs.values())[0]
+        element: inc_qua_config_pb2.QuaConfig.ElementDec,
+        octaves: MutableMapping[str, inc_qua_config_pb2.QuaConfig.Octave.Config],
+    ) -> Optional[inc_qua_config_pb2.QuaConfig.Octave.RFOutputConfig]:
+        if element.RFInputs:
+            element_rf_input = list(element.RFInputs.values())[0]
             octave_config = octaves[element_rf_input.device_name]
             return octave_config.rf_outputs[element_rf_input.port]
 
         # This part is for users that do not use the rf_inputs  for connecting the octave
-        element_input = element.mix_inputs
+        element_input = element.mixInputs
         for octave in octaves.values():
             for rf_output in octave.rf_outputs.values():
                 if all(
                     [
-                        (rf_output.i_connection.controller == element_input.i.controller),
-                        (rf_output.i_connection.fem == element_input.i.fem),
-                        (rf_output.i_connection.number == element_input.i.number),
-                        (rf_output.q_connection.controller == element_input.q.controller),
-                        (rf_output.q_connection.fem == element_input.q.fem),
-                        (rf_output.q_connection.number == element_input.q.number),
+                        (rf_output.I_connection.controller == element_input.I.controller),
+                        (rf_output.I_connection.fem == element_input.I.fem),
+                        (rf_output.I_connection.number == element_input.I.number),
+                        (rf_output.Q_connection.controller == element_input.Q.controller),
+                        (rf_output.Q_connection.fem == element_input.Q.fem),
+                        (rf_output.Q_connection.number == element_input.Q.number),
                     ]
                 ):
                     return rf_output
         return None
 
     @staticmethod
-    def set_octave_downconverter_connection_to_elements(pb_config: QuaConfig) -> None:
+    def set_octave_downconverter_connection_to_elements(pb_config: inc_qua_config_pb2.QuaConfig) -> None:
         octaves_config = get_controller_pb_config(pb_config).octaves
         elements_config = get_logical_pb_config(pb_config).elements
 
-        for element in elements_config.values():
-            for _, rf_output in element.rf_outputs.items():
-                if rf_output.device_name in octaves_config:
-                    if rf_output.port in octaves_config[rf_output.device_name].rf_inputs:
-                        downconverter_config = octaves_config[rf_output.device_name].if_outputs
-                        outputs_form_octave = {
-                            downconverter_config.if_out1.name: downconverter_config.if_out1.port,
-                            downconverter_config.if_out2.name: downconverter_config.if_out2.port,
-                        }
-                        for k, v in outputs_form_octave.items():
-                            if k in element.outputs:
-                                if v != element.outputs[k]:
-                                    raise ElementOutputConnectionAmbiguity(
-                                        f"Output {k} is connected to {element.outputs[k]} but the octave "
-                                        f"downconverter is connected to {v}"
-                                    )
-                            else:
-                                element.outputs[k] = v
-                                _, element_outputs = betterproto.which_one_of(element, "element_outputs_one_of")
-                                if isinstance(element_outputs, QuaConfigMicrowaveOutputPortReference):
-                                    raise ConfigValidationException("Cannot connect octave to microwave output")
-                                elif isinstance(element_outputs, QuaConfigMultipleOutputs):
-                                    element_outputs.port_references[k] = v
-                                else:
-                                    element.multiple_outputs = QuaConfigMultipleOutputs(port_references={k: v})
+        for element_name, element in elements_config.items():
+            for _, rf_output in element.RFOutputs.items():
+                device = octaves_config.get(rf_output.device_name)
+                if not device:
+                    raise NoMatchingOctavePort(
+                        f"Octave `{rf_output.device_name}` that is connected to the element `{element_name}` (output) was not found"
+                    )
+                port = device.rf_inputs.get(rf_output.port)
+                if not port:
+                    raise NoMatchingOctavePort(
+                        f"Port {rf_output.port} of octave `{rf_output.device_name}` that is connected to the element `{element_name}` (output) was not found"
+                    )
+
+                downconverter_config = device.if_outputs
+                outputs_form_octave = {
+                    downconverter_config.IF_out1.name: downconverter_config.IF_out1.port,
+                    downconverter_config.IF_out2.name: downconverter_config.IF_out2.port,
+                }
+                for k, v in outputs_form_octave.items():
+                    if k in element.outputs:
+                        if v != element.outputs[k]:
+                            raise ElementOutputConnectionAmbiguity(
+                                f"Output {k} is connected to {element.outputs[k]} but the octave "
+                                f"downconverter is connected to {v}"
+                            )
+                    else:
+                        element.outputs[k].CopyFrom(v)
+                        _, element_outputs = which_one_of(element, "element_outputs_one_of")
+                        if isinstance(element_outputs, inc_qua_config_pb2.QuaConfig.MicrowaveOutputPortReference):
+                            raise ConfigValidationException("Cannot connect octave to microwave output")
+                        elif isinstance(element_outputs, inc_qua_config_pb2.QuaConfig.MultipleOutputs):
+                            element_outputs.port_references[k].CopyFrom(v)
+                        else:
+                            element.multipleOutputs.CopyFrom(
+                                inc_qua_config_pb2.QuaConfig.MultipleOutputs(port_references={k: v})
+                            )
 
     @staticmethod
-    def set_non_existing_mixers_in_mix_input_elements(pb_config: QuaConfig) -> None:
+    def set_non_existing_mixers_in_mix_input_elements(pb_config: inc_qua_config_pb2.QuaConfig) -> None:
         mixers_config = get_controller_pb_config(pb_config).mixers
         elements_config = get_logical_pb_config(pb_config).elements
 
         for element_name, element in elements_config.items():
-            _, element_input = betterproto.which_one_of(element, "element_inputs_one_of")
-            if isinstance(element_input, QuaConfigMixInputs):
-                if (
-                    element.intermediate_frequency
+            _, element_input = which_one_of(element, "element_inputs_one_of")
+            if isinstance(element_input, inc_qua_config_pb2.QuaConfig.MixInputs):
+                if element.HasField(
+                    "intermediateFrequency"
                 ):  # This is here because in validation I saw that we can set an element without IF
                     if not element_input.mixer:
                         element_input.mixer = f"{element_name}_mixer_{uuid.uuid4().hex[:3]}"
                         # The uuid is just to make sure the mixer doesn't exist
                     if element_input.mixer not in mixers_config:
-                        mixers_config[element_input.mixer] = QuaConfigMixerDec(
-                            correction=[
-                                QuaConfigCorrectionEntry(
-                                    frequency=element.intermediate_frequency,
-                                    frequency_negative=element.intermediate_frequency_negative,
-                                    frequency_double=element.intermediate_frequency_double,
-                                    lo_frequency=element_input.lo_frequency,
-                                    lo_frequency_double=element_input.lo_frequency_double,
-                                    correction=QuaConfigMatrix(v00=1, v01=0, v10=0, v11=1),
-                                )
-                            ]
+                        mixers_config[element_input.mixer].CopyFrom(
+                            inc_qua_config_pb2.QuaConfig.MixerDec(
+                                correction=[
+                                    inc_qua_config_pb2.QuaConfig.CorrectionEntry(
+                                        frequency=element.intermediateFrequency.value,
+                                        frequencyNegative=element.intermediateFrequencyNegative,
+                                        frequencyDouble=element.intermediateFrequencyDouble,
+                                        loFrequency=element_input.loFrequency,
+                                        loFrequencyDouble=element_input.loFrequencyDouble,
+                                        correction=inc_qua_config_pb2.QuaConfig.Matrix(v00=1, v01=0, v10=0, v11=1),
+                                    )
+                                ]
+                            )
                         )
 
-    def deconvert(self, output_data: QuaConfig) -> FullQuaConfig:
+    def deconvert(self, output_data: inc_qua_config_pb2.QuaConfig) -> FullQuaConfig:
         controller_config = get_controller_pb_config(output_data)
         logical_config = get_logical_pb_config(output_data)
 
-        if controller_config.control_devices:
+        if controller_config.controlDevices:
             controllers = {
                 name: self.control_device_converter.deconvert(value)
-                for name, value in controller_config.control_devices.items()
+                for name, value in controller_config.controlDevices.items()
             }
-        elif isinstance(controller_config, QuaConfigQuaConfigV1) and controller_config.controllers:
+        elif isinstance(controller_config, inc_qua_config_pb2.QuaConfig.QuaConfigV1) and controller_config.controllers:
             controllers = {
                 name: self.control_device_converter._deconvert_controller(value)
                 for name, value in controller_config.controllers.items()
@@ -365,10 +375,10 @@ class DictToQuaConfigConverter(
             "pulses": {name: self.pulse_converter.deconvert(pulse) for name, pulse in logical_config.pulses.items()},
             "waveforms": {name: self.waveform_converter.deconvert(wf) for name, wf in logical_config.waveforms.items()},
             "digital_waveforms": {
-                name: self._deconvert_digital_waveforms(wf) for name, wf in logical_config.digital_waveforms.items()
+                name: self._deconvert_digital_waveforms(wf) for name, wf in logical_config.digitalWaveforms.items()
             },
             "integration_weights": {
-                name: self.iw_converter.deconvert(iw) for name, iw in logical_config.integration_weights.items()
+                name: self.iw_converter.deconvert(iw) for name, iw in logical_config.integrationWeights.items()
             },
             "mixers": {
                 name: [self.mixer_correction_converter.deconvert(u) for u in value.correction]
@@ -379,7 +389,9 @@ class DictToQuaConfigConverter(
         return result
 
     @staticmethod
-    def _deconvert_digital_waveforms(digital_wave_form: QuaConfigDigitalWaveformDec) -> DigitalWaveformConfigType:
+    def _deconvert_digital_waveforms(
+        digital_wave_form: inc_qua_config_pb2.QuaConfig.DigitalWaveformDec,
+    ) -> DigitalWaveformConfigType:
         temp_list: list[tuple[int, int]] = []
         for sample in digital_wave_form.samples:
             value = int(bool(sample.value))

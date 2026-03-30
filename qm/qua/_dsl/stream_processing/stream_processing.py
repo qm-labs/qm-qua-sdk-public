@@ -8,17 +8,17 @@ from typing import Iterable as IterableClass
 from typing import List, Tuple, Union, Literal
 
 import numpy as np
-from betterproto.lib.std.google.protobuf import Value, ListValue
+from google.protobuf.struct_pb2 import Value, ListValue
 
 from qm._loc import _get_loc
 from qm.type_hinting import Number
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.utils import deprecation_message
 from qm.qua._dsl._type_hints import OneOrMore
 from qm.qua._scope_management.scopes_manager import scopes_manager
-from qm.grpc.qua import QuaProgramAnyStatement, QuaProgramSaveStatement
-from qm.qua._expressions import ScalarOfAnyType, create_qua_scalar_expression
 from qm.qua._dsl.stream_processing.stream_processing_utils import _ARRAY_SYMBOL, create_array
+from qm.qua._expressions import ScalarOfAnyType, OutputStreamInterface, create_qua_scalar_expression
 from qm.qua._dsl.stream_processing.map_functions.map_function_classes import (
     FFT,
     DotProduct,
@@ -88,6 +88,7 @@ class ResultStream(metaclass=abc.ABCMeta):
             # example3 -> [[1, 2, 3], [3, 4, 5], [5, 6, 7], [7, 8, 9]]
             # example4 -> [[1, 2, 3], [6, 7, 8]]
             ```
+
         Args:
             length: number of items to gather
             skip: number of items to skip for each buffer, starting from
@@ -292,9 +293,9 @@ class ResultStream(metaclass=abc.ABCMeta):
             i = declare(int)
             j = declare(int)
             k = declare(int, value=5)
-            stream = declare_stream()
-            stream2 = declare_stream()
-            stream3 = declare_stream()
+            stream = declare_output_stream()
+            stream2 = declare_output_stream()
+            stream3 = declare_output_stream()
             with for_(j, 0, j < 30, j + 1):
                 with for_(i, 0, i < 10, i + 1):
                     save(i, stream)
@@ -319,9 +320,9 @@ class ResultStream(metaclass=abc.ABCMeta):
             i = declare(int)
             j = declare(int)
             k = declare(int, value=5)
-            stream = declare_stream()
-            stream2 = declare_stream()
-            stream3 = declare_stream()
+            stream = declare_output_stream()
+            stream2 = declare_output_stream()
+            stream3 = declare_output_stream()
             with for_(j, 0, j < 30, j + 1):
                 with for_(i, 0, i < 10, i + 1):
                     save(i, stream)
@@ -346,9 +347,9 @@ class ResultStream(metaclass=abc.ABCMeta):
             i = declare(int)
             j = declare(int)
             k = declare(int, value=5)
-            stream = declare_stream()
-            stream2 = declare_stream()
-            stream3 = declare_stream()
+            stream = declare_output_stream()
+            stream2 = declare_output_stream()
+            stream3 = declare_output_stream()
             with for_(j, 0, j < 30, j + 1):
                 with for_(i, 0, i < 10, i + 1):
                     save(i, stream)
@@ -373,9 +374,9 @@ class ResultStream(metaclass=abc.ABCMeta):
             i = declare(int)
             j = declare(int)
             k = declare(int, value=5)
-            stream = declare_stream()
-            stream2 = declare_stream()
-            stream3 = declare_stream()
+            stream = declare_output_stream()
+            stream2 = declare_output_stream()
+            stream3 = declare_output_stream()
             with for_(j, 0, j < 30, j + 1):
                 with for_(i, 0, i < 10, i + 1):
                     save(i, stream)
@@ -458,15 +459,16 @@ class _TimestampMode(Enum):
 class _Configuration:
     var_name: str
     timestamp_mode: _TimestampMode
-    is_adc_trace: bool
+    is_adc_trace: Optional[bool]
     input: int
     auto_reshape: bool
+    dtype: Optional[type]
 
 
 _RESULT_SYMBOL = "@re"
 
 
-class ResultStreamSource(ResultStream):
+class ResultStreamSource(ResultStream, OutputStreamInterface):
     """A python object representing a source of values that can be processed in a [`stream_processing()`][qm.qua.stream_processing] pipeline
 
     This interface is chainable, which means that calling most methods on this object will create a new streaming source
@@ -478,8 +480,16 @@ class ResultStreamSource(ResultStream):
         self._configuration = configuration
 
     @property
-    def is_adc_trace(self) -> bool:
+    def is_adc_trace(self) -> Optional[bool]:
         return self._configuration.is_adc_trace
+
+    @is_adc_trace.setter
+    def is_adc_trace(self, value: bool) -> None:
+        self._configuration.is_adc_trace = value
+
+    @property
+    def dtype(self) -> Optional[type]:
+        return self._configuration.dtype
 
     def _to_list_of_values(self) -> Sequence[Value]:
         result = [
@@ -496,7 +506,7 @@ class ResultStreamSource(ResultStream):
         macro_auto_reshape = [Value(string_value="@macro_auto_reshape"), Value(list_value=ListValue(values=inputs))]
         auto_reshape = macro_auto_reshape if self._configuration.auto_reshape else inputs
         macro_adc_trace = [Value(string_value="@macro_adc_trace"), Value(list_value=ListValue(values=auto_reshape))]
-        return macro_adc_trace if self._configuration.is_adc_trace else auto_reshape
+        return macro_adc_trace if self.is_adc_trace else auto_reshape
 
     def get_var_name(self) -> str:
         return self._configuration.var_name
@@ -547,7 +557,7 @@ class ResultStreamSource(ResultStream):
             ```python
             i = declare(int)
             j = declare(int)
-            stream = declare_stream()
+            stream = declare_output_stream()
             with for_(i, 0, i < 30, i + 1):
                 with for_(j, 0, j < 10, j + 1):
                     save(i, stream)
@@ -559,12 +569,17 @@ class ResultStreamSource(ResultStream):
         return ResultStreamSource(dataclasses.replace(self._configuration, auto_reshape=True))
 
     def __lshift__(self, other: ScalarOfAnyType) -> None:
-        if self.is_adc_trace:
+        if self.is_adc_trace is True:  # Both None (unset) and False are fine
             raise QmQuaException("adc_trace can't be used in save")
-        statement = QuaProgramSaveStatement(
+        # Since a lshift is equivalent to a save operation, we set `is_adc_trace` to False if it was previously None.
+        # This effectively marks the stream as a non-ADC stream, which affects how it is handled by other commands
+        # such as `measure`.
+        self.is_adc_trace = False
+
+        statement = inc_qua_pb2.QuaProgram.SaveStatement(
             loc=_get_loc(), source=create_qua_scalar_expression(other).save_statement, tag=self.get_var_name()
         )
-        scopes_manager.append_statement(QuaProgramAnyStatement(save=statement))
+        scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(save=statement))
 
 
 class _UnaryOperation(ResultStream, metaclass=abc.ABCMeta):
@@ -741,48 +756,6 @@ class _AutoSaveAllOutputStream(_OutputStream):
     @property
     def _operator_array(self) -> Tuple[str, ...]:
         return "saveAll", self.tag, "auto"
-
-
-def declare_stream(adc_trace: bool = False) -> "ResultStreamSource":
-    """Declare a QUA output stream to be used in subsequent statements
-    To retrieve the result - it must be saved in the stream processing block.
-
-    Declaration is performed by declaring a python variable with the return value of this function.
-
-    Note:
-        if the stream is an ADC trace, declaring it with the syntax ``declare_stream(adc_trace=True)``
-        will add a buffer of length corresponding to the pulse length.
-
-    Returns:
-        A :class:`ResultStreamSource` object to be used in
-        [`stream_processing`][qm.qua.stream_processing]
-
-    Example:
-        ```python
-        a = declare_stream()
-        measure('pulse', 'element', a)
-
-        with stream_processing():
-            a.save("tag")
-            a.save_all("another tag")
-        ```
-    """
-
-    scope = scopes_manager.program_scope
-    scope.result_index += 1
-    var = f"r{scope.result_index}"
-    if adc_trace:
-        var = "atr_" + var
-
-    return ResultStreamSource(
-        _Configuration(
-            var_name=var,
-            timestamp_mode=_TimestampMode.Values,
-            is_adc_trace=adc_trace,
-            input=-1,
-            auto_reshape=False,
-        )
-    )
 
 
 StreamType = Union[str, ResultStreamSource]

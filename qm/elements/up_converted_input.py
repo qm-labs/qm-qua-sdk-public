@@ -1,12 +1,11 @@
 import logging
 from typing import TYPE_CHECKING, Tuple, Union, Optional, Sequence
 
-from octave_sdk.octave import RFOutput
-from octave_sdk import RFOutputMode, OctaveLOSource
-
+from qm.octave_sdk.octave import RFOutput
 from qm.api.frontend_api import FrontendApi
+from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.elements.element_inputs import MixInputs
-from qm.grpc.qua_config import QuaConfigMixInputs
+from qm.octave_sdk import RFOutputMode, OctaveLOSource
 from qm.type_hinting.general import NumpySupportedFloat, NumpySupportedNumber
 
 if TYPE_CHECKING:
@@ -19,7 +18,7 @@ class UpconvertedInput(MixInputs):
     def __init__(
         self,
         name: str,
-        config: QuaConfigMixInputs,
+        config: inc_qua_config_pb2.QuaConfig.MixInputs,
         frontend_api: FrontendApi,
         machine_id: str,
         client: RFOutput,
@@ -31,7 +30,7 @@ class UpconvertedInput(MixInputs):
     ):
         super().__init__(name, config, frontend_api, machine_id, set_frequency_as_double=set_frequency_as_double)
         self._client = client
-        self._lo_frequency = config.lo_frequency_double if config.lo_frequency_double else float(config.lo_frequency)
+        self._lo_frequency = config.loFrequencyDouble if config.loFrequencyDouble else float(config.loFrequency)
         self._port = port
         self._gain = gain
         self._calibration_db = calibration_db
@@ -88,6 +87,7 @@ class UpconvertedInput(MixInputs):
     def set_lo_source(self, lo_port: OctaveLOSource) -> None:
         """
         Sets the source of LO going to the upconverter associated with element.
+
         Args:
             lo_port:
         """
@@ -130,7 +130,7 @@ class UpconvertedInputNewApi(UpconvertedInput):
     def __init__(
         self,
         name: str,
-        config: QuaConfigMixInputs,
+        config: inc_qua_config_pb2.QuaConfig.MixInputs,
         client: RFOutput,
         port: Tuple[str, int],
         gain: Optional[float],

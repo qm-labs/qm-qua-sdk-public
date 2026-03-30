@@ -2,7 +2,7 @@ import warnings
 from typing import List, Optional
 from dataclasses import field, dataclass
 
-from qm.grpc.qua import QuaProgramCompilerOptions
+from qm.grpc.qm.pb import inc_qua_pb2
 
 
 @dataclass
@@ -14,12 +14,12 @@ class CompilerOptionArguments:
 
 def get_request_compiler_options(
     compiler_options: CompilerOptionArguments,
-) -> QuaProgramCompilerOptions:
+) -> inc_qua_pb2.QuaProgram.CompilerOptions:
     flags = compiler_options.flags
     if compiler_options.strict:
         flags.append("strict")
 
-    return QuaProgramCompilerOptions(flags=compiler_options.flags)
+    return inc_qua_pb2.QuaProgram.CompilerOptions(flags=compiler_options.flags)
 
 
 def standardize_compiler_params(

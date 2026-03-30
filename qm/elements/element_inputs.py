@@ -4,17 +4,9 @@ from typing import Tuple, Generic, TypeVar, Optional, Sequence
 import numpy
 
 from qm.api.frontend_api import FrontendApi
-from qm.grpc.general_messages import Matrix
+from qm.grpc.qm.pb import inc_qua_config_pb2, general_messages_pb2
 from qm.api.models.devices import MixerInfo, AnalogOutputPortFilter
 from qm.type_hinting.general import NumpySupportedFloat, NumpySupportedNumber
-from qm.grpc.qua_config import (
-    QuaConfigMixInputs,
-    QuaConfigSingleInput,
-    QuaConfigMultipleInputs,
-    QuaConfigDacPortReference,
-    QuaConfigSingleInputCollection,
-    QuaConfigMicrowaveInputPortReference,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +58,9 @@ def static_set_mixer_correction(
             f"Not setting the correction matrix."
         )
         return
-    correction_matrix = Matrix(*float_values)
+    correction_matrix = general_messages_pb2.Matrix(
+        v00=float_values[0], v01=float_values[1], v10=float_values[2], v11=float_values[3]
+    )
 
     mixer_lo_frequency_double = 0.0
     mixer_intermediate_frequency_double = 0.0
@@ -87,11 +81,11 @@ def static_set_mixer_correction(
 
 ElementInputGRPCType = TypeVar(
     "ElementInputGRPCType",
-    QuaConfigSingleInput,
-    QuaConfigMixInputs,
-    QuaConfigSingleInputCollection,
-    QuaConfigMultipleInputs,
-    QuaConfigMicrowaveInputPortReference,
+    inc_qua_config_pb2.QuaConfig.SingleInput,
+    inc_qua_config_pb2.QuaConfig.MixInputs,
+    inc_qua_config_pb2.QuaConfig.SingleInputCollection,
+    inc_qua_config_pb2.QuaConfig.MultipleInputs,
+    inc_qua_config_pb2.QuaConfig.MicrowaveInputPortReference,
     None,
 )
 
@@ -108,13 +102,13 @@ class NoInput(ElementInput[None]):
     pass
 
 
-class MicrowaveInput(ElementInput[QuaConfigMicrowaveInputPortReference]):
+class MicrowaveInput(ElementInput[inc_qua_config_pb2.QuaConfig.MicrowaveInputPortReference]):
     pass
 
 
-class SingleInput(ElementInput[QuaConfigSingleInput]):
+class SingleInput(ElementInput[inc_qua_config_pb2.QuaConfig.SingleInput]):
     @property
-    def port(self) -> QuaConfigDacPortReference:
+    def port(self) -> inc_qua_config_pb2.QuaConfig.DacPortReference:
         return self._config.port
 
     def set_output_dc_offset(self, offset: float) -> None:
@@ -129,19 +123,19 @@ class SingleInput(ElementInput[QuaConfigSingleInput]):
         self._frontend.set_output_filter_taps(self._id, self._name, "single", analog_filter)
 
 
-class MultipleInputs(ElementInput[QuaConfigMultipleInputs]):
+class MultipleInputs(ElementInput[inc_qua_config_pb2.QuaConfig.MultipleInputs]):
     pass
 
 
-class SingleInputCollection(ElementInput[QuaConfigSingleInputCollection]):
+class SingleInputCollection(ElementInput[inc_qua_config_pb2.QuaConfig.SingleInputCollection]):
     pass
 
 
-class MixInputs(ElementInput[QuaConfigMixInputs]):
+class MixInputs(ElementInput[inc_qua_config_pb2.QuaConfig.MixInputs]):
     def __init__(
         self,
         name: str,
-        config: QuaConfigMixInputs,
+        config: inc_qua_config_pb2.QuaConfig.MixInputs,
         frontend_api: FrontendApi,
         machine_id: str,
         set_frequency_as_double: bool,
@@ -150,18 +144,18 @@ class MixInputs(ElementInput[QuaConfigMixInputs]):
         self._set_frequency_as_double = set_frequency_as_double
 
     @property
-    def i_port(self) -> QuaConfigDacPortReference:
-        return self._config.i
+    def i_port(self) -> inc_qua_config_pb2.QuaConfig.DacPortReference:
+        return self._config.I
 
     @property
-    def q_port(self) -> QuaConfigDacPortReference:
-        return self._config.q
+    def q_port(self) -> inc_qua_config_pb2.QuaConfig.DacPortReference:
+        return self._config.Q
 
     @property
     def lo_frequency(self) -> float:
         if self._set_frequency_as_double:
-            return self._config.lo_frequency_double
-        return self._config.lo_frequency
+            return self._config.loFrequencyDouble
+        return self._config.loFrequency
 
     def set_lo_frequency(self, value: float) -> None:
         self._set_config_lo_frequency(value)
@@ -169,10 +163,10 @@ class MixInputs(ElementInput[QuaConfigMixInputs]):
     def _set_config_lo_frequency(self, value: float) -> None:
         freq = float(value)
         logger.debug(f"Setting element '{self._name}' LO frequency to '{freq}'.")
-        self._config.lo_frequency = int(freq)
-        self._config.lo_frequency_double = 0.0
+        self._config.loFrequency = int(freq)
+        self._config.loFrequencyDouble = 0.0
         if self._set_frequency_as_double:
-            self._config.lo_frequency_double = float(freq)
+            self._config.loFrequencyDouble = float(freq)
 
     @property
     def mixer(self) -> str:

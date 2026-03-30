@@ -5,60 +5,41 @@ from typing import TYPE_CHECKING, Any, Type, Union, Generic, Literal, TypeVar, O
 import numpy as np
 
 from qm._loc import _get_loc
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.utils import deprecation_message
 from qm.type_hinting.general import NumberT
 from qm.serialization.expression_serializing_visitor import ExpressionSerializingVisitor
-from qm.grpc.qua import (
-    QuaProgramType,
-    QuaProgramDirection,
-    QuaProgramAnyStatement,
-    QuaProgramVarDeclaration,
-    QuaProgramBinaryExpression,
-    QuaProgramVarRefExpression,
-    QuaProgramLiteralExpression,
-    QuaProgramFunctionExpression,
-    QuaProgramAnyScalarExpression,
-    QuaProgramBroadcastExpression,
-    QuaProgramSaveStatementSource,
-    QuaProgramArrayLengthExpression,
-    QuaProgramArrayVarRefExpression,
-    QuaProgramLibFunctionExpression,
-    QuaProgramArrayCellRefExpression,
-    QuaProgramStructVarRefExpression,
-    QuaProgramAssignmentStatementTarget,
-    QuaProgramExternalStreamDeclaration,
-    QuaProgramVarDeclarationStructMember,
-    QuaProgramAdvanceInputStreamStatement,
-    QuaProgramExternalStreamRefExpression,
-    QuaProgramBinaryExpressionBinaryOperator,
-)
 
-_ScalarExpressionType = QuaProgramAnyScalarExpression
+_ScalarExpressionType = inc_qua_pb2.QuaProgram.AnyScalarExpression
 
 
 if TYPE_CHECKING:
     from qm.qua._qua_struct import _QuaStruct
 
 
-def to_literal(value: Union[bool, int, float], dtype: QuaProgramType) -> QuaProgramLiteralExpression:
-    return QuaProgramLiteralExpression(value=str(value), type=dtype, loc=_get_loc())
+def to_literal(
+    value: Union[bool, int, float], dtype: inc_qua_pb2.QuaProgram.Type
+) -> inc_qua_pb2.QuaProgram.LiteralExpression:
+    return inc_qua_pb2.QuaProgram.LiteralExpression(value=str(value), type=dtype, loc=_get_loc())
 
 
 def literal_int(value: int) -> _ScalarExpressionType:
-    return QuaProgramAnyScalarExpression(literal=to_literal(value, QuaProgramType.INT))  # type: ignore[arg-type]
+    return inc_qua_pb2.QuaProgram.AnyScalarExpression(literal=to_literal(value, inc_qua_pb2.QuaProgram.Type.INT))
 
 
 def literal_bool(value: bool) -> _ScalarExpressionType:
-    return QuaProgramAnyScalarExpression(literal=to_literal(value, QuaProgramType.BOOL))  # type: ignore[arg-type]
+    return inc_qua_pb2.QuaProgram.AnyScalarExpression(literal=to_literal(value, inc_qua_pb2.QuaProgram.Type.BOOL))
 
 
 def literal_real(value: float) -> _ScalarExpressionType:
-    return QuaProgramAnyScalarExpression(literal=to_literal(value, QuaProgramType.REAL))  # type: ignore[arg-type]
+    return inc_qua_pb2.QuaProgram.AnyScalarExpression(literal=to_literal(value, inc_qua_pb2.QuaProgram.Type.REAL))
 
 
 def io(number: Literal[1, 2]) -> _ScalarExpressionType:
-    return QuaProgramAnyScalarExpression(variable=QuaProgramVarRefExpression(io_number=number, loc=_get_loc()))
+    return inc_qua_pb2.QuaProgram.AnyScalarExpression(
+        variable=inc_qua_pb2.QuaProgram.VarRefExpression(ioNumber=number, loc=_get_loc())
+    )
 
 
 def io1() -> _ScalarExpressionType:
@@ -71,24 +52,25 @@ def io2() -> _ScalarExpressionType:
 
 ScalarMessageType = TypeVar(
     "ScalarMessageType",
-    QuaProgramVarRefExpression,
-    QuaProgramLiteralExpression,
-    QuaProgramBinaryExpression,
-    QuaProgramArrayCellRefExpression,
-    QuaProgramArrayLengthExpression,
-    QuaProgramLibFunctionExpression,
-    QuaProgramFunctionExpression,
-    QuaProgramBroadcastExpression,
+    inc_qua_pb2.QuaProgram.VarRefExpression,
+    inc_qua_pb2.QuaProgram.LiteralExpression,
+    inc_qua_pb2.QuaProgram.BinaryExpression,
+    inc_qua_pb2.QuaProgram.ArrayCellRefExpression,
+    inc_qua_pb2.QuaProgram.ArrayLengthExpression,
+    inc_qua_pb2.QuaProgram.LibFunctionExpression,
+    inc_qua_pb2.QuaProgram.FunctionExpression,
+    inc_qua_pb2.QuaProgram.BroadcastExpression,
+    inc_qua_pb2.QuaProgram.GlobalVarRefExpression,
 )
 
 
 S = TypeVar(
     "S",
     bound=Union[
-        QuaProgramArrayVarRefExpression,
-        QuaProgramAnyScalarExpression,
-        QuaProgramStructVarRefExpression,
-        QuaProgramExternalStreamRefExpression,
+        inc_qua_pb2.QuaProgram.ArrayVarRefExpression,
+        inc_qua_pb2.QuaProgram.AnyScalarExpression,
+        inc_qua_pb2.QuaProgram.StructVarRefExpression,
+        inc_qua_pb2.QuaProgram.ExternalStreamRefExpression,
     ],
 )
 
@@ -124,18 +106,18 @@ class QuaNumericExpression(Generic[S, NumberT], QuaExpression[S], metaclass=abc.
         return self._type
 
     @property
-    def _qua_type(self) -> QuaProgramType:
+    def _qua_type(self) -> inc_qua_pb2.QuaProgram.Type:
         if issubclass(self.dtype, bool):
-            return QuaProgramType.BOOL  # type: ignore[return-value]
+            return inc_qua_pb2.QuaProgram.Type.BOOL
         if issubclass(self.dtype, int):
-            return QuaProgramType.INT  # type: ignore[return-value]
+            return inc_qua_pb2.QuaProgram.Type.INT
         if issubclass(self.dtype, float):
-            return QuaProgramType.REAL  # type: ignore[return-value]
+            return inc_qua_pb2.QuaProgram.Type.REAL
         raise NotImplementedError(f"Unsupported type - {self.dtype}")
 
     @property
     def _is_input_stream(self) -> bool:
-        return isinstance(self, InputStreamInterface)
+        return isinstance(self, InputStreamOldInterface)
 
     def empty(self) -> bool:
         warnings.warn(
@@ -203,7 +185,7 @@ class ScalarMessageInterface(Generic[ScalarMessageType], metaclass=abc.ABCMeta):
 
 
 class QuaScalarExpression(
-    QuaNumericExpression[QuaProgramAnyScalarExpression, NumberT],
+    QuaNumericExpression[inc_qua_pb2.QuaProgram.AnyScalarExpression, NumberT],
     ScalarMessageInterface[ScalarMessageType],
     metaclass=abc.ABCMeta,
 ):
@@ -213,8 +195,11 @@ class QuaScalarExpression(
     """
 
     def _get_binary_pb_expression(
-        self, other: "ScalarOfAnyType", op: QuaProgramBinaryExpressionBinaryOperator, self_is_first: bool = True
-    ) -> QuaProgramAnyScalarExpression:
+        self,
+        other: "ScalarOfAnyType",
+        op: inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator,
+        self_is_first: bool = True,
+    ) -> inc_qua_pb2.QuaProgram.AnyScalarExpression:
         other_as_exp = to_scalar_pb_expression(other)
         self_as_exp = self.unwrapped
         if self_is_first:
@@ -222,127 +207,140 @@ class QuaScalarExpression(
         else:
             left, right = other_as_exp, self_as_exp
 
-        exp = QuaProgramAnyScalarExpression(
-            binary_operation=QuaProgramBinaryExpression(loc=_get_loc(), left=left, right=right, op=op)
+        exp = inc_qua_pb2.QuaProgram.AnyScalarExpression(
+            binaryOperation=inc_qua_pb2.QuaProgram.BinaryExpression(loc=_get_loc(), left=left, right=right, op=op)
         )
         return exp
 
     def _binary(
-        self, other: "Scalar[NumberT]", op: QuaProgramBinaryExpressionBinaryOperator, self_is_first: bool = True
+        self,
+        other: "Scalar[NumberT]",
+        op: inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator,
+        self_is_first: bool = True,
     ) -> "QuaBinaryOperation[NumberT]":
         exp = self._get_binary_pb_expression(other, op, self_is_first)
         return QuaBinaryOperation(exp, self.dtype)
 
     def _boolean_binary(
-        self, other: "Scalar[NumberT]", op: QuaProgramBinaryExpressionBinaryOperator, self_is_first: bool = True
+        self,
+        other: "Scalar[NumberT]",
+        op: inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator,
+        self_is_first: bool = True,
     ) -> "QuaBinaryOperation[bool]":
         exp = self._get_binary_pb_expression(other, op, self_is_first)
         return QuaBinaryOperation(exp, bool)
 
     def _shift_operation_binary(
-        self, other: "Scalar[int]", op: QuaProgramBinaryExpressionBinaryOperator, self_is_first: bool = True
+        self,
+        other: "Scalar[int]",
+        op: inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator,
+        self_is_first: bool = True,
     ) -> "QuaBinaryOperation[NumberT]":
         exp = self._get_binary_pb_expression(other, op, self_is_first)
         return QuaBinaryOperation(exp, self.dtype)
 
     def __add__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.ADD)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.ADD)
 
     def __radd__(self, other: NumberT) -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.ADD, self_is_first=False)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.ADD, self_is_first=False)
 
     def __sub__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.SUB)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.SUB)
 
     def __rsub__(self, other: NumberT) -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.SUB, self_is_first=False)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.SUB, self_is_first=False)
 
     def __neg__(self) -> "QuaBinaryOperation[NumberT]":
         return self.cast(0) - self
 
     def __gt__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[bool]":
-        return self._boolean_binary(other, QuaProgramBinaryExpressionBinaryOperator.GT)  # type: ignore[arg-type]
+        return self._boolean_binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.GT)
 
     def __ge__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[bool]":
-        return self._boolean_binary(other, QuaProgramBinaryExpressionBinaryOperator.GET)  # type: ignore[arg-type]
+        return self._boolean_binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.GET)
 
     def __lt__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[bool]":
-        return self._boolean_binary(other, QuaProgramBinaryExpressionBinaryOperator.LT)  # type: ignore[arg-type]
+        return self._boolean_binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.LT)
 
     def __le__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[bool]":
-        return self._boolean_binary(other, QuaProgramBinaryExpressionBinaryOperator.LET)  # type: ignore[arg-type]
+        return self._boolean_binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.LET)
 
     def __eq__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[bool]":  # type: ignore[override]
-        return self._boolean_binary(other, QuaProgramBinaryExpressionBinaryOperator.EQ)  # type: ignore[arg-type]
+        return self._boolean_binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.EQ)
 
     def __mul__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.MULT)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.MULT)
 
     def __rmul__(self, other: NumberT) -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.MULT, self_is_first=False)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.MULT, self_is_first=False)
 
     def __truediv__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.DIV)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.DIV)
 
     def __rtruediv__(self, other: NumberT) -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.DIV, self_is_first=False)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.DIV, self_is_first=False)
 
     def __lshift__(self, other: "Scalar[int]") -> "QuaBinaryOperation[NumberT]":
-        return self._shift_operation_binary(other, QuaProgramBinaryExpressionBinaryOperator.SHL)  # type: ignore[arg-type]
+        return self._shift_operation_binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.SHL)
 
     def __rlshift__(self, other: int) -> "QuaBinaryOperation[NumberT]":
-        return self._shift_operation_binary(other, QuaProgramBinaryExpressionBinaryOperator.SHL, self_is_first=False)  # type: ignore[arg-type]
+        return self._shift_operation_binary(
+            other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.SHL, self_is_first=False
+        )
 
     def __rshift__(self, other: "Scalar[int]") -> "QuaBinaryOperation[NumberT]":
-        return self._shift_operation_binary(other, QuaProgramBinaryExpressionBinaryOperator.SHR)  # type: ignore[arg-type]
+        return self._shift_operation_binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.SHR)
 
     def __rrshift__(self, other: int) -> "QuaBinaryOperation[NumberT]":
-        return self._shift_operation_binary(other, QuaProgramBinaryExpressionBinaryOperator.SHR, self_is_first=False)  # type: ignore[arg-type]
+        return self._shift_operation_binary(
+            other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.SHR, self_is_first=False
+        )
 
     def __and__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.AND)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.AND)
 
     def __rand__(self, other: NumberT) -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.AND, self_is_first=False)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.AND, self_is_first=False)
 
     def __or__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.OR)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.OR)
 
     def __ror__(self, other: NumberT) -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.OR, self_is_first=False)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.OR, self_is_first=False)
 
     def __xor__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.XOR)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.XOR)
 
     def __rxor__(self, other: NumberT) -> "QuaBinaryOperation[NumberT]":
-        return self._binary(other, QuaProgramBinaryExpressionBinaryOperator.XOR, self_is_first=False)  # type: ignore[arg-type]
+        return self._binary(other, inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.XOR, self_is_first=False)
 
     def __invert__(self) -> "QuaBinaryOperation[NumberT]":
-        return self._binary(self.cast(True), QuaProgramBinaryExpressionBinaryOperator.XOR)  # type: ignore[arg-type]
+        return self._binary(self.cast(True), inc_qua_pb2.QuaProgram.BinaryExpression.BinaryOperator.XOR)
 
     def cast(self, n: Union[bool, int, float]) -> NumberT:
         return self.dtype(n)
 
     @property
-    def save_statement(self) -> QuaProgramSaveStatementSource:
+    def save_statement(self) -> inc_qua_pb2.QuaProgram.SaveStatement.Source:
         raise QmQuaException("saving is not allowed for this kind of qua expression")
 
 
-class QuaArrayVariable(QuaNumericExpression[QuaProgramArrayVarRefExpression, NumberT]):
+class QuaArrayVariable(QuaNumericExpression[inc_qua_pb2.QuaProgram.ArrayVarRefExpression, NumberT]):
     def __init__(self, name: str, t: Type[NumberT], init_value: Sequence[Union[int, bool, float]], size: int):
-        super(QuaArrayVariable, self).__init__(QuaProgramArrayVarRefExpression(name=name), t)
+        super(QuaArrayVariable, self).__init__(inc_qua_pb2.QuaProgram.ArrayVarRefExpression(name=name), t)
         self._size = size
         self._init_value = [to_literal(t(val), self._qua_type) for val in init_value]
 
     @property
-    def declaration_statement(self) -> QuaProgramVarDeclaration:
-        return QuaProgramVarDeclaration(
+    def declaration_statement(self) -> inc_qua_pb2.QuaProgram.VarDeclaration:
+        return inc_qua_pb2.QuaProgram.VarDeclaration(
             name=self.unwrapped.name,
             value=self._init_value,
             type=self._qua_type,
             size=self._size,
             dim=1,
-            is_input_stream=self._is_input_stream,
+            isInputStream=self._is_input_stream,
         )
 
     def __getitem__(self, item: "Scalar[int]") -> "QuaArrayCell[NumberT]":
@@ -350,21 +348,21 @@ class QuaArrayVariable(QuaNumericExpression[QuaProgramArrayVarRefExpression, Num
         arr = self.unwrapped
         loc = _get_loc()
         arr.loc = loc
-        item_scalar_expression = QuaProgramAnyScalarExpression(
-            array_cell=QuaProgramArrayCellRefExpression(array_var=arr, index=idx_as_pb, loc=loc)
+        item_scalar_expression = inc_qua_pb2.QuaProgram.AnyScalarExpression(
+            arrayCell=inc_qua_pb2.QuaProgram.ArrayCellRefExpression(arrayVar=arr, index=idx_as_pb, loc=loc)
         )
         return QuaArrayCell(item_scalar_expression, self.dtype)
 
     def length(self) -> "QuaArrayLength[int]":
         unwrapped_element = self.unwrapped
-        array_exp = QuaProgramArrayLengthExpression(array=unwrapped_element)
-        result = QuaProgramAnyScalarExpression(array_length=array_exp)
+        array_exp = inc_qua_pb2.QuaProgram.ArrayLengthExpression(array=unwrapped_element)
+        result = inc_qua_pb2.QuaProgram.AnyScalarExpression(arrayLength=array_exp)
         return QuaArrayLength(result, int)
 
 
-class QuaStructReference(QuaExpression[QuaProgramStructVarRefExpression]):
+class QuaStructReference(QuaExpression[inc_qua_pb2.QuaProgram.StructVarRefExpression]):
     def __init__(self, name: str):
-        super().__init__(QuaProgramStructVarRefExpression(name=name, loc=_get_loc()))
+        super().__init__(inc_qua_pb2.QuaProgram.StructVarRefExpression(name=name, loc=_get_loc()))
         self.name = name
 
 
@@ -381,7 +379,7 @@ class QuaStructArrayVariable(QuaArrayVariable[NumberT], Generic[NumberT, NSize])
         struct: QuaStructReference,
     ):
         super(QuaArrayVariable, self).__init__(
-            QuaProgramArrayVarRefExpression(name=name, struct_var=struct.unwrapped), t
+            inc_qua_pb2.QuaProgram.ArrayVarRefExpression(name=name, structVar=struct.unwrapped), t
         )
         self._size = size
         self._init_value = []
@@ -389,17 +387,19 @@ class QuaStructArrayVariable(QuaArrayVariable[NumberT], Generic[NumberT, NSize])
         self._struct: QuaStructReference = struct
 
     @property
-    def declaration_statement(self) -> QuaProgramVarDeclaration:
+    def declaration_statement(self) -> inc_qua_pb2.QuaProgram.VarDeclaration:
         declaration_statement = super().declaration_statement
-        struct_member = QuaProgramVarDeclarationStructMember(name=self._struct.name, position=self._position)
-        declaration_statement.struct_member = struct_member
+        struct_member = inc_qua_pb2.QuaProgram.VarDeclaration.StructMember(
+            name=self._struct.name, position=self._position
+        )
+        declaration_statement.structMember.CopyFrom(struct_member)
         return declaration_statement
 
 
 class AssignmentTargetInterface(metaclass=abc.ABCMeta):
     @property
     @abc.abstractmethod
-    def assignment_statement(self) -> QuaProgramAssignmentStatementTarget:
+    def assignment_statement(self) -> inc_qua_pb2.QuaProgram.AssignmentStatement.Target:
         pass
 
 
@@ -420,37 +420,37 @@ class NotAllowedOperationArrayCell(NotAllowedOperation):
         super().__init__("array cell")
 
 
-class QuaVariable(AssignmentTargetInterface, QuaScalarExpression[NumberT, QuaProgramVarRefExpression]):
+class QuaVariable(AssignmentTargetInterface, QuaScalarExpression[NumberT, inc_qua_pb2.QuaProgram.VarRefExpression]):
     """A class representing a QUA scalar variable. Note that a `QuaVariable` is also a `QuaScalarExpression`."""
 
     def __init__(self, name: str, t: Type[NumberT], init_value: Optional[Union[int, bool, float]]):
         super(QuaScalarExpression, self).__init__(
-            QuaProgramAnyScalarExpression(variable=QuaProgramVarRefExpression(name)), t
+            inc_qua_pb2.QuaProgram.AnyScalarExpression(variable=inc_qua_pb2.QuaProgram.VarRefExpression(name=name)), t
         )
         self._init_value = [to_literal(t(init_value), self._qua_type)] if init_value is not None else []
 
     @property
-    def declaration_statement(self) -> QuaProgramVarDeclaration:
-        return QuaProgramVarDeclaration(
+    def declaration_statement(self) -> inc_qua_pb2.QuaProgram.VarDeclaration:
+        return inc_qua_pb2.QuaProgram.VarDeclaration(
             name=self.unwrapped.variable.name,
             value=self._init_value,
             type=self._qua_type,
             size=1,
             dim=0,
-            is_input_stream=self._is_input_stream,
+            isInputStream=self._is_input_stream,
         )
 
     @property
-    def unwrapped_scalar(self) -> QuaProgramVarRefExpression:
+    def unwrapped_scalar(self) -> inc_qua_pb2.QuaProgram.VarRefExpression:
         return self.unwrapped.variable
 
     @property
-    def save_statement(self) -> QuaProgramSaveStatementSource:
-        return QuaProgramSaveStatementSource(variable=self.unwrapped_scalar)
+    def save_statement(self) -> inc_qua_pb2.QuaProgram.SaveStatement.Source:
+        return inc_qua_pb2.QuaProgram.SaveStatement.Source(variable=self.unwrapped_scalar)
 
     @property
-    def assignment_statement(self) -> QuaProgramAssignmentStatementTarget:
-        return QuaProgramAssignmentStatementTarget(variable=self.unwrapped_scalar)
+    def assignment_statement(self) -> inc_qua_pb2.QuaProgram.AssignmentStatement.Target:
+        return inc_qua_pb2.QuaProgram.AssignmentStatement.Target(variable=self.unwrapped_scalar)
 
     def __iadd__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
         raise NotAllowedOperationVariable
@@ -489,30 +489,32 @@ class QuaVariable(AssignmentTargetInterface, QuaScalarExpression[NumberT, QuaPro
         raise NotAllowedOperationVariable
 
 
-class QuaLiteral(QuaScalarExpression[NumberT, QuaProgramLiteralExpression]):
+class QuaLiteral(QuaScalarExpression[NumberT, inc_qua_pb2.QuaProgram.LiteralExpression]):
     @property
-    def unwrapped_scalar(self) -> QuaProgramLiteralExpression:
+    def unwrapped_scalar(self) -> inc_qua_pb2.QuaProgram.LiteralExpression:
         return self.unwrapped.literal
 
     @property
-    def save_statement(self) -> QuaProgramSaveStatementSource:
-        return QuaProgramSaveStatementSource(literal=self.unwrapped_scalar)
+    def save_statement(self) -> inc_qua_pb2.QuaProgram.SaveStatement.Source:
+        return inc_qua_pb2.QuaProgram.SaveStatement.Source(literal=self.unwrapped_scalar)
 
 
-class QuaArrayCell(AssignmentTargetInterface, QuaScalarExpression[NumberT, QuaProgramArrayCellRefExpression]):
+class QuaArrayCell(
+    AssignmentTargetInterface, QuaScalarExpression[NumberT, inc_qua_pb2.QuaProgram.ArrayCellRefExpression]
+):
     """A class representing a QUA variable inside a QUA array cell."""
 
     @property
-    def unwrapped_scalar(self) -> QuaProgramArrayCellRefExpression:
-        return self.unwrapped.array_cell
+    def unwrapped_scalar(self) -> inc_qua_pb2.QuaProgram.ArrayCellRefExpression:
+        return self.unwrapped.arrayCell
 
     @property
-    def save_statement(self) -> QuaProgramSaveStatementSource:
-        return QuaProgramSaveStatementSource(array_cell=self.unwrapped_scalar)
+    def save_statement(self) -> inc_qua_pb2.QuaProgram.SaveStatement.Source:
+        return inc_qua_pb2.QuaProgram.SaveStatement.Source(arrayCell=self.unwrapped_scalar)
 
     @property
-    def assignment_statement(self) -> QuaProgramAssignmentStatementTarget:
-        return QuaProgramAssignmentStatementTarget(array_cell=self.unwrapped_scalar)
+    def assignment_statement(self) -> inc_qua_pb2.QuaProgram.AssignmentStatement.Target:
+        return inc_qua_pb2.QuaProgram.AssignmentStatement.Target(arrayCell=self.unwrapped_scalar)
 
     def __iadd__(self, other: "Scalar[NumberT]") -> "QuaBinaryOperation[NumberT]":
         raise NotAllowedOperationArrayCell
@@ -551,121 +553,137 @@ class QuaArrayCell(AssignmentTargetInterface, QuaScalarExpression[NumberT, QuaPr
         raise NotAllowedOperationArrayCell
 
 
-class QuaBinaryOperation(QuaScalarExpression[NumberT, QuaProgramBinaryExpression]):
+class QuaBinaryOperation(QuaScalarExpression[NumberT, inc_qua_pb2.QuaProgram.BinaryExpression]):
     @property
-    def unwrapped_scalar(self) -> QuaProgramBinaryExpression:
-        return self.unwrapped.binary_operation
+    def unwrapped_scalar(self) -> inc_qua_pb2.QuaProgram.BinaryExpression:
+        return self.unwrapped.binaryOperation
 
 
-class QuaArrayLength(QuaScalarExpression[NumberT, QuaProgramArrayLengthExpression]):
+class QuaArrayLength(QuaScalarExpression[NumberT, inc_qua_pb2.QuaProgram.ArrayLengthExpression]):
     @property
-    def unwrapped_scalar(self) -> QuaProgramArrayLengthExpression:
-        return self.unwrapped.array_length
+    def unwrapped_scalar(self) -> inc_qua_pb2.QuaProgram.ArrayLengthExpression:
+        return self.unwrapped.arrayLength
 
 
-class QuaLibFunctionOutput(QuaScalarExpression[NumberT, QuaProgramLibFunctionExpression]):
+class QuaLibFunctionOutput(QuaScalarExpression[NumberT, inc_qua_pb2.QuaProgram.LibFunctionExpression]):
     """A class representing the result of a QUA lib function."""
 
     @property
-    def unwrapped_scalar(self) -> QuaProgramLibFunctionExpression:
-        return self.unwrapped.lib_function
+    def unwrapped_scalar(self) -> inc_qua_pb2.QuaProgram.LibFunctionExpression:
+        return self.unwrapped.libFunction
 
 
-class QuaFunctionOutput(QuaScalarExpression[NumberT, QuaProgramFunctionExpression]):
-    def __init__(self, function_expression: QuaProgramFunctionExpression, t: Type[NumberT]):
-        super(QuaScalarExpression, self).__init__(QuaProgramAnyScalarExpression(function=function_expression), t)
+class QuaFunctionOutput(QuaScalarExpression[NumberT, inc_qua_pb2.QuaProgram.FunctionExpression]):
+    def __init__(self, function_expression: inc_qua_pb2.QuaProgram.FunctionExpression, t: Type[NumberT]):
+        super(QuaScalarExpression, self).__init__(
+            inc_qua_pb2.QuaProgram.AnyScalarExpression(function=function_expression), t
+        )
 
     @property
-    def unwrapped_scalar(self) -> QuaProgramFunctionExpression:
+    def unwrapped_scalar(self) -> inc_qua_pb2.QuaProgram.FunctionExpression:
         return self.unwrapped.function
 
 
-class QuaBroadcast(QuaScalarExpression[NumberT, QuaProgramBroadcastExpression]):
+class QuaBroadcast(QuaScalarExpression[NumberT, inc_qua_pb2.QuaProgram.BroadcastExpression]):
     """A class representing the result of a QUA broadcast expression."""
 
     def __init__(self, t: Type[NumberT], value: _ScalarExpressionType):
         super(QuaScalarExpression, self).__init__(
-            QuaProgramAnyScalarExpression(broadcast=QuaProgramBroadcastExpression(value, loc=_get_loc())), t
+            inc_qua_pb2.QuaProgram.AnyScalarExpression(
+                broadcast=inc_qua_pb2.QuaProgram.BroadcastExpression(value=value, loc=_get_loc())
+            ),
+            t,
         )
 
     @property
-    def unwrapped_scalar(self) -> QuaProgramBroadcastExpression:
+    def unwrapped_scalar(self) -> inc_qua_pb2.QuaProgram.BroadcastExpression:
         return self.unwrapped.broadcast
+
+
+class StreamInterface(abc.ABC):
+    @property
+    @abc.abstractmethod
+    def _direction(self) -> inc_qua_pb2.QuaProgram.Direction:
+        pass
+
+
+class OutputStreamInterface(StreamInterface, abc.ABC):
+    @property
+    def _direction(self) -> inc_qua_pb2.QuaProgram.Direction:
+        return inc_qua_pb2.QuaProgram.Direction.OUTGOING
+
+
+class InputStreamInterface(StreamInterface, abc.ABC):
+    @property
+    def _direction(self) -> inc_qua_pb2.QuaProgram.Direction:
+        return inc_qua_pb2.QuaProgram.Direction.INCOMING
 
 
 StructT = TypeVar("StructT", bound="_QuaStruct")
 
 
-class QuaExternalStream(Generic[StructT], QuaExpression[QuaProgramExternalStreamRefExpression], metaclass=abc.ABCMeta):
+class QuaExternalStream(
+    Generic[StructT], QuaExpression[inc_qua_pb2.QuaProgram.ExternalStreamRefExpression], StreamInterface
+):
     def __init__(self, stream_id: int, struct_t: Type[StructT]):
         super(QuaExternalStream, self).__init__(
-            QuaProgramExternalStreamRefExpression(stream_id=stream_id, loc=_get_loc())
+            inc_qua_pb2.QuaProgram.ExternalStreamRefExpression(stream_id=stream_id, loc=_get_loc())
         )
         self._stream_id = stream_id
         self._struct_t = struct_t
 
     @property
-    @abc.abstractmethod
-    def _direction(self) -> QuaProgramDirection:
-        pass
-
-    @property
-    def declaration_statement(self) -> QuaProgramExternalStreamDeclaration:
-        return QuaProgramExternalStreamDeclaration(
+    def declaration_statement(self) -> inc_qua_pb2.QuaProgram.ExternalStreamDeclaration:
+        return inc_qua_pb2.QuaProgram.ExternalStreamDeclaration(
             stream_id=self._stream_id,
-            expected_types=self._struct_t.__underlying_declarations__,
+            expectedTypes=self._struct_t.__underlying_declarations__,
             direction=self._direction,
         )
 
 
-class QuaExternalIncomingStream(QuaExternalStream[StructT]):
-    @property
-    def _direction(self) -> QuaProgramDirection:
-        return QuaProgramDirection.INCOMING  # type: ignore[return-value]
-
+class QuaExternalIncomingStream(QuaExternalStream[StructT], InputStreamInterface):
     def receive(self, struct: StructT) -> None:
-        # Alternative API to directly call `receive_from_external_stream`.
-        # Importing `receive_from_external_stream` here to avoid circular imports
-        from qm.qua._dsl.external_stream import receive_from_external_stream
+        # Alternative API to directly call `receive_from_opnic_stream`.
+        # Importing `_receive_from_opnic_stream` here to avoid circular imports
+        from qm.qua._dsl.streams.external_streams import _receive_from_opnic_stream
 
-        receive_from_external_stream(self, struct)
+        _receive_from_opnic_stream(self, struct)
 
 
-class QuaExternalOutgoingStream(QuaExternalStream[StructT]):
-    @property
-    def _direction(self) -> QuaProgramDirection:
-        return QuaProgramDirection.OUTGOING  # type: ignore[return-value]
-
+class QuaExternalOutgoingStream(QuaExternalStream[StructT], OutputStreamInterface):
     def send(self, struct: StructT) -> None:
-        # Alternative API to directly call `send_to_external_stream`.
-        # Importing `send_to_external_stream` here to avoid circular imports
-        from qm.qua._dsl.external_stream import send_to_external_stream
+        # Alternative API to directly call `send_to_opnic_stream`.
+        # Importing `_send_to_opnic_stream` here to avoid circular imports
+        from qm.qua._dsl.streams.external_streams import _send_to_opnic_stream
 
-        send_to_external_stream(self, struct)
+        _send_to_opnic_stream(self, struct)
 
 
-class InputStreamInterface(metaclass=abc.ABCMeta):
+class InputStreamOldInterface(InputStreamInterface, abc.ABC):
     @abc.abstractmethod
-    def advance(self) -> QuaProgramAnyStatement:
+    def advance(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
+        # The statement itself, will be added to the program in the advance_input_stream() method
         pass
 
 
-class QuaArrayInputStream(QuaArrayVariable[NumberT], InputStreamInterface):
+class QuaArrayInputStream(QuaArrayVariable[NumberT], InputStreamOldInterface):
     """A class representing the QUA vector that will be used as an input stream from the job to the QUA program."""
 
-    def advance(self) -> QuaProgramAnyStatement:
-        return QuaProgramAnyStatement(
-            advance_input_stream=QuaProgramAdvanceInputStreamStatement(loc=_get_loc(), stream_array=self.unwrapped)
+    def advance(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
+        return inc_qua_pb2.QuaProgram.AnyStatement(
+            advanceInputStream=inc_qua_pb2.QuaProgram.AdvanceInputStreamStatement(
+                loc=_get_loc(), streamArray=self.unwrapped
+            )
         )
 
 
-class QuaVariableInputStream(QuaVariable[NumberT], InputStreamInterface):
+class QuaVariableInputStream(QuaVariable[NumberT], InputStreamOldInterface):
     """A class representing the QUA variable that will be used as an input stream from the job to the QUA program."""
 
-    def advance(self) -> QuaProgramAnyStatement:
-        return QuaProgramAnyStatement(
-            advance_input_stream=QuaProgramAdvanceInputStreamStatement(
-                loc=_get_loc(), stream_variable=self.unwrapped.variable
+    def advance(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
+        return inc_qua_pb2.QuaProgram.AnyStatement(
+            advanceInputStream=inc_qua_pb2.QuaProgram.AdvanceInputStreamStatement(
+                loc=_get_loc(), streamVariable=self.unwrapped.variable
             )
         )
 
@@ -677,14 +695,51 @@ class QuaIO(AssignmentTargetInterface):
         self._number = number
 
     @property
-    def assignment_statement(self) -> QuaProgramAssignmentStatementTarget:
-        return QuaProgramAssignmentStatementTarget(
-            variable=QuaProgramVarRefExpression(io_number=self._number, loc=_get_loc())
+    def assignment_statement(self) -> inc_qua_pb2.QuaProgram.AssignmentStatement.Target:
+        return inc_qua_pb2.QuaProgram.AssignmentStatement.Target(
+            variable=inc_qua_pb2.QuaProgram.VarRefExpression(ioNumber=self._number, loc=_get_loc())
         )
 
 
 IO1 = QuaIO(1)
 IO2 = QuaIO(2)
+
+
+class _QuaGlobalVarOperation(
+    QuaScalarExpression[NumberT, inc_qua_pb2.QuaProgram.GlobalVarRefExpression], metaclass=abc.ABCMeta
+):
+    def __init__(
+        self, bits: Sequence[int], operation: inc_qua_pb2.QuaProgram.GlobalVarOperation, t: Type[NumberT]
+    ) -> None:
+        super(_QuaGlobalVarOperation, self).__init__(
+            inc_qua_pb2.QuaProgram.AnyScalarExpression(
+                globalVariable=inc_qua_pb2.QuaProgram.GlobalVarRefExpression(
+                    loc=_get_loc(),
+                    bits=list(bits),
+                    operation=operation,
+                ),
+            ),
+            t,
+        )
+
+    @property
+    def unwrapped_scalar(self) -> inc_qua_pb2.QuaProgram.GlobalVarRefExpression:
+        return self.unwrapped.globalVariable
+
+
+class QuaGlobalVarRead(_QuaGlobalVarOperation[int]):
+    def __init__(self, bits: Sequence[int], shift: bool) -> None:
+        operation = (
+            inc_qua_pb2.QuaProgram.GlobalVarOperation.read_shift
+            if shift
+            else inc_qua_pb2.QuaProgram.GlobalVarOperation.read
+        )
+        super(QuaGlobalVarRead, self).__init__(bits, operation, int)
+
+
+class QuaGlobalVarXor(_QuaGlobalVarOperation[bool]):
+    def __init__(self, bits: Sequence[int]) -> None:
+        super(QuaGlobalVarXor, self).__init__(bits, inc_qua_pb2.QuaProgram.GlobalVarOperation.xor, bool)
 
 
 def _fix_object_data_type(obj: Any) -> Any:
@@ -739,6 +794,11 @@ def create_qua_scalar_expression(value: "Scalar[NumberT]") -> "QuaScalar[NumberT
     raise NotImplementedError
 
 
+def validate_scalar_of_any_type(data_type: Any) -> None:
+    if not isinstance(data_type, (QuaScalarExpression, bool, int, float)):
+        raise QmQuaException(f"Data type must be a ScalarOfAnyType (QUA scalar value), got {type(data_type).__name__}.")
+
+
 class fixed(float):
     pass
 
@@ -752,6 +812,7 @@ QuaScalar = Union[
     QuaLibFunctionOutput[NumberT],
     QuaFunctionOutput[NumberT],
     QuaBroadcast[NumberT],
+    _QuaGlobalVarOperation[NumberT],
 ]
 
 Scalar = Union[QuaScalar[NumberT], NumberT]

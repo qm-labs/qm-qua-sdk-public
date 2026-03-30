@@ -1,16 +1,12 @@
 from typing import Optional
 
+from google.protobuf.wrappers_pb2 import UInt32Value
+
 from qm._loc import _get_loc
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.api.models.capabilities import QopCaps
 from qm.qua._expressions import Scalar, to_scalar_pb_expression
 from qm.qua._scope_management.scopes_manager import scopes_manager
-from qm.grpc.qua import (
-    QuaProgramAnyStatement,
-    QuaProgramPulseReference,
-    QuaProgramRampToZeroStatement,
-    QuaProgramLoadWaveformStatement,
-    QuaProgramQuantumElementReference,
-)
 
 
 def ramp_to_zero(element: str, duration: Optional[int] = None) -> None:
@@ -30,12 +26,13 @@ def ramp_to_zero(element: str, duration: Optional[int] = None) -> None:
     """
     duration = duration if duration is None else int(duration)
     loc = _get_loc()
-    statement = QuaProgramRampToZeroStatement(
+    duration_val = UInt32Value(value=duration) if duration else None
+    statement = inc_qua_pb2.QuaProgram.RampToZeroStatement(
         loc=loc,
-        qe=QuaProgramQuantumElementReference(name=element, loc=loc),
-        duration=duration if duration else None,
+        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+        duration=duration_val,
     )
-    scopes_manager.append_statement(QuaProgramAnyStatement(ramp_to_zero=statement))
+    scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(rampToZero=statement))
 
 
 def load_waveform(
@@ -55,11 +52,11 @@ def load_waveform(
     """
     loc = _get_loc()
     scopes_manager.program_scope.add_used_capability(QopCaps.waveform_array)
-    statement = QuaProgramAnyStatement(
-        load_waveform=QuaProgramLoadWaveformStatement(
+    statement = inc_qua_pb2.QuaProgram.AnyStatement(
+        loadWaveform=inc_qua_pb2.QuaProgram.LoadWaveformStatement(
             loc=loc,
-            pulse=QuaProgramPulseReference(name=pulse, loc=loc),
-            qe=QuaProgramQuantumElementReference(name=element, loc=loc),
+            pulse=inc_qua_pb2.QuaProgram.PulseReference(name=pulse, loc=loc),
+            qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
             waveform_index=to_scalar_pb_expression(waveform_index),
         )
     )

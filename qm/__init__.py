@@ -1,20 +1,23 @@
 import logging
 import warnings
 
-from qm.jobs.qm_job import QmJob  # noqa
-from qm.version import __version__  # noqa
-from qm.logging_utils import config_loggers
-from qm.jobs.job_queue_old_api import QmQueue
-from qm.user_config import UserConfig  # noqa
-from qm.program import Program, _Program  # noqa
-from qm.jobs.pending_job import QmPendingJob  # noqa
-from qm.quantum_machine import QuantumMachine  # noqa
-from qm.api.models.capabilities import QopCaps  # noqa
-from qm.type_hinting import DictQuaConfig, FullQuaConfig  # noqa
-from qm.api.models.compiler import CompilerOptionArguments  # noqa
-from qm.quantum_machines_manager import QuantumMachinesManager  # noqa
-from qm.serialization.generate_qua_script import generate_qua_script  # noqa
-from qm.simulate import (  # noqa
+# Suppress protobuf runtime version warnings for cross-version compatibility (must be before protobuf imports)
+warnings.filterwarnings("ignore", category=UserWarning, module="google.protobuf.runtime_version")
+
+from qm.jobs.qm_job import QmJob  # noqa: E402
+from qm.version import __version__  # noqa: E402
+from qm.user_config import UserConfig  # noqa: E402
+from qm.program import Program, _Program  # noqa: E402
+from qm.logging_utils import config_loggers  # noqa: E402
+from qm.jobs.pending_job import QmPendingJob  # noqa: E402
+from qm.jobs.job_queue_old_api import QmQueue  # noqa: E402
+from qm.quantum_machine import QuantumMachine  # noqa: E402
+from qm.api.models.capabilities import QopCaps  # noqa: E402
+from qm.type_hinting import DictQuaConfig, FullQuaConfig  # noqa: E402
+from qm.api.models.compiler import CompilerOptionArguments  # noqa: E402
+from qm.quantum_machines_manager import QuantumMachinesManager  # noqa: E402
+from qm.serialization.generate_qua_script import generate_qua_script  # noqa: E402
+from qm.simulate import (  # noqa: E402
     InterOpxAddress,
     InterOpxChannel,
     InterOpxPairing,
@@ -25,7 +28,7 @@ from qm.simulate import (  # noqa
     SimulatorControllerSamples,
 )
 
-from ._stream_results import (  # noqa
+from ._stream_results import (  # noqa: E402
     StreamsManager,
     StreamingResultFetcher,
     BaseSingleStreamFetcher,

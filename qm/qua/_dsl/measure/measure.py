@@ -3,6 +3,7 @@ import warnings
 from typing import List, Tuple, Union, Optional, overload
 
 from qm._loc import _get_loc
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.qua._expressions import QuaVariable
 from qm.qua._dsl.amplitude import AmpValuesType
@@ -10,13 +11,8 @@ from qm.qua._dsl._utils import _standardize_timestamp_label
 from qm.qua._dsl.measure.measure_process_factories import demod
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.measure.analog_measure_process import MeasureProcessAbstract
-from qm.qua._dsl.stream_processing.stream_processing import StreamType, ResultStreamSource, declare_stream
-from qm.grpc.qua import (
-    QuaProgramAnyStatement,
-    QuaProgramPulseReference,
-    QuaProgramMeasureStatement,
-    QuaProgramQuantumElementReference,
-)
+from qm.qua._dsl.stream_processing.stream_processing import StreamType, ResultStreamSource
+from qm.qua._dsl.streams.output_streams.declare_output_stream import declare_output_stream
 
 logger = logging.getLogger(__name__)
 
@@ -96,14 +92,18 @@ def measure(
 
             !!! Warning:
 
-                Streaming adc data without declaring the stream with `declare_stream(adc_trace=true)` might cause performance issues
+                Using `measure` on a stream that was previously used with `save` or `send` may cause performance issues,
+                 as the stream will no longer be treated as an ADC stream.
+                If you are using the deprecated `declare_stream` function, note that streaming ADC data without specifying
+                 `declare_stream(adc_trace=True)` may also cause performance issues.
+
 
     Example:
         ```python
         with program() as prog:
             I = declare(fixed)
             Q = declare(fixed)
-            adc_st = declare_stream(adc_trace=True)
+            adc_st = declare_output_stream()
 
             # measure by playing 'meas_pulse' to element 'resonator', do not save raw results.
             # demodulate data from "out1" port of 'resonator' using 'cos_weights' and store result in I, and also
@@ -186,10 +186,19 @@ def measure(
         _adc_stream = adc_stream
 
     if _adc_stream and not _adc_stream.is_adc_trace:
-        logger.warning(
-            "Streaming adc data without declaring the stream with "
-            "`declare_stream(adc_trace=true)` might cause performance issues"
-        )
+        if _adc_stream.is_adc_trace is False:
+            # TODO: in the future (2.0.0), we will want to raise an error here instead of a warning.
+            warnings.warn(
+                "Using a single stream for both a `measure` command and a `save`/`send` statement may cause performance issues. "
+                "This option is deprecated and will be removed in QUA 2.0.0. "
+                "If you are using the deprecated `declare_stream` API, streaming ADC data without specifying `declare_stream(adc_trace=True)` may also cause performance issues.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        elif _adc_stream.is_adc_trace is None:
+            # In case the user declared the stream without explicitly specifying adc_trace, we automatically set it to True here.
+            _adc_stream.is_adc_trace = True
+
     timestamp_label = _standardize_timestamp_label(timestamp_stream)
     processes = [x.unwrapped for x in measure_process]
 
@@ -198,37 +207,40 @@ def measure(
         pulse, amp = pulse
 
     loc = _get_loc()
-    statement = QuaProgramAnyStatement(
-        measure=QuaProgramMeasureStatement(
+    statement = inc_qua_pb2.QuaProgram.AnyStatement(
+        measure=inc_qua_pb2.QuaProgram.MeasureStatement(
             loc=loc,
-            pulse=QuaProgramPulseReference(name=pulse, loc=loc),
-            qe=QuaProgramQuantumElementReference(name=element, loc=loc),
+            pulse=inc_qua_pb2.QuaProgram.PulseReference(name=pulse, loc=loc),
+            qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
         )
     )
     if _adc_stream is not None:
-        statement.measure.stream_as = _adc_stream.get_var_name()
+        statement.measure.streamAs = _adc_stream.get_var_name()
 
     for analog_process in processes:
-        statement.measure.measure_processes.append(analog_process)
+        statement.measure.measureProcesses.append(analog_process)
 
     if amp is not None:
         statement.measure.amp.loc = loc
-        statement.measure.amp.v0 = amp[0]
+        statement.measure.amp.v0.CopyFrom(amp[0])
         for i in range(1, 4, 1):
             if amp[i] is not None:
-                setattr(statement.measure.amp, "v" + str(i), amp[i])
+                getattr(statement.measure.amp, "v" + str(i)).CopyFrom(amp[i])
 
     if timestamp_label is not None:
-        statement.measure.timestamp_label = timestamp_label
+        statement.measure.timestampLabel = timestamp_label
 
     scopes_manager.append_statement(statement)
+    # add implicit save if needed
+    for m in measure_process:
+        m.save_stream_if_needed()
 
 
 def _declare_legacy_adc(tag: str) -> ResultStreamSource:
     program_scope = scopes_manager.program_scope
     result_object = program_scope.declared_streams.get(tag, None)
     if result_object is None:
-        result_object = declare_stream(adc_trace=True)
+        result_object = declare_output_stream(adc_trace=True)
         program_scope.add_stream_declaration(tag, result_object)
         result_object.input1().with_timestamps()._auto_save_all(tag + "_input1")
         result_object.input2().with_timestamps()._auto_save_all(tag + "_input2")

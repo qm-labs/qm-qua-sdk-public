@@ -2,8 +2,6 @@ import json
 import logging
 from typing import Dict, List, Tuple, Union, Mapping, Optional, Sequence, cast
 
-import betterproto
-
 from qm.program import Program
 from qm.jobs.qm_job import QmJob
 from qm.octave import QmOctaveConfig
@@ -16,10 +14,12 @@ from qm.jobs.simulated_job import SimulatedJob
 from qm.api.simulation_api import SimulationApi
 from qm.jobs.running_qm_job import RunningQmJob
 from qm.utils.config_utils import get_fem_config
+from qm.utils.protobuf_utils import which_one_of
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
 from qm.elements_db import ElementsDB, init_elements
 from qm.utils.types_utils import convert_object_type
+from qm.grpc.qm.pb import frontend_pb2, inc_qua_config_pb2
 from qm.elements.up_converted_input import UpconvertedInput
 from qm._QmJobErrors import InvalidDigitalInputPolarityError
 from qm.api.v2.job_api.job_api import JobApiWithDeprecations
@@ -34,13 +34,6 @@ from qm.type_hinting.config_types import StandardPort, FullQuaConfig, PortRefere
 from qm.elements.element_inputs import MixInputs, SingleInput, static_set_mixer_correction
 from qm.type_hinting.general import Value, PathLike, NumpySupportedFloat, NumpySupportedValue, NumpySupportedNumber
 from qm.octave.octave_mixer_calibration import AutoCalibrationParams, OctaveMixerCalibration, MixerCalibrationResults
-from qm.grpc.frontend import (
-    JobExecutionStatus,
-    JobExecutionStatusLoading,
-    JobExecutionStatusPending,
-    JobExecutionStatusRunning,
-    JobExecutionStatusCompleted,
-)
 from qm.exceptions import (
     QmValueError,
     JobCancelledError,
@@ -50,14 +43,6 @@ from qm.exceptions import (
     AnotherJobIsRunning,
     CantCalibrateElementError,
 )
-from qm.grpc.qua_config import (
-    QuaConfig,
-    QuaConfigQuaConfigV1,
-    QuaConfigPortReference,
-    QuaConfigMicrowaveFemDec,
-    QuaConfigDigitalInputPortDec,
-    QuaConfigDigitalInputPortDecPolarity,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +51,7 @@ class QuantumMachine:
     def __init__(
         self,
         machine_id: str,
-        pb_config: QuaConfig,
+        pb_config: inc_qua_config_pb2.QuaConfig,
         frontend_api: FrontendApi,
         capabilities: ServerCapabilities,
         octave_manager: OctaveManager,
@@ -140,6 +125,7 @@ class QuantumMachine:
             compiler_options: Optional arguments for compilation.
             strict: This parameter is deprecated, please use `compiler_options`
             flags: This parameter is deprecated, please use `compiler_options`
+
         Returns:
             A ``QmJob`` object (see Job API).
         """
@@ -161,6 +147,7 @@ class QuantumMachine:
         *,
         strict: Optional[bool] = None,
         flags: Optional[List[str]] = None,
+        wait_for_execution_timeout: float = 5,
     ) -> RunningQmJob:
         """Executes a program and returns a job object to keep track of execution and get
         results.
@@ -179,6 +166,8 @@ class QuantumMachine:
             compiler_options: Optional arguments for compilation.
             strict: This parameter is deprecated, please use `compiler_options`
             flags: This parameter is deprecated, please use `compiler_options`
+            wait_for_execution_timeout: Set the timeout for waiting for execution in seconds.
+
         Returns:
             A ``QmJob`` object (see Job API).
         """
@@ -206,7 +195,7 @@ class QuantumMachine:
             current_running_job.cancel()
         pending_job = self._queue.add(program, standardized_compiler_options)
         logger.info("Executing program")
-        return pending_job.wait_for_execution(timeout=5)
+        return pending_job.wait_for_execution(timeout=wait_for_execution_timeout)
 
     def compile(
         self,
@@ -246,7 +235,7 @@ class QuantumMachine:
             The names of the controllers configured in this qm
         """
         config = self._get_config_as_object()
-        return tuple(config.control_devices) or tuple(config.controllers)
+        return tuple(config.controlDevices) or tuple(config.controllers)
 
     def set_mixer_correction(
         self,
@@ -406,10 +395,10 @@ class QuantumMachine:
         port_number = port.number
 
         specific_fem = get_fem_config(config, port)
-        if isinstance(specific_fem, QuaConfigMicrowaveFemDec):
+        if isinstance(specific_fem, inc_qua_config_pb2.QuaConfig.MicrowaveFemDec):
             raise InvalidConfigError(f"Port num {port_number} is a MW-FEM port, has no offset")
-        if port_number in specific_fem.analog_outputs:
-            offset = specific_fem.analog_outputs[port_number].offset
+        if port_number in specific_fem.analogOutputs:
+            offset = specific_fem.analogOutputs[port_number].offset
             assert offset is not None  # Mypy thinks it can be None, but it can't really (offset has a default value)
             return offset
         else:
@@ -449,6 +438,12 @@ class QuantumMachine:
 
             If the sum of the DC offset and the largest waveform data-point exceed the range,
             DAC output overflow will occur and the output will be corrupted.
+
+            On the OPX+, DC offsets are managed at the **QM level** (not the job level).
+            Changes made via this method persist across jobs while the QM is open.
+            Closing the QM resets all DC offsets to zero unless ``keep_dc_offsets_when_closing=True``
+            was passed to [open_qm][qm.QuantumMachinesManager.open_qm] (available from qm-qua 1.2.1 / QOP 2.4.2).
+            See [Output Idle Values](../../Guides/output_idle_values.md) for the full lifecycle.
         """
         element_inst = self._elements[element]
         if isinstance(element_inst.input, MixInputs):
@@ -558,11 +553,11 @@ class QuantumMachine:
             raise Exception("Output does not exist")
 
         specific_fem = get_fem_config(config, port)
-        if isinstance(specific_fem, QuaConfigMicrowaveFemDec):
+        if isinstance(specific_fem, inc_qua_config_pb2.QuaConfig.MicrowaveFemDec):
             raise InvalidConfigError(f"Port num {port.number} is a MW-FEM port, has no offset")
 
-        if port.number in specific_fem.analog_inputs:
-            offset = specific_fem.analog_inputs[port.number].offset
+        if port.number in specific_fem.analogInputs:
+            offset = specific_fem.analogInputs[port.number].offset
             assert offset is not None  # Mypy thinks it can be None, but it can't really (offset has a default value)
             return offset
         else:
@@ -789,13 +784,13 @@ class QuantumMachine:
             },
         ]
 
-    def _get_pb_config(self) -> QuaConfig:
+    def _get_pb_config(self) -> inc_qua_config_pb2.QuaConfig:
         config = self._frontend.get_quantum_machine_config(self._id)
         fill_defaults_in_config_v1(config)
         return config
 
-    def _get_config_as_object(self) -> QuaConfigQuaConfigV1:
-        return self._get_pb_config().v1_beta
+    def _get_config_as_object(self) -> inc_qua_config_pb2.QuaConfig.QuaConfigV1:
+        return self._get_pb_config().v1beta
 
     def get_config(self) -> FullQuaConfig:
         """Gets the current config of the qm
@@ -844,19 +839,22 @@ class QuantumMachine:
 
         Args:
             job_id: A list of jobs ids
+
         Returns:
             The job
         """
-        status: JobExecutionStatus = self._job_manager.get_job_execution_status(job_id, self._id)
-        _, status_inst = betterproto.which_one_of(status, "status")
-        if isinstance(status_inst, (JobExecutionStatusRunning, JobExecutionStatusCompleted)):
+        status: frontend_pb2.JobExecutionStatus = self._job_manager.get_job_execution_status(job_id, self._id)
+        _, status_inst = which_one_of(status, "status")
+        if isinstance(
+            status_inst, (frontend_pb2.JobExecutionStatus.Running, frontend_pb2.JobExecutionStatus.Completed)
+        ):
             return QmJob(
                 job_id=job_id,
                 machine_id=self._id,
                 frontend_api=self._frontend,
                 capabilities=self._capabilities,
             )
-        if isinstance(status_inst, (JobExecutionStatusPending, JobExecutionStatusLoading)):
+        if isinstance(status_inst, (frontend_pb2.JobExecutionStatus.Pending, frontend_pb2.JobExecutionStatus.Loading)):
             return QmPendingJob(
                 job_id=job_id,
                 machine_id=self._id,
@@ -866,7 +864,7 @@ class QuantumMachine:
 
         raise ErrorJobStateError(
             f"job {self._id} encountered an error",
-            error_list=[value.string_value for value in status.error.error_messages.values],
+            error_list=[value.string_value for value in status.error.errorMessages.values],
         )
 
     def set_digital_input_threshold(self, port: PortReferenceType, threshold: float) -> None:
@@ -879,13 +877,15 @@ class QuantumMachine:
         controller_name, fem_number, port_number = _standardize_port(port)
         self._frontend.set_digital_input_threshold(self._id, controller_name, fem_number, port_number, threshold)
 
-    def _get_digital_input_port(self, port: PortReferenceType) -> QuaConfigDigitalInputPortDec:
+    def _get_digital_input_port(self, port: PortReferenceType) -> inc_qua_config_pb2.QuaConfig.DigitalInputPortDec:
         config = self._get_pb_config()
         controller_name, fem_number, port_number = _standardize_port(port)
-        port_obj = QuaConfigPortReference(controller=controller_name, fem=fem_number, number=port_number)
+        port_obj = inc_qua_config_pb2.QuaConfig.PortReference(
+            controller=controller_name, fem=fem_number, number=port_number
+        )
         fem_config = get_fem_config(config, port_obj)
-        if port_obj.number in fem_config.digital_inputs:
-            return fem_config.digital_inputs[port_number]
+        if port_obj.number in fem_config.digitalInputs:
+            return fem_config.digitalInputs[port_number]
         raise InvalidConfigError("Digital input port not found")
 
     def get_digital_input_threshold(self, port: PortReferenceType) -> float:
@@ -951,7 +951,7 @@ class QuantumMachine:
             The polarity
         """
         digital_input_port = self._get_digital_input_port(port)
-        return QuaConfigDigitalInputPortDecPolarity(digital_input_port.polarity).name  # type: ignore[return-value]
+        return inc_qua_config_pb2.QuaConfig.DigitalInputPortDec.Polarity.Name(digital_input_port.polarity)
 
 
 def _standardize_port(port: PortReferenceType) -> StandardPort:

@@ -1,34 +1,13 @@
 import abc
 from typing import Union, TypeVar, Optional
 
-import betterproto
-
 from qm._loc import _get_loc
 from qm.type_hinting import Number
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
+from qm.utils.protobuf_utils import which_one_of
 from qm.qua._expressions import QuaVariable, QuaArrayCell, QuaArrayVariable
-from qm.grpc.qua import (
-    QuaProgramMeasureProcess,
-    QuaProgramVarRefExpression,
-    QuaProgramAnalogProcessTarget,
-    QuaProgramAnyScalarExpression,
-    QuaProgramAnalogMeasureProcess,
-    QuaProgramArrayVarRefExpression,
-    QuaProgramArrayCellRefExpression,
-    QuaProgramAnalogTimeDivisionSliced,
-    QuaProgramIntegrationWeightReference,
-    QuaProgramAnalogTimeDivisionAccumulated,
-    QuaProgramAnalogTimeDivisionMovingWindow,
-    QuaProgramAnalogProcessTargetTimeDivision,
-    QuaProgramAnalogMeasureProcessRawTimeTagging,
-    QuaProgramAnalogMeasureProcessBareIntegration,
-    QuaProgramDigitalMeasureProcessRawTimeTagging,
-    QuaProgramAnalogMeasureProcessDemodIntegration,
-    QuaProgramAnalogMeasureProcessHighResTimeTagging,
-    QuaProgramAnalogProcessTargetScalarProcessTarget,
-    QuaProgramAnalogProcessTargetVectorProcessTarget,
-    QuaProgramAnalogMeasureProcessDualDemodIntegration,
-)
+from qm.qua._dsl.stream_processing.direct_stream_processing_interface import DirectStreamSourceInterface
 
 
 class AnalogTimeDivision(metaclass=abc.ABCMeta):
@@ -38,23 +17,23 @@ class AnalogTimeDivision(metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def unwrapped(self) -> QuaProgramAnalogProcessTargetTimeDivision:
+    def unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogProcessTarget.TimeDivision:
         pass
 
 
 class SlicedAnalogTimeDivision(AnalogTimeDivision):
     @property
-    def unwrapped(self) -> QuaProgramAnalogProcessTargetTimeDivision:
-        return QuaProgramAnalogProcessTargetTimeDivision(
-            sliced=QuaProgramAnalogTimeDivisionSliced(samples_per_chunk=self.samples_per_chunk)
+    def unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogProcessTarget.TimeDivision:
+        return inc_qua_pb2.QuaProgram.AnalogProcessTarget.TimeDivision(
+            sliced=inc_qua_pb2.QuaProgram.AnalogTimeDivision.Sliced(samplesPerChunk=self.samples_per_chunk)
         )
 
 
 class AccumulatedAnalogTimeDivision(AnalogTimeDivision):
     @property
-    def unwrapped(self) -> QuaProgramAnalogProcessTargetTimeDivision:
-        return QuaProgramAnalogProcessTargetTimeDivision(
-            accumulated=QuaProgramAnalogTimeDivisionAccumulated(samples_per_chunk=self.samples_per_chunk)
+    def unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogProcessTarget.TimeDivision:
+        return inc_qua_pb2.QuaProgram.AnalogProcessTarget.TimeDivision(
+            accumulated=inc_qua_pb2.QuaProgram.AnalogTimeDivision.Accumulated(samplesPerChunk=self.samples_per_chunk)
         )
 
 
@@ -64,11 +43,11 @@ class MovingWindowAnalogTimeDivision(AnalogTimeDivision):
         self.chunks_per_window = chunks_per_window
 
     @property
-    def unwrapped(self) -> QuaProgramAnalogProcessTargetTimeDivision:
-        return QuaProgramAnalogProcessTargetTimeDivision(
-            moving_window=QuaProgramAnalogTimeDivisionMovingWindow(
-                samples_per_chunk=self.samples_per_chunk,
-                chunks_per_window=self.chunks_per_window,
+    def unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogProcessTarget.TimeDivision:
+        return inc_qua_pb2.QuaProgram.AnalogProcessTarget.TimeDivision(
+            movingWindow=inc_qua_pb2.QuaProgram.AnalogTimeDivision.MovingWindow(
+                samplesPerChunk=self.samples_per_chunk,
+                chunksPerWindow=self.chunks_per_window,
             )
         )
 
@@ -79,7 +58,11 @@ class AnalogProcessTarget(metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def unwrapped(self) -> QuaProgramAnalogProcessTarget:
+    def unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogProcessTarget:
+        pass
+
+    @abc.abstractmethod
+    def save_stream_if_needed(self) -> None:
         pass
 
 
@@ -89,19 +72,23 @@ class ScalarProcessTarget(AnalogProcessTarget):
         self.target = target
 
     @property
-    def unwrapped(self) -> QuaProgramAnalogProcessTarget:
+    def unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogProcessTarget:
         target_exp = self.target.unwrapped
-        if not isinstance(target_exp, QuaProgramAnyScalarExpression):
+        if not isinstance(target_exp, inc_qua_pb2.QuaProgram.AnyScalarExpression):
             raise QmQuaException(f"Unknown type - {type(target_exp)}")
 
-        target_type, found = betterproto.which_one_of(target_exp, "expression_oneof")
-        if isinstance(found, QuaProgramVarRefExpression):
-            target = QuaProgramAnalogProcessTargetScalarProcessTarget(variable=found)
-        elif isinstance(found, QuaProgramArrayCellRefExpression):
-            target = QuaProgramAnalogProcessTargetScalarProcessTarget(array_cell=found)
+        target_type, found = which_one_of(target_exp, "expression_oneof")
+        if isinstance(found, inc_qua_pb2.QuaProgram.VarRefExpression):
+            target = inc_qua_pb2.QuaProgram.AnalogProcessTarget.ScalarProcessTarget(variable=found)
+        elif isinstance(found, inc_qua_pb2.QuaProgram.ArrayCellRefExpression):
+            target = inc_qua_pb2.QuaProgram.AnalogProcessTarget.ScalarProcessTarget(arrayCell=found)
         else:
             raise QmQuaException(f"Unknown target type - {target_type}")
-        return QuaProgramAnalogProcessTarget(scalar_process=target)
+        return inc_qua_pb2.QuaProgram.AnalogProcessTarget(scalarProcess=target)
+
+    def save_stream_if_needed(self) -> None:
+        if isinstance(self.target, DirectStreamSourceInterface):
+            self.target.save()
 
 
 class VectorProcessTarget(AnalogProcessTarget):
@@ -111,13 +98,17 @@ class VectorProcessTarget(AnalogProcessTarget):
         self.target = target
 
     @property
-    def unwrapped(self) -> QuaProgramAnalogProcessTarget:
+    def unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogProcessTarget:
         target_exp = self.target.unwrapped
-        target = QuaProgramAnalogProcessTargetVectorProcessTarget(
+        target = inc_qua_pb2.QuaProgram.AnalogProcessTarget.VectorProcessTarget(
             array=target_exp,
-            time_division=QuaProgramAnalogProcessTargetTimeDivision().from_dict(self.time_division.unwrapped.to_dict()),
+            timeDivision=self.time_division.unwrapped,
         )
-        return QuaProgramAnalogProcessTarget(vector_process=target)
+        return inc_qua_pb2.QuaProgram.AnalogProcessTarget(vectorProcess=target)
+
+    def save_stream_if_needed(self) -> None:
+        if isinstance(self.target, DirectStreamSourceInterface):
+            self.target.save()
 
 
 class MeasureProcessAbstract(metaclass=abc.ABCMeta):
@@ -126,7 +117,11 @@ class MeasureProcessAbstract(metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def unwrapped(self) -> QuaProgramMeasureProcess:
+    def unwrapped(self) -> inc_qua_pb2.QuaProgram.MeasureProcess:
+        pass
+
+    @abc.abstractmethod
+    def save_stream_if_needed(self) -> None:
         pass
 
 
@@ -136,13 +131,16 @@ class AnalogMeasureProcess(MeasureProcessAbstract, metaclass=abc.ABCMeta):
         self.target = target
 
     @property
-    def unwrapped(self) -> QuaProgramMeasureProcess:
-        return QuaProgramMeasureProcess(analog=self._analog_unwrapped)
+    def unwrapped(self) -> inc_qua_pb2.QuaProgram.MeasureProcess:
+        return inc_qua_pb2.QuaProgram.MeasureProcess(analog=self._analog_unwrapped)
 
     @property
     @abc.abstractmethod
-    def _analog_unwrapped(self) -> QuaProgramAnalogMeasureProcess:
+    def _analog_unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogMeasureProcess:
         pass
+
+    def save_stream_if_needed(self) -> None:
+        self.target.save_stream_if_needed()
 
 
 class BasicIntegration(AnalogMeasureProcess):
@@ -153,18 +151,18 @@ class BasicIntegration(AnalogMeasureProcess):
 
     @property
     @abc.abstractmethod
-    def _analog_unwrapped(self) -> QuaProgramAnalogMeasureProcess:
+    def _analog_unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogMeasureProcess:
         pass
 
 
 class BareIntegration(BasicIntegration):
     @property
-    def _analog_unwrapped(self) -> QuaProgramAnalogMeasureProcess:
-        return QuaProgramAnalogMeasureProcess(
+    def _analog_unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogMeasureProcess:
+        return inc_qua_pb2.QuaProgram.AnalogMeasureProcess(
             loc=self.loc,
-            bare_integration=QuaProgramAnalogMeasureProcessBareIntegration(
-                integration=QuaProgramIntegrationWeightReference(name=self.iw),
-                element_output=self.element_output,
+            bareIntegration=inc_qua_pb2.QuaProgram.AnalogMeasureProcess.BareIntegration(
+                integration=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self.iw),
+                elementOutput=self.element_output,
                 target=self.target.unwrapped,
             ),
         )
@@ -172,12 +170,12 @@ class BareIntegration(BasicIntegration):
 
 class DemodIntegration(BasicIntegration):
     @property
-    def _analog_unwrapped(self) -> QuaProgramAnalogMeasureProcess:
-        return QuaProgramAnalogMeasureProcess(
+    def _analog_unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogMeasureProcess:
+        return inc_qua_pb2.QuaProgram.AnalogMeasureProcess(
             loc=self.loc,
-            demod_integration=QuaProgramAnalogMeasureProcessDemodIntegration(
-                integration=QuaProgramIntegrationWeightReference(name=self.iw),
-                element_output=self.element_output,
+            demodIntegration=inc_qua_pb2.QuaProgram.AnalogMeasureProcess.DemodIntegration(
+                integration=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self.iw),
+                elementOutput=self.element_output,
                 target=self.target.unwrapped,
             ),
         )
@@ -201,14 +199,14 @@ class DualMeasureProcess(AnalogMeasureProcess, metaclass=abc.ABCMeta):
 
 class DualDemodIntegration(DualMeasureProcess):
     @property
-    def _analog_unwrapped(self) -> QuaProgramAnalogMeasureProcess:
-        return QuaProgramAnalogMeasureProcess(
+    def _analog_unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogMeasureProcess:
+        return inc_qua_pb2.QuaProgram.AnalogMeasureProcess(
             loc=self.loc,
-            dual_demod_integration=QuaProgramAnalogMeasureProcessDualDemodIntegration(
-                integration1=QuaProgramIntegrationWeightReference(name=self.iw1),
-                integration2=QuaProgramIntegrationWeightReference(name=self.iw2),
-                element_output1=self.element_output1,
-                element_output2=self.element_output2,
+            dualDemodIntegration=inc_qua_pb2.QuaProgram.AnalogMeasureProcess.DualDemodIntegration(
+                integration1=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self.iw1),
+                integration2=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self.iw2),
+                elementOutput1=self.element_output1,
+                elementOutput2=self.element_output2,
                 target=self.target.unwrapped,
             ),
         )
@@ -217,16 +215,16 @@ class DualDemodIntegration(DualMeasureProcess):
 T = TypeVar(
     "T",
     bound=Union[
-        QuaProgramAnalogMeasureProcessRawTimeTagging,
-        QuaProgramAnalogMeasureProcessHighResTimeTagging,
-        QuaProgramDigitalMeasureProcessRawTimeTagging,
+        inc_qua_pb2.QuaProgram.AnalogMeasureProcess.RawTimeTagging,
+        inc_qua_pb2.QuaProgram.AnalogMeasureProcess.HighResTimeTagging,
+        inc_qua_pb2.QuaProgram.DigitalMeasureProcess.RawTimeTagging,
     ],
 )
 
 
 def _add_target_len(time_tagging: T, target_len: Optional[QuaVariable[int]]) -> T:
     if target_len is not None:
-        time_tagging.target_len = target_len.unwrapped.variable
+        time_tagging.targetLen.CopyFrom(target_len.unwrapped.variable)
     return time_tagging
 
 
@@ -245,40 +243,43 @@ class TimeTaggingMeasurementProcess(MeasureProcessAbstract, metaclass=abc.ABCMet
         self.max_time = max_time
 
     @property
-    def unwrapped_target(self) -> QuaProgramArrayVarRefExpression:
+    def unwrapped_target(self) -> inc_qua_pb2.QuaProgram.ArrayVarRefExpression:
         a = self.time_tagging_target.unwrapped
-        assert isinstance(a, QuaProgramArrayVarRefExpression)
+        assert isinstance(a, inc_qua_pb2.QuaProgram.ArrayVarRefExpression)
         return a
 
     @property
-    def unwrapped(self) -> QuaProgramMeasureProcess:
-        return QuaProgramMeasureProcess(analog=self._analog_unwrapped)
+    def unwrapped(self) -> inc_qua_pb2.QuaProgram.MeasureProcess:
+        return inc_qua_pb2.QuaProgram.MeasureProcess(analog=self._analog_unwrapped)
 
     @property
     @abc.abstractmethod
-    def _analog_unwrapped(self) -> QuaProgramAnalogMeasureProcess:
+    def _analog_unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogMeasureProcess:
+        pass
+
+    def save_stream_if_needed(self) -> None:
         pass
 
 
 class RawTimeTagging(TimeTaggingMeasurementProcess):
     @property
-    def _analog_unwrapped(self) -> QuaProgramAnalogMeasureProcess:
-        time_tagging = QuaProgramAnalogMeasureProcessRawTimeTagging(
-            max_time=int(self.max_time),
-            element_output=self.element_output,
+    def _analog_unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogMeasureProcess:
+        time_tagging = inc_qua_pb2.QuaProgram.AnalogMeasureProcess.RawTimeTagging(
+            maxTime=int(self.max_time),
+            elementOutput=self.element_output,
             target=self.unwrapped_target,
         )
         time_tagging = _add_target_len(time_tagging, self.targetLen)
-        return QuaProgramAnalogMeasureProcess(loc=self.loc, raw_time_tagging=time_tagging)
+        return inc_qua_pb2.QuaProgram.AnalogMeasureProcess(loc=self.loc, rawTimeTagging=time_tagging)
 
 
 class HighResTimeTagging(TimeTaggingMeasurementProcess):
     @property
-    def _analog_unwrapped(self) -> QuaProgramAnalogMeasureProcess:
-        time_tagging = QuaProgramAnalogMeasureProcessHighResTimeTagging(
-            max_time=int(self.max_time),
-            element_output=self.element_output,
+    def _analog_unwrapped(self) -> inc_qua_pb2.QuaProgram.AnalogMeasureProcess:
+        time_tagging = inc_qua_pb2.QuaProgram.AnalogMeasureProcess.HighResTimeTagging(
+            maxTime=int(self.max_time),
+            elementOutput=self.element_output,
             target=self.unwrapped_target,
         )
         time_tagging = _add_target_len(time_tagging, self.targetLen)
-        return QuaProgramAnalogMeasureProcess(loc=self.loc, high_res_time_tagging=time_tagging)
+        return inc_qua_pb2.QuaProgram.AnalogMeasureProcess(loc=self.loc, highResTimeTagging=time_tagging)

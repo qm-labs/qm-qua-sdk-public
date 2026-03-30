@@ -1,8 +1,8 @@
 from typing import Dict, Optional
 
+from qm.grpc.qm.grpc.v2 import job_api_pb2
 from qm.api.v2.job_api.generic_apis import ElementGenericApi
 from qm.api.v2.job_api.element_input_api import ElementInputApi
-from qm.grpc.v2 import GetIntermediateFrequencyRequest, SetIntermediateFrequencyRequest
 from qm.api.v2.job_api.element_port_api import MwOutputApi, AnalogOutputApi, DigitalInputApi
 
 
@@ -21,12 +21,14 @@ class NoMicrowaveOutputError(KeyError):
 
 class ElementApi(ElementGenericApi):
     def set_intermediate_frequency(self, frequency: float) -> None:
-        request = SetIntermediateFrequencyRequest(job_id=self._id, qe=self._element_id, frequency=frequency)
-        self._run(self._stub.set_intermediate_frequency(request, timeout=self._timeout))
+        request = job_api_pb2.SetIntermediateFrequencyRequest(job_id=self._id, qe=self._element_id, frequency=frequency)
+        self._run(self._stub.SetIntermediateFrequency, request, timeout=self._timeout)
 
     def get_intermediate_frequency(self) -> float:
-        request = GetIntermediateFrequencyRequest(job_id=self._id, qe=self._element_id)
-        response = self._run(self._stub.get_intermediate_frequency(request, timeout=self._timeout))
+        request = job_api_pb2.GetIntermediateFrequencyRequest(job_id=self._id, qe=self._element_id)
+        response: job_api_pb2.GetIntermediateFrequencyResponse.GetIntermediateFrequencyResponseSuccess = self._run(
+            self._stub.GetIntermediateFrequency, request, timeout=self._timeout
+        )
         return response.frequency
 
 

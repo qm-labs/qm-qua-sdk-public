@@ -11,27 +11,25 @@ from typing import List, Union
 
 from qm._loc import _get_loc
 from qm.type_hinting import NumberT
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.qua._expressions import Scalar, QuaArrayVariable, QuaFunctionOutput, create_qua_scalar_expression
-from qm.grpc.qua import (
-    QuaProgramFunctionExpression,
-    QuaProgramFunctionExpressionOrFunction,
-    QuaProgramFunctionExpressionAndFunction,
-    QuaProgramFunctionExpressionXorFunction,
-    QuaProgramFunctionExpressionScalarOrVectorArgument,
-)
 
 
 def _standardize_args(
     *args: Union[Scalar[NumberT], QuaArrayVariable[NumberT]]
-) -> List[QuaProgramFunctionExpressionScalarOrVectorArgument]:
+) -> List[inc_qua_pb2.QuaProgram.FunctionExpression.ScalarOrVectorArgument]:
     standardized_args = []
 
     for arg in args:
         if isinstance(arg, QuaArrayVariable):
-            standardized_args.append(QuaProgramFunctionExpressionScalarOrVectorArgument(array=arg.unwrapped))
+            standardized_args.append(
+                inc_qua_pb2.QuaProgram.FunctionExpression.ScalarOrVectorArgument(array=arg.unwrapped)
+            )
         else:
             arg = create_qua_scalar_expression(arg)
-            standardized_args.append(QuaProgramFunctionExpressionScalarOrVectorArgument(scalar=arg.unwrapped))
+            standardized_args.append(
+                inc_qua_pb2.QuaProgram.FunctionExpression.ScalarOrVectorArgument(scalar=arg.unwrapped)
+            )
 
     return standardized_args
 
@@ -43,9 +41,9 @@ def and_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaFunctionOut
         *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
             logical AND operation. Each input can be a single boolean, a QUA boolean or a QUA array of booleans.
     """
-    function_expression = QuaProgramFunctionExpression(
-        and_=QuaProgramFunctionExpressionAndFunction(_standardize_args(*values)),
-        loc=_get_loc(),
+    function_expression = inc_qua_pb2.QuaProgram.FunctionExpression(loc=_get_loc())
+    getattr(function_expression, "and").CopyFrom(
+        inc_qua_pb2.QuaProgram.FunctionExpression.AndFunction(values=_standardize_args(*values))
     )
     return QuaFunctionOutput(function_expression, bool)
 
@@ -57,9 +55,9 @@ def or_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaFunctionOutp
         *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
             logical OR operation. Each input can be a single boolean, a QUA boolean or a QUA array of booleans.
     """
-    function_expression = QuaProgramFunctionExpression(
-        or_=QuaProgramFunctionExpressionOrFunction(_standardize_args(*values)),
-        loc=_get_loc(),
+    function_expression = inc_qua_pb2.QuaProgram.FunctionExpression(loc=_get_loc())
+    getattr(function_expression, "or").CopyFrom(
+        inc_qua_pb2.QuaProgram.FunctionExpression.OrFunction(values=_standardize_args(*values))
     )
     return QuaFunctionOutput(function_expression, bool)
 
@@ -71,8 +69,8 @@ def xor_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaFunctionOut
         *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
             logical XOR operation. Each input can be a single boolean, a QUA boolean, or a QUA array of booleans.
     """
-    function_expression = QuaProgramFunctionExpression(
-        xor=QuaProgramFunctionExpressionXorFunction(_standardize_args(*values)),
+    function_expression = inc_qua_pb2.QuaProgram.FunctionExpression(
+        xor=inc_qua_pb2.QuaProgram.FunctionExpression.XorFunction(values=_standardize_args(*values)),
         loc=_get_loc(),
     )
     return QuaFunctionOutput(function_expression, bool)

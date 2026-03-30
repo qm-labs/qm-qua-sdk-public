@@ -1,7 +1,7 @@
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Optional, Sequence, cast
 
+from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException, NoScopeFoundException
-from qm.grpc.qua import QuaProgramAnyStatement, QuaProgramAnyScalarExpression
 from qm.qua._scope_management._core_scopes import _BaseScope, _ProgramScope, _get_scopes_stack
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ class _ScopesStackManager:
     """
 
     def __init__(self) -> None:
-        self._port_condition: Optional[QuaProgramAnyScalarExpression] = None
+        self._port_condition: Optional[inc_qua_pb2.QuaProgram.AnyScalarExpression] = None
 
     @property
     def program_scope(self) -> _ProgramScope:
@@ -31,14 +31,18 @@ class _ScopesStackManager:
             raise NoScopeFoundException("No scope found")
         return scopes_stack[-1]
 
-    def append_statement(self, statement: QuaProgramAnyStatement) -> None:
+    @property
+    def scope_stack(self) -> Sequence[_BaseScope]:
+        return tuple(_get_scopes_stack())
+
+    def append_statement(self, statement: inc_qua_pb2.QuaProgram.AnyStatement) -> None:
         self.current_scope.append_statement(statement)
 
     def append_output_stream(self, stream: "_OutputStream") -> None:
         self.program_scope.result_analysis_scope.append_output_stream(stream)
 
     # The function is private since it should only be used by the PortConditionScope, and should not be used by the DSL functions.
-    def _set_port_condition(self, condition: QuaProgramAnyScalarExpression) -> None:
+    def _set_port_condition(self, condition: inc_qua_pb2.QuaProgram.AnyScalarExpression) -> None:
         scopes_stack = _get_scopes_stack()
         if len(scopes_stack) == 0:
             raise NoScopeFoundException("No program scope found")
@@ -51,7 +55,7 @@ class _ScopesStackManager:
         self._port_condition = None
 
     @property
-    def port_condition(self) -> Optional[QuaProgramAnyScalarExpression]:
+    def port_condition(self) -> Optional[inc_qua_pb2.QuaProgram.AnyScalarExpression]:
         return self._port_condition
 
 
