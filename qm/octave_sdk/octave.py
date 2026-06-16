@@ -546,7 +546,7 @@ class RFInput:
         ignore_shared_errors: bool = False,
         check_conflict: bool = False,
     ) -> None:
-        (octave_lo_source, synth_index) = convert_rf_in_enum_to_octave_lo_input(
+        octave_lo_source, synth_index = convert_rf_in_enum_to_octave_lo_input(
             name,
             self._context.connectivity.synth_by_rf_out(),
             self._context.connectivity.synth_by_lo_source(),
@@ -868,7 +868,7 @@ class RFOutput:
         total_attn = _round_to_int(total_attn)
 
         if total_attn < 0:
-            raise ValueError(f"maximum gain for frequency {frequency/1e9:.3f}GHz is {total_attn_0db/2:.2f}dB")
+            raise ValueError(f"maximum gain for frequency {frequency / 1e9:.3f}GHz is {total_attn_0db / 2:.2f}dB")
 
         # We always enable the upconverter and use the power amplifier (to keep the heating constant)
         crb.up[self._index].enabled.value = True

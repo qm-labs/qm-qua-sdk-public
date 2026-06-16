@@ -146,7 +146,7 @@ class _WaveformPlotBuilder:
         y_level = [start_y] * 3
         for wf in port_played_waveforms:
             x_axis_points = (wf.timestamp, wf.ends_at)
-            num_intersections = len([l for l in levels if self._is_intersect(l, x_axis_points)])
+            num_intersections = len([ll for ll in levels if self._is_intersect(ll, x_axis_points)])
             levels.append(x_axis_points)
             prev_y = start_y if num_intersections == 0 else y_level[0]
             y_level = [prev_y - diff_between_traces] * 3
@@ -221,7 +221,7 @@ class _WaveformPlotBuilder:
         y_level = [1.2] * 3
         for adc in adc_port_acquisitions:
             x_axis_points = (adc.start_time, adc.end_time)
-            num_intersections = len([l for l in levels if self._is_intersect(l, x_axis_points)])
+            num_intersections = len([ll for ll in levels if self._is_intersect(ll, x_axis_points)])
             levels.append(x_axis_points)
             prev_y = 1.2 if num_intersections == 0 else y_level[0]
             y_level = [prev_y - 0.2] * 3

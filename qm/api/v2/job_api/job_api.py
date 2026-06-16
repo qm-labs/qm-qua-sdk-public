@@ -71,7 +71,7 @@ IoValueTypes = Union[Type[bool], Type[int], Type[float], Type[fixed]]
 
 
 def transfer_statuses_to_enum(
-    status: Union[JobStatus, Iterable[JobStatus]]
+    status: Union[JobStatus, Iterable[JobStatus]],
 ) -> List[common_types_pb2.JobExecutionStatus.ValueType]:  # type: ignore[name-defined]
     if isinstance(status, str):
         status = [status]
@@ -209,11 +209,11 @@ class JobApi(JobGenericApi):
             data: The data to be pushed. The data's size & type must match
                 the size & type of the input stream.
         """
-        if all(type(element) == bool for element in data):
+        if all(type(element) is bool for element in data):
             self._typed_push_to_input_stream(stream_name, bool, data)
-        elif all(type(element) == int for element in data):
+        elif all(type(element) is int for element in data):
             self._typed_push_to_input_stream(stream_name, int, data)
-        elif all(type(element) == float for element in data):
+        elif all(type(element) is float for element in data):
             self._typed_push_to_input_stream(stream_name, float, data)
         else:
             raise QmValueError(
@@ -418,9 +418,7 @@ class JobApi(JobGenericApi):
         self.set_io_values(io2=value)
 
     @overload
-    def get_io_values(
-        self, *, io1_type: None = ..., io2_type: None = ...
-    ) -> Tuple[
+    def get_io_values(self, *, io1_type: None = ..., io2_type: None = ...) -> Tuple[
         job_api_pb2.GetIoValuesResponse.GetIoValuesResponseSuccess.IOValuesData,
         job_api_pb2.GetIoValuesResponse.GetIoValuesResponseSuccess.IOValuesData,
     ]:

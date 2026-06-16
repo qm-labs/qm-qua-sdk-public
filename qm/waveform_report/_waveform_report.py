@@ -167,6 +167,7 @@ class PlayedAnalogWaveform(PlayedWaveform):
 
     def to_custom_string(self, show_chirp: bool = True) -> str:
         _attributes = super()._common_attributes_to_printable_str_list()
+        dc_offset_by_port = {k: format_float(v) for k, v in self.current_dc_offset_by_port.items()}
         _attributes += (
             [
                 f"{k}={v if self.is_iq else v[0]}"
@@ -178,7 +179,7 @@ class PlayedAnalogWaveform(PlayedWaveform):
             ]
             + [
                 f"Intermediate Frequency={pretty_string_freq(self.current_intermediate_frequency)}",
-                f"Current DC Offset (By output ports)={ {k: format_float(v) for k, v in self.current_dc_offset_by_port.items()} }",
+                f"Current DC Offset (By output ports)={dc_offset_by_port}",
                 f"Current Phase={format_float(self.current_phase)},",
             ]
             + ([] if (self.chirp_info is None or not show_chirp) else [f"chirp_info={self.chirp_info}"])

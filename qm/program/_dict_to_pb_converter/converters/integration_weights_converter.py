@@ -32,7 +32,7 @@ class IntegrationWeightsConverter(
 
 
 def build_iw_sample(
-    data: Union[List[Tuple[float, int]], List[float]]
+    data: Union[List[Tuple[float, int]], List[float]],
 ) -> List[inc_qua_config_pb2.QuaConfig.IntegrationWeightSample]:
     clean_data = _standardize_iw_data(data)
     return [inc_qua_config_pb2.QuaConfig.IntegrationWeightSample(value=s[0], length=int(s[1])) for s in clean_data]

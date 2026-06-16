@@ -5,9 +5,9 @@ from typing import Any, Union, Literal, Optional, cast, get_args, overload
 from qm.type_hinting import NumberT
 from qm.exceptions import QmQuaException
 from qm.qua._dsl._type_hints import OneOrMore
-from qm.qua._dsl.streams.common import StreamEndpoints
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.variable_handling import _standardize_value_and_size
+from qm.qua._dsl.streams.common import StreamEndpoints, _validate_number_type
 from qm.qua._dsl.streams.external_streams import QuaStreamDirection, _declare_opnic_stream
 from qm.qua._expressions import StructT, QuaArrayInputStream, QuaVariableInputStream, QuaExternalIncomingStream
 
@@ -62,13 +62,7 @@ def _declare_any_input_stream(
     size: Optional[int] = None,
 ) -> Union[QuaExternalIncomingStream[StructT], QuaVariableInputStream[NumberT], QuaArrayInputStream[NumberT]]:
     if source == "client":
-        # Dynamically extract valid NumberT types from TypeVar constraints
-        number_types = NumberT.__constraints__  # type: ignore[misc]
-        if not issubclass(dtype, tuple(number_types)):
-            raise QmQuaException(
-                f"Client input streams require a NumberT type (one of {', '.join(t.__name__ for t in number_types)}), "
-                f"got {dtype.__name__}"
-            )
+        _validate_number_type(dtype, "input")
         return _declare_client_input_stream(cast(type[NumberT], dtype), str(stream_id), size=size)
 
     elif source == "opnic":
@@ -79,6 +73,10 @@ def _declare_any_input_stream(
         return cast(
             QuaExternalIncomingStream[StructT],
             _declare_opnic_stream(cast(type[StructT], dtype), stream_id, QuaStreamDirection.INCOMING),
+        )
+    else:
+        raise QmQuaException(
+            f"Unsupported source for input stream '{source}'. Supported sources are {get_args(StreamEndpoints)}."
         )
 
 
@@ -149,32 +147,29 @@ def declare_input_stream(
 
 
 @overload
-def declare_input_stream(t: type[NumberT], name: str) -> QuaVariableInputStream[NumberT]:
-    ...
+def declare_input_stream(t: type[NumberT], name: str) -> QuaVariableInputStream[NumberT]: ...
 
 
 @overload
-def declare_input_stream(t: type[NumberT], name: str, value: Literal[None], size: int) -> QuaArrayInputStream[NumberT]:
-    ...
+def declare_input_stream(
+    t: type[NumberT], name: str, value: Literal[None], size: int
+) -> QuaArrayInputStream[NumberT]: ...
 
 
 @overload
-def declare_input_stream(t: type[NumberT], name: str, *, size: int) -> QuaArrayInputStream[NumberT]:
-    ...
+def declare_input_stream(t: type[NumberT], name: str, *, size: int) -> QuaArrayInputStream[NumberT]: ...
 
 
 @overload
 def declare_input_stream(
     t: type[NumberT], name: str, value: Union[int, bool, float]
-) -> QuaVariableInputStream[NumberT]:
-    ...
+) -> QuaVariableInputStream[NumberT]: ...
 
 
 @overload
 def declare_input_stream(
     t: type[NumberT], name: str, value: Sequence[Union[int, bool, float]]
-) -> QuaArrayInputStream[NumberT]:
-    ...
+) -> QuaArrayInputStream[NumberT]: ...
 
 
 def declare_input_stream(
@@ -225,7 +220,7 @@ def declare_input_stream(
         ```
 
     """
-    if isinstance(args[0], str) and args[0] in get_args(StreamEndpoints):
+    if isinstance(args[0], str):
         return _declare_any_input_stream(*args, **kwargs)
     else:
         warnings.warn(

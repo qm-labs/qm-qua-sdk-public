@@ -6,7 +6,7 @@ from numpy.lib import format as _format
 
 def _write_header(writer: BinaryIO, shape: Tuple[int, ...], d_type: object) -> None:
     corrected_dtype = _fix_unsupported_dtype(d_type)
-    _format.write_array_header_2_0(writer, {"descr": corrected_dtype, "fortran_order": False, "shape": shape})  # type: ignore[no-untyped-call]
+    _format.write_array_header_2_0(writer, {"descr": corrected_dtype, "fortran_order": False, "shape": shape})
 
 
 _NP_BOOL = numpy.dtype(numpy.bool_).str

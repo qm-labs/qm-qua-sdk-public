@@ -9,7 +9,7 @@ from qm.qua._expressions import (
     ScalarOfAnyType,
     OutputStreamInterface,
     QuaExternalOutgoingStream,
-    validate_scalar_of_any_type,
+    get_scalar_dtype,
 )
 
 
@@ -47,7 +47,8 @@ def send_to_stream(stream: OutputStreamInterface, data: Union[StructT, ScalarOfA
     For client output streams declared with [qm.qua.declare_output_stream][], this is equivalent to
     [qm.qua.save][] with a declared stream:
     ``send_to_stream(stream, value)`` and ``save(value, stream)`` produce the same client-stream items.
-    If the stream was declared with ``dtype``, the value is cast to that type before it is saved.
+    If the stream was declared with dtype, the value that is sent must match that type; otherwise, an exception will be
+    raised.
 
     Writing to a declared client output stream does not by itself create a client-visible result handle.
     The stream items become input to [qm.qua.stream_processing][], and to retrieve them on the client
@@ -85,12 +86,24 @@ def send_to_stream(stream: OutputStreamInterface, data: Union[StructT, ScalarOfA
         _send_to_opnic_stream(stream, data)
 
     elif isinstance(stream, ResultStreamSource):
-        validate_scalar_of_any_type(data)
         try:
-            if stream.dtype is not None:
-                data = stream.dtype(data)  # Casting to the data type that was configured for the stream
+            _validate_client_stream_data_type(cast(ScalarOfAnyType, data), stream)
             save(cast(ScalarOfAnyType, data), stream)
         except SaveToAdcTraceException:
             raise SaveToAdcTraceException("`send` cannot be used to for adc_trace streams.")
     else:
         raise QmQuaException(f"Unsupported stream type: {type(stream).__name__}.")
+
+
+def _validate_client_stream_data_type(data: ScalarOfAnyType, stream: ResultStreamSource) -> None:
+    dtype = get_scalar_dtype(data)  # type: ignore[misc]
+    if stream.dtype is None:
+        return
+
+    # In QUA, bool is a distinct type from int (despite Python's issubclass(bool, int) == True)
+    is_bool_to_int = dtype is bool and stream.dtype is int
+
+    if is_bool_to_int or not issubclass(dtype, stream.dtype):
+        raise QmQuaException(
+            f"Sent data type '{dtype.__name__}' does not match the type declared for the stream: '{stream.dtype.__name__}'."
+        )

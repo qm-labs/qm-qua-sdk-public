@@ -688,6 +688,15 @@ class QuaVariableInputStream(QuaVariable[NumberT], InputStreamOldInterface):
         )
 
 
+class IoVariableImproperUsage(QmQuaException):
+    def __init__(self, number: Literal[1, 2]):
+        message = (
+            f"The variable IO{number} used where it cannot be used. "
+            f"please assign it first to a different variable and use the variable instead."
+        )
+        super().__init__(message)
+
+
 class QuaIO(AssignmentTargetInterface):
     """A class representing the QUA IO type."""
 
@@ -699,6 +708,17 @@ class QuaIO(AssignmentTargetInterface):
         return inc_qua_pb2.QuaProgram.AssignmentStatement.Target(
             variable=inc_qua_pb2.QuaProgram.VarRefExpression(ioNumber=self._number, loc=_get_loc())
         )
+
+    @property
+    def number(self) -> Literal[1, 2]:
+        return self._number
+
+    @property
+    def unwrapped(self) -> None:
+        raise IoVariableImproperUsage(self._number)
+
+    def __eq__(self, other: Any) -> bool:
+        raise IoVariableImproperUsage(self._number)
 
 
 IO1 = QuaIO(1)
@@ -763,21 +783,17 @@ def to_scalar_pb_expression(value: Union["ScalarOfAnyType", QuaIO]) -> _ScalarEx
         return literal_int(other)
     if isinstance(other, float):
         return literal_real(other)
-    if other == IO1:
-        return io(1)
-    if other == IO2:
-        return io(2)
+    if isinstance(other, QuaIO):
+        return io(other.number)
     raise QmQuaException(f"invalid expression: '{other}' is not a scalar expression")
 
 
 @overload
-def create_qua_scalar_expression(value: "QuaScalar[NumberT]") -> "QuaScalar[NumberT]":
-    ...
+def create_qua_scalar_expression(value: "QuaScalar[NumberT]") -> "QuaScalar[NumberT]": ...
 
 
 @overload
-def create_qua_scalar_expression(value: NumberT) -> QuaLiteral[NumberT]:
-    ...
+def create_qua_scalar_expression(value: NumberT) -> QuaLiteral[NumberT]: ...
 
 
 def create_qua_scalar_expression(value: "Scalar[NumberT]") -> "QuaScalar[NumberT]":
@@ -792,11 +808,6 @@ def create_qua_scalar_expression(value: "Scalar[NumberT]") -> "QuaScalar[NumberT
     if isinstance(value, float):
         return QuaLiteral(literal_real(value), float)
     raise NotImplementedError
-
-
-def validate_scalar_of_any_type(data_type: Any) -> None:
-    if not isinstance(data_type, (QuaScalarExpression, bool, int, float)):
-        raise QmQuaException(f"Data type must be a ScalarOfAnyType (QUA scalar value), got {type(data_type).__name__}.")
 
 
 class fixed(float):
@@ -826,3 +837,13 @@ ScalarOfAnyType = Union[Scalar[bool], Scalar[int], Scalar[float]]
 
 VectorOfAnyType = Union[Vector[bool], Vector[int], Vector[float]]
 """A type representing a vector value in QUA, or the equivalent python type."""
+
+
+def get_scalar_dtype(data: Scalar[NumberT]) -> Type[NumberT]:
+    if not isinstance(data, (QuaScalarExpression, bool, int, float)):
+        raise QmQuaException(f"Data type must be a ScalarOfAnyType (QUA scalar value), got {type(data).__name__}.")
+
+    if isinstance(data, QuaScalarExpression):
+        return data.dtype
+    else:
+        return type(data)

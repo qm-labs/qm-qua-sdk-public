@@ -28,9 +28,10 @@ class NativeIterableRange(NativeIterableBase[Any]):
     """
     Python-side range iterator.
 
-    Use this helper for sweep dimensions that should stay in Python, for
-    example when choosing configuration variants or element names around QUA
-    code. No QUA variable is declared; the yielded value is a Python value.
+    Use this helper when iterating over a range of values that should stay
+    in Python — for example, when choosing configuration variants or element
+    names around QUA code. No QUA variable is declared; the yielded value is
+    a Python value.
 
     Use ``NativeIterableRange`` instead of a plain Python iterator when the
     Python-side axis should still participate in Sweep Program composition. The
@@ -49,7 +50,7 @@ class NativeIterableRange(NativeIterableBase[Any]):
         ```python
         with program() as prog:
             for amp_scale in NativeIterableRange("amp_scale", 0.1, 1.0, 0.05):
-                play("pulse" * amp(amp_scale), "element")
+                play("pulse", "element", amplitude_scale=amp_scale)
         ```
 
         This is equivalent to:
@@ -57,7 +58,7 @@ class NativeIterableRange(NativeIterableBase[Any]):
         ```python
         with program() as prog:
             for amp_scale in np.arange(0.1, 1.0, 0.05):
-                play("pulse" * amp(amp_scale), "element")
+                play("pulse", "element", amplitude_scale=amp_scale)
         ```
     """
 
@@ -71,8 +72,7 @@ class NativeIterableRange(NativeIterableBase[Any]):
     @overload
     def __init__(
         self, name: str, start: Number, stop: Number, step: Number = 1, *, metadata: Optional[MetaDataType] = None
-    ):
-        ...
+    ): ...
 
     def __init__(self, name: str, *args: Number, metadata: Optional[MetaDataType] = None):  # type: ignore[misc]
         super().__init__(name, metadata)

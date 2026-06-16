@@ -1,12 +1,12 @@
 import warnings
-from typing import Union, Literal, Optional, overload
+from typing import Union, Literal, Optional, get_args, overload
 
 from qm.type_hinting import NumberT
 from qm.exceptions import QmQuaException
 from qm.utils import deprecation_message
-from qm.qua._dsl.streams.common import StreamEndpoints
 from qm.qua._expressions import StructT, QuaExternalOutgoingStream
 from qm.qua._scope_management.scopes_manager import scopes_manager
+from qm.qua._dsl.streams.common import StreamEndpoints, _validate_number_type
 from qm.qua._dsl.streams.external_streams import QuaStreamDirection, _declare_opnic_stream
 from qm.qua._dsl.stream_processing.stream_processing import ResultStreamSource, _Configuration, _TimestampMode
 
@@ -68,7 +68,8 @@ def _declare_client_output_stream(
 ) -> ResultStreamSource:
     # In contrast to the deprecated declare_stream function, here stream_id can be auto generated, and adc_trace is not required.
     # We keep the adc_trace for edge cases of backwards compatibility.
-
+    if dtype is not None:
+        _validate_number_type(dtype, "output")
     stream_name = _get_stream_name(stream_id, adc_trace)
     stream = ResultStreamSource(
         _Configuration(
@@ -188,4 +189,6 @@ def declare_output_stream(
         return _declare_opnic_stream(dtype, stream_id, QuaStreamDirection.OUTGOING)  # type: ignore[arg-type, return-value]
 
     else:
-        raise QmQuaException(f"Unsupported target for output stream: {target!r}")
+        raise QmQuaException(
+            f"Unsupported target for output stream: '{target}'. Supported targets are {get_args(StreamEndpoints)}."
+        )

@@ -385,17 +385,6 @@ from qm.qua import *
             raise QmQuaException(f"Unknown pulse type {pulse_one_of}")
 
         element = node.qe.name
-        amp = ""
-        if serialized_on_wire(node.amp):
-            v0 = self.serialize_expression(node.amp.v0)
-            v1 = self.serialize_expression(node.amp.v1)
-            v2 = self.serialize_expression(node.amp.v2)
-            v3 = self.serialize_expression(node.amp.v3)
-            if v0 != "":
-                if v1 != "":
-                    amp = f"*amp({v0}, {v1}, {v2}, {v3})"
-                else:
-                    amp = f"*amp({v0})"
         args = []
 
         _, duration = which_one_of(node.duration, "expression_oneof")
@@ -453,6 +442,17 @@ from qm.qua import *
                 self.tags.append(node.timestampLabel)
             args.append(f"timestamp_stream={_safe_identifier(node.timestampLabel)}")
 
+        if serialized_on_wire(node.amp):
+            v0 = self.serialize_expression(node.amp.v0)
+            v1 = self.serialize_expression(node.amp.v1)
+            v2 = self.serialize_expression(node.amp.v2)
+            v3 = self.serialize_expression(node.amp.v3)
+            if v0 != "":
+                if v1 != "":
+                    args.append(f"amplitude_scale=({v0}, {v1}, {v2}, {v3})")
+                else:
+                    args.append(f"amplitude_scale={v0}")
+
         # TODO maybe make sure no other fields?
 
         if len(args) > 0:
@@ -463,7 +463,7 @@ from qm.qua import *
         if serialized_on_wire(node.port_condition):
             self._line(f"with port_condition({self.serialize_expression(node.port_condition)}):")
             indent = " " * 4
-        self._line(f"{indent}play({pulse}{amp}, {_safe_str(element)}{args_str})")
+        self._line(f"{indent}play({pulse}, {_safe_str(element)}{args_str})")
 
     def _default_leave(self, node: Message) -> None:
         if isinstance(node, tuple(_blocks)):
@@ -504,18 +504,7 @@ def _ramp_to_zero_statement(node: QuaProgram.RampToZeroStatement, visitor: QuaSe
 def _measure_statement(node: QuaProgram.MeasureStatement, visitor: QuaSerializingVisitor) -> str:
     args = []
 
-    amp = ""
-    v0 = visitor.serialize_expression(node.amp.v0)
-    v1 = visitor.serialize_expression(node.amp.v1)
-    v2 = visitor.serialize_expression(node.amp.v2)
-    v3 = visitor.serialize_expression(node.amp.v3)
-    if v0 != "":
-        if v1 != "":
-            amp = f"*amp({v0}, {v1}, {v2}, {v3})"
-        else:
-            amp = f"*amp({v0})"
-
-    args.append(f"{_safe_str(node.pulse.name)}{amp}")
+    args.append(f"{_safe_str(node.pulse.name)}")
     args.append(_safe_str(node.qe.name))
 
     if len(node.measureProcesses) > 0:
@@ -525,6 +514,15 @@ def _measure_statement(node: QuaProgram.MeasureStatement, visitor: QuaSerializin
         args.append(f"timestamp_stream={_safe_identifier(node.timestampLabel)}")
     if node.streamAs:
         args.append(f"adc_stream={_safe_identifier(node.streamAs)}")
+    v0 = visitor.serialize_expression(node.amp.v0)
+    v1 = visitor.serialize_expression(node.amp.v1)
+    v2 = visitor.serialize_expression(node.amp.v2)
+    v3 = visitor.serialize_expression(node.amp.v3)
+    if v0 != "":
+        if v1 != "":
+            args.append(f"amplitude_scale=({v0}, {v1}, {v2}, {v3})")
+        else:
+            args.append(f"amplitude_scale={v0}")
     return f'measure({", ".join(args)})'
 
 

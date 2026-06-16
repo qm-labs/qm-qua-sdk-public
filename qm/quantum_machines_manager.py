@@ -363,9 +363,8 @@ class QuantumMachinesManager:
 
             if local_proto_version < qop_proto_version:
                 logger.warning(
-                    f"You are using an outdated version of `qm-qua` which was not tested against the current QOP "
-                    f"version. Please consider updating to the latest qm-qua version, or at least to version"
-                    f" '{qop_proto_version.base_version}'."
+                    "You are using an outdated version of `qm-qua` which was not tested against the current QOP "
+                    "version. Please consider updating to the latest qm-qua version."
                 )
 
     def version_dict(self) -> Version:
@@ -456,11 +455,11 @@ class QuantumMachinesManager:
 
         Args:
             config: The config that will be used by the Quantum Machine
-            close_other_machines: When set to true, any open
-                quantum machines will be closed. This simplifies the
-                workflow but does not enable opening more than one
-                quantum machine. The default `None` behavior is currently
-                the same as `True`.
+            close_other_machines: When set to true, any open quantum machine
+                that uses resources required for the opening of the new
+                quantum machine will be closed. This simplifies the workflow
+                but might result in unintended closure of quantun machines.
+                The default `None` behavior is currently the same as `True`.
             validate_with_protobuf (bool): Validates config with
                 protobuf instead of marshmallow. It is usually faster
                 when working with large configs. Defaults to False.
@@ -725,6 +724,18 @@ class QuantumMachinesManager:
             self._api.close_all_qms()
         else:
             self._frontend.close_all_quantum_machines()
+
+    def close(self) -> None:
+        """Tear down the gRPC channel and release its network resources.
+
+        Without ``close()``, the channel is pinned to the process until
+        interpreter shutdown — accumulating one open connection per QMM
+        instance in long-running sessions (e.g. Jupyter kernels).
+
+        Idempotent: subsequent calls are no-ops. After ``close()`` any
+        RPC method on this instance raises ``QMConnectionError``.
+        """
+        self._server_details.connection_details.close()
 
     def close_all_quantum_machines(self) -> None:
         warnings.warn(

@@ -23,8 +23,7 @@ def wait(duration: Scalar[int], *elements: str) -> None:
 
     Args:
         duration (Union[int,QUA variable of type int]): time to wait in
-            units of the clock cycle (4ns). Range: [4, $2^{31}-1$]
-            in steps of 1.
+            units of the clock cycle (4ns).
         *elements (Union[str,sequence of str]): elements to wait on
 
     Warning:

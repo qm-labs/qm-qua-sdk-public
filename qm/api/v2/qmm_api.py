@@ -217,9 +217,11 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
                         for i, f in value.fems.items()
                         if f.type > 0
                     },
-                    _temperatures=proto_map_to_dict(value.temperatures)
-                    if self._caps.supports(QopCaps.device_temperatures)
-                    else None,
+                    _temperatures=(
+                        proto_map_to_dict(value.temperatures)
+                        if self._caps.supports(QopCaps.device_temperatures)
+                        else None
+                    ),
                 )
             else:
                 raise NotImplementedError(f"Controller type {value.controller_type} is not supported.")

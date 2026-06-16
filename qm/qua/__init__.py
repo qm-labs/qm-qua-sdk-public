@@ -3,13 +3,13 @@ from qm.qua._expressions import fixed
 from qm.exceptions import QmQuaException
 from qm.qua._expressions import IO1, IO2
 from qm.qua._dsl.broadcast import broadcast
+from qm.qua._dsl.measure.measure import measure
 from qm.qua._qua_struct import QuaArray, qua_struct
-from qm.qua._dsl.amplitude import AmpValuesType, amp
 from qm.qua._expressions import QuaVariable as Variable
 from qm.qua._dsl.pulses_utils import ramp_to_zero, load_waveform
-from qm.qua._dsl.measure.measure import MeasurePulseType, measure
 from qm.qua._dsl.play import ChirpType, PlayPulseType, play, ramp
 from qm.qua._dsl.wait import wait, align, pause, wait_for_trigger
+from qm.qua._dsl.amplitude import AmpValuesType, MeasurePulseType, amp
 from qm.qua._dsl.stream_processing.stream_processing import StreamType
 from qm.qua._dsl.stream_processing.stream_processing_utils import bins
 from qm.qua._dsl.measure.analog_measure_process import AnalogMeasureProcess
@@ -19,12 +19,12 @@ from qm.qua._dsl.stream_processing.map_functions.map_functions import FUNCTIONS
 from qm.qua._dsl.phase_reset import reset_phase, reset_if_phase, reset_global_phase
 from qm.qua._dsl._type_hints import OneOrMore, MessageVarType, MessageExpressionType
 from qm.qua._dsl.streams.input_streams.receive_from_stream import receive_from_stream
-from qm.qua._dsl.stream_processing.direct_stream_processing import declare_with_stream
 from qm.qua._dsl.streams.input_streams.declare_input_stream import declare_input_stream
 from qm.qua._dsl.calibration_params_update import set_dc_offset, update_frequency, update_correction
 from qm.qua.lib import Cast, Math, Util, Random, call_library_function, call_vectors_library_function
 from qm.qua._dsl.streams.output_streams.declare_output_stream import declare_stream, declare_output_stream
 from qm.qua._dsl.frame_rotation import reset_frame, frame_rotation, frame_rotation_2pi, fast_frame_rotation
+from qm.qua._dsl.stream_processing.direct_stream_processing import STREAM_NAME_SEPARATOR, declare_with_stream
 from qm.qua._dsl.measure.measure_process_factories import demod, counting, dual_demod, integration, time_tagging
 from qm.qua._dsl.variable_handling import DeclarationType, save, assign, declare, declare_struct, advance_input_stream
 from qm.qua.extensions.qua_iterators import (
@@ -146,4 +146,5 @@ __all__ = [
     "declare_input_stream",
     "receive_from_stream",
     "send_to_stream",
+    "STREAM_NAME_SEPARATOR",
 ]

@@ -6,38 +6,63 @@ from qm._loc import _get_loc
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.qua._expressions import QuaVariable
-from qm.qua._dsl.amplitude import AmpValuesType
 from qm.qua._dsl._utils import _standardize_timestamp_label
 from qm.qua._dsl.measure.measure_process_factories import demod
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.measure.analog_measure_process import MeasureProcessAbstract
 from qm.qua._dsl.stream_processing.stream_processing import StreamType, ResultStreamSource
 from qm.qua._dsl.streams.output_streams.declare_output_stream import declare_output_stream
+from qm.qua._dsl.amplitude import AmpValuesType, MeasurePulseType, AmplitudeScaleTypes, standardize_pulse_and_amplitude
 
 logger = logging.getLogger(__name__)
-
-MeasurePulseType = Union[str, Tuple[str, AmpValuesType]]
 
 
 @overload
 def measure(
-    pulse: MeasurePulseType,
+    pulse: Tuple[str, AmpValuesType],
     element: str,
     *outputs: Union[Tuple[str, QuaVariable[float]], Tuple[str, str, QuaVariable[float]], MeasureProcessAbstract],
     timestamp_stream: Optional[StreamType] = None,
     adc_stream: Optional[StreamType] = None,
+    amplitude_scale: None = None,
 ) -> None:
     pass
 
 
 @overload
 def measure(
-    pulse: MeasurePulseType,
+    pulse: Tuple[str, AmpValuesType],
     element: str,
     stream: Optional[StreamType],
     *outputs: Union[Tuple[str, QuaVariable[float]], Tuple[str, str, QuaVariable[float]], MeasureProcessAbstract],
     timestamp_stream: Optional[StreamType] = None,
     adc_stream: Optional[StreamType] = None,
+    amplitude_scale: None = None,
+) -> None:
+    pass
+
+
+@overload
+def measure(
+    pulse: str,
+    element: str,
+    *outputs: Union[Tuple[str, QuaVariable[float]], Tuple[str, str, QuaVariable[float]], MeasureProcessAbstract],
+    timestamp_stream: Optional[StreamType] = None,
+    adc_stream: Optional[StreamType] = None,
+    amplitude_scale: AmplitudeScaleTypes = None,
+) -> None:
+    pass
+
+
+@overload
+def measure(
+    pulse: str,
+    element: str,
+    stream: Optional[StreamType],
+    *outputs: Union[Tuple[str, QuaVariable[float]], Tuple[str, str, QuaVariable[float]], MeasureProcessAbstract],
+    timestamp_stream: Optional[StreamType] = None,
+    adc_stream: Optional[StreamType] = None,
+    amplitude_scale: AmplitudeScaleTypes = None,
 ) -> None:
     pass
 
@@ -54,6 +79,7 @@ def measure(
     stream: Optional[StreamType] = None,
     timestamp_stream: Optional[StreamType] = None,
     adc_stream: Optional[StreamType] = None,
+    amplitude_scale: AmplitudeScaleTypes = None,
 ) -> None:
     """Perform a measurement of `element` using `pulse` based on 'operation' as defined in the 'element'.
 
@@ -96,6 +122,7 @@ def measure(
                  as the stream will no longer be treated as an ADC stream.
                 If you are using the deprecated `declare_stream` function, note that streaming ADC data without specifying
                  `declare_stream(adc_trace=True)` may also cause performance issues.
+        amplitude_scale (Union[float, Qua expression of type fixed, tuple of four float/Qua fixed expressions]): indicate the amplitude multiplier of the pulse.
 
 
     Example:
@@ -202,9 +229,7 @@ def measure(
     timestamp_label = _standardize_timestamp_label(timestamp_stream)
     processes = [x.unwrapped for x in measure_process]
 
-    amp = None
-    if isinstance(pulse, tuple):
-        pulse, amp = pulse
+    pulse, amp = standardize_pulse_and_amplitude(pulse, amplitude_scale)
 
     loc = _get_loc()
     statement = inc_qua_pb2.QuaProgram.AnyStatement(

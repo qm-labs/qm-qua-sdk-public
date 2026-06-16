@@ -6,13 +6,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-
-## [1.3.0a1] - 2026-03-30
-
-- Requires Python >=3.9, <3.14 
-- Tested against QOP 3.7.0
-
-
 ### Added
 - QOP 3.7 - Added key `lo_mode` to the MW-FEM analog input port configuration, with the options of "auto" (default) and "always_on".
 - Added support for Python 3.13
@@ -22,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Introduced the wait_for_execution_timeout argument to the execute method.
 - Introduced declare_with_stream API to create qua variables with built-in implicit stream processing.
 - Added NativeIterable, NativeIterableRange, QuaIterable, and QuaIterableRange to simplify writing QUA programs containing loops.
+- Added support for protobuf 7.
+- Added support for Python 3.14.
+- Added `qmm.close()` to release the gRPC channel and free its TCP connection. After `close()`, any RPC method on the QMM raises `QMConnectionError`.
 
 ### Changed
 - Updated the `high_pass` warning message to indicate the correct behavior and marked it as a DeprecationWarning.
@@ -35,23 +31,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Input streams can receive data using `receive_from_stream()`.
     - Data can be sent to output streams using `send_to_stream()`.
 - Changed the signature of `declare_input_stream()` to support OPNIC streams. This is a backward-compatible change.
+- Changed `QuaZip` to raise `QmQuaException` when the provided QUA iterables do not all have the same length.
 
 ### Fixed
+- Fixed a bug where passing a non-integer value to the deprecated arguments `duration_limit`, `data_limit`, `force_execution`, or `dry_run` in `execute()` would be silently ignored instead of raising an error.
 - Fixed a bug when opening a qm with the flag `"validate_with_protobuf"=True` when the config had string keys.
 - Fixed a bug in `job.get_simulated_samples()` when using OPX+ with NumPy 2
 - Update the dependency of marshmallow to avoid a vulnerability issue.
 - Fix a bug in config validation - an element that had RF inputs or outputs, but did not have an Octave, did not raise an error.
 - Fix a bug that made an element named `""` (empty string) appear in the waveform report.
 - Using `wait_until()` on a specific state will now also return if a following state is reached. E.g., `wait_until("RUNNING")` will return if the state is "PROCESSING" or "DONE".
+- Fixed the warning message for unsupported QOP versions so it no longer displays an incorrect version number.
+- Fixed a dependency incompatibility issue of protobuf, that caused due to a too-new proto-files generation (too-advanced grpcio-tool version)
+- Fixed a bug where configuring Octave ports that share a synthesizer (upconverters 2 & 3, upconverters 4 & 5, and upconverter 1 / downconverter 1) with internal LO source and different LO frequencies was silently accepted; this now raises `OctaveLoFrequencyConflict`.
+- Fixed a bug that prevented setting negative intermediate-frequency when calibrating an Octave (bug introduced in 1.3.0a1).
+- Fixed missing license metadata in the qm-qua PyPI package distribution
+- Improved the error message when fetching simulation results before the simulation has finished, to indicate that `job.wait_until("Done")` should be called first.
+- Fixed an ambiguous error raised when using an IO variable (`IO1`, `IO2`) where it is not allowed. Now a clear `IoVariableImproperUsage` is raised advising to assign it to a regular QUA variable first.
 
 ### Deprecated
 - The `declare_stream()` function is deprecated and has been replaced by `declare_output_stream()`.
 - The `declare_external_stream()` function is deprecated and has been replaced by `declare_input_stream()` and `declare_output_stream()`.
 - The `send_to_external_stream()` function is deprecated and has been replaced by `send_to_stream()`.
 - The `receive_from_external_stream()` function is deprecated and has been replaced by `receive_from_stream()`.
+- `amp` function in the dsl is deprecated. Instead, one can use the keyword argument `amplitude_scale` in the `play` and `measure` commands.
 
 ### Removed
 - Dropped support of 4 <= protobuf < 4.25
+- Dropped support for Python 3.9.
 
 
 ## [1.2.6] - 2026-02-25

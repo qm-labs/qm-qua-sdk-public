@@ -24,13 +24,14 @@ class QuaZip(IterableBase[Any]):
     per position.
 
     It can zip either QUA iterables or native iterables, but not both in the
-    same call. When zipping QUA iterables, the zip is compiled as a single
-    [`for_each_`][qm.qua.for_each_] loop. When zipping native iterables,
-    iteration happens in Python and stops at the shortest iterable.
+    same call.
 
     Note:
-        Provide iterables with matching lengths so that the zipped values
-        represent the same sweep positions.
+        When zipping QUA iterables, the zip is compiled as a single
+        [`for_each_`][qm.qua.for_each_] loop and all iterables must have the
+        same length; a `QmQuaException` is raised otherwise. When zipping native
+        iterables, iteration happens in Python and follows the behavior of the
+        built-in `zip`, stopping at the shortest iterable.
 
     Example:
         ```python
@@ -41,7 +42,7 @@ class QuaZip(IterableBase[Any]):
                     QuaIterable("tau", [16, 32, 64]),
                 ]
             ):
-                play("x90" * amp(pair.amp), "q1")
+                play("x90", "q1", amplitude_scale=pair.amp)
                 wait(pair.tau)
         ```
     """
@@ -89,12 +90,16 @@ class QuaZipIterable(ZipIterableBase):
     _iterables: Sequence[QuaIterableBase[Any]]
 
     def __init__(self, iterables: Sequence[QuaIterableBase[Any]], name: Optional[str]):
+        first_len = len(iterables[0])
+        if not all(len(itr) == first_len for itr in iterables):
+            lengths = {itr.name: len(itr) for itr in iterables}
+            raise QmQuaException(f"QuaZip requires all iterables to have the same length, got {lengths}.")
         super().__init__(iterables, name)
 
     def __iter__(self) -> MultiIteratorType:
         qua_vars = [itr.declare_var() for itr in self._iterables]
         qua_values = [itr.values for itr in self._iterables]
-        with (for_each_(qua_vars, cast(List[AnyQuaIterableArrayType], qua_values))):
+        with for_each_(qua_vars, cast(List[AnyQuaIterableArrayType], qua_values)):
             self._add_to_current_scope()
             yield QuaNamedTuple(self._iterable_names, qua_vars)
             self._set_averaged_streams()
@@ -110,7 +115,7 @@ class NativeZipIterable(ZipIterableBase):
 
     def __iter__(self) -> MultiIteratorType:
         native_scope = _PythonNativeScope(_get_loc())
-        with (native_scope):
+        with native_scope:
             self._add_to_current_scope()
             for i, args in enumerate(zip(*[itr.values for itr in self._iterables])):
                 native_scope.set_current_iteration_number(i)

@@ -30,7 +30,7 @@ def _get_scopes_stack() -> Deque["_BaseScope"]:
     return cast(Deque["_BaseScope"], _thread_local.scopes_stack)
 
 
-class _BaseScope(abc.ABC):
+class _BaseScope(abc.ABC):  # noqa: B024
     def __init__(self) -> None:
         self._statements: List[inc_qua_pb2.QuaProgram.AnyStatement] = []
 
