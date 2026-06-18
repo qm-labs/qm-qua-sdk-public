@@ -434,7 +434,7 @@ def _deconvert_mw_analog_inputs(
 
 
 def _deconvert_inputs(
-    inputs: MutableMapping[str, inc_qua_config_pb2.QuaConfig.DigitalInputPortReference],
+    inputs: MutableMapping[str, inc_qua_config_pb2.QuaConfig.DigitalInputPortReference]
 ) -> dict[str, DigitalInputConfigType]:
     ret: dict[str, DigitalInputConfigType] = {}
     for name, data in inputs.items():
@@ -443,7 +443,7 @@ def _deconvert_inputs(
 
 
 def _deconvert_digital_output(
-    outputs: MutableMapping[str, inc_qua_config_pb2.QuaConfig.DigitalOutputPortReference],
+    outputs: MutableMapping[str, inc_qua_config_pb2.QuaConfig.DigitalOutputPortReference]
 ) -> dict[str, PortReferenceType]:
     ret = {}
     for name, data in outputs.items():

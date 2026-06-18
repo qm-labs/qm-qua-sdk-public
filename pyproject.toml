@@ -62,14 +62,14 @@ pytest-order = "^1.0.0"
 pytest-xdist = "^3.8"
 poetry ="<=2.1.3"
 coverage = "^7.0.1"
-black = "^26"
+black = "^22.6.0"
 flake8 = "^7"
 flake8-bugbear = "*"
 
 apispec = "^5.1.1"
 poetry-dynamic-versioning = { extras = ["plugin"], version = "^1.0.0" }
 mypy = "^1.14"
-isort = "^8"
+isort = "^5.11.5"
 qm-saas = "^1.1.8"
 python-dev-scripts = "0.1.0.dev20260507131531+6d6aa2a"
 
@@ -110,7 +110,7 @@ generate-grpc.args = [
   { name = "QUA_PROTO_VERSION", options = ["--qua-proto-version"], default = "" }
 ]
 
-generate-grpc-from-dir.cmd = "python -m qm_python_dev_scripts.proto_generation.generate_grpc --skip-download ${PROTO_SRC_PATH} --python-version ${PYTHON_VERSION} --output-dir qm/grpc"
+generate-grpc-from-dir.cmd = "python -m qm_python_dev_scripts.proto_generation.generate_grpc --skip-download ${PROTO_SRC_PATH} --python-version ${PYTHON_VERSION}"
 generate-grpc-from-dir.args = [
   { name = "PROTO_SRC_PATH", positional = true, default = "." },
   { name = "PYTHON_VERSION", options = ["--python-version"], default = "3.11" }
@@ -141,6 +141,7 @@ check.ignore_fail = true
 
 pre-commit-hook.sequence = ["format", "lint", "generate-files-for-docs-website"]
 pre-commit-hook.ignore_fail = true
+
 
 [tool.poetry-dynamic-versioning]
 enable = true

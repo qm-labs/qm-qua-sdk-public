@@ -7,6 +7,7 @@ from qm.api.v2.job_api import JobApi
 from qm.octave import QmOctaveConfig
 from qm.program.program import Program
 from qm.utils import deprecation_message
+from qm.exceptions import FunctionInputError
 from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
@@ -14,7 +15,6 @@ from qm.api.models.capabilities import ServerCapabilities
 from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.qm_api import QmApi, IoValue, NoRunningQmJob
 from qm.api.v2.job_api.job_api import JobApiWithDeprecations
-from qm.exceptions import QmQuaException, FunctionInputError
 from qm.type_hinting import Value, Number, NumpySupportedValue
 from qm.type_hinting.general import PathLike, NumpySupportedFloat
 from qm.jobs.job_queue_with_deprecations import QmQueueWithDeprecations
@@ -165,11 +165,6 @@ class QmApiWithDeprecations(QmApi):
                         removed_in="2.0.0",
                     ),
                 )
-                if not isinstance(x, int):
-                    raise QmQuaException(
-                        f"The argument {name} is deprecated and must be an integer, got {type(x).__name__}."
-                        "Maybe the parameter you want to add is a keyword-only argument?"
-                    )
 
         compiler_options = standardize_compiler_params(compiler_options, strict, flags)
 

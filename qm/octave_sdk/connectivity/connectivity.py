@@ -338,9 +338,9 @@ class Connectivity:
     def _fill_synth_panel_mapping(self) -> None:
         for synth_output in self._identity_response.panel_identity.synth_outputs:
             output = get_rf_source_from_synth_panel_output(synth_output.source)
-            self._synth_connectivity[output.index].synth_output_panel[OctaveOutput(synth_output.index)] = (
-                SynthPanelMapping(panel_port=OctaveOutput(synth_output.index), port_type=output.output_port)
-            )
+            self._synth_connectivity[output.index].synth_output_panel[
+                OctaveOutput(synth_output.index)
+            ] = SynthPanelMapping(panel_port=OctaveOutput(synth_output.index), port_type=output.output_port)
 
     def _fill_synths_mapping(self) -> None:
         for synth in self._identity_response.synthesizers:

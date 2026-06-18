@@ -546,7 +546,7 @@ class RFInput:
         ignore_shared_errors: bool = False,
         check_conflict: bool = False,
     ) -> None:
-        octave_lo_source, synth_index = convert_rf_in_enum_to_octave_lo_input(
+        (octave_lo_source, synth_index) = convert_rf_in_enum_to_octave_lo_input(
             name,
             self._context.connectivity.synth_by_rf_out(),
             self._context.connectivity.synth_by_lo_source(),

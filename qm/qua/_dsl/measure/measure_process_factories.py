@@ -114,7 +114,8 @@ class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
         iw1: str,
         iw2: str,
         target: Union[QuaVariable[float], QuaArrayCell[float]],
-    ) -> DualMeasureProcess: ...
+    ) -> DualMeasureProcess:
+        ...
 
     @overload
     @classmethod
@@ -125,7 +126,8 @@ class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
         iw2: str,
         element_output2: str,
         target: Union[QuaVariable[float], QuaArrayCell[float]],
-    ) -> DualMeasureProcess: ...
+    ) -> DualMeasureProcess:
+        ...
 
     @classmethod
     def full(cls, *args: Any, **kwargs: Any) -> DualMeasureProcess:

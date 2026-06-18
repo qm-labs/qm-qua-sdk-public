@@ -6,8 +6,8 @@ from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.qua._dsl.scope_functions import stream_processing
 from qm.qua._scope_management.scopes_manager import scopes_manager
+from qm.qua._scope_management._core_scopes import _LoopScope, _PythonScope
 from qm.qua._dsl.variable_handling import save, declare, _get_save_statement
-from qm.qua._scope_management._core_scopes import _LoopScope, _PythonNativeScope
 from qm.qua._dsl.streams.output_streams.declare_output_stream import declare_output_stream
 from qm.qua._dsl.stream_processing.stream_processing import ResultStream, ResultStreamSource
 from qm.qua._dsl.stream_processing.direct_stream_processing_interface import DirectStreamSourceInterface
@@ -33,7 +33,7 @@ class DirectStreamSource(DirectStreamSourceInterface[NumberT]):
         ]
 
         # add axis to average stream if exist
-        # doing it here as native context is duplicating the get call but not the init call
+        # doing it here as python context is duplicating the get call but not the init call
         if average_axes:
             for scope in scopes_manager.scope_stack:
                 if isinstance(scope, _LoopScope):
@@ -87,16 +87,16 @@ class DirectStreamSource(DirectStreamSourceInterface[NumberT]):
 
     @property
     def stream_full_name(self) -> str:
-        """Get the stream name, potentially modified by native loop contexts."""
+        """Get the stream name, potentially modified by Python loop contexts."""
         stream_full_name = self.stream_name
-        # Append native loop contexts to the stream name
-        native_contexts_values = [
+        # Append Python loop contexts to the stream name
+        python_contexts_values = [
             scope.current_value_name
             for scope in scopes_manager.scope_stack
-            if isinstance(scope, _PythonNativeScope) and scope.name not in self._average_axes
+            if isinstance(scope, _PythonScope) and scope.name not in self._average_axes
         ]
-        if len(native_contexts_values) > 0:
-            stream_full_name = STREAM_NAME_SEPARATOR.join([stream_full_name] + native_contexts_values)
+        if len(python_contexts_values) > 0:
+            stream_full_name = STREAM_NAME_SEPARATOR.join([stream_full_name] + python_contexts_values)
         return stream_full_name
 
     def get_stream(self) -> ResultStreamSource:
@@ -162,10 +162,10 @@ class DirectStreamSource(DirectStreamSourceInterface[NumberT]):
         if self._auto_buffer:
             axes_to_average = self._average_axes
             for scope in scopes_manager.scope_stack:
-                if isinstance(scope, _PythonNativeScope):
-                    # skip native scopes for buffering as they are handled in the stream name
+                if isinstance(scope, _PythonScope):
+                    # skip Python scopes for buffering as they are handled in the stream name
                     if scope.name in axes_to_average:
-                        raise QmQuaException(f"Auto buffering cannot average over native iterator '{scope.name}'.")
+                        raise QmQuaException(f"Auto buffering cannot average over Python iterator '{scope.name}'.")
                     continue
 
                 elif isinstance(scope, _LoopScope):
@@ -205,7 +205,7 @@ def declare_with_stream(
     to ``stream_name``.
 
     When ``auto_buffer=True``, buffering is derived from the enclosing named
-    QUA loops. Native iterables are not buffered; their current values are
+    QUA loops. Python iterables are not buffered; their current values are
     appended to the saved stream name instead. When no averaging is requested,
     the outermost buffered QUA axis is left unbuffered so live plotting can
     consume the stream progressively, and the generated stream-processing step
@@ -232,7 +232,7 @@ def declare_with_stream(
     Raises:
         QmQuaException: If ``average_axes`` is provided while
             ``auto_buffer`` is ``False``, if ``average_axes`` refers to a
-            native iterator, if non-averaged QUA loop scopes appear before an
+            Python iterator, if non-averaged QUA loop scopes appear before an
             averaged axis, or if auto-buffering is used inside loops without
             names or known sizes.
 

@@ -71,7 +71,7 @@ IoValueTypes = Union[Type[bool], Type[int], Type[float], Type[fixed]]
 
 
 def transfer_statuses_to_enum(
-    status: Union[JobStatus, Iterable[JobStatus]],
+    status: Union[JobStatus, Iterable[JobStatus]]
 ) -> List[common_types_pb2.JobExecutionStatus.ValueType]:  # type: ignore[name-defined]
     if isinstance(status, str):
         status = [status]
@@ -418,7 +418,9 @@ class JobApi(JobGenericApi):
         self.set_io_values(io2=value)
 
     @overload
-    def get_io_values(self, *, io1_type: None = ..., io2_type: None = ...) -> Tuple[
+    def get_io_values(
+        self, *, io1_type: None = ..., io2_type: None = ...
+    ) -> Tuple[
         job_api_pb2.GetIoValuesResponse.GetIoValuesResponseSuccess.IOValuesData,
         job_api_pb2.GetIoValuesResponse.GetIoValuesResponseSuccess.IOValuesData,
     ]:

@@ -35,6 +35,7 @@ from qm.qua import (
     IO1,
     IO2,
     Util,
+    amp,
     if_,
     for_,
     play,
@@ -252,9 +253,9 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
             reset_if_phase(elements_names.lo_analyzer)
             reset_if_phase(elements_names.image_analyzer)
 
-            play("DC_offset", elements_names.i_offset, amplitude_scale=i0_curr)
-            play("DC_offset", elements_names.q_offset, amplitude_scale=q0_curr)
-            play("calibration", elements_names.iq_mixer, amplitude_scale=scale_cal)
+            play("DC_offset" * amp(i0_curr), elements_names.i_offset)
+            play("DC_offset" * amp(q0_curr), elements_names.q_offset)
+            play("calibration" * amp(scale_cal), elements_names.iq_mixer)
 
             measure(
                 "Analyze",
@@ -487,11 +488,9 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 rf_down_conv=api_pb2.RFDownConvUpdate(
                     index=CALIBRATION_INPUT,
                     enabled=BoolValue(value=True),
-                    lo_input=(
-                        api_pb2.RFDownConvUpdate.LOInput.LO_INPUT_1
-                        if params.use_main_lo
-                        else api_pb2.RFDownConvUpdate.LOInput.LO_INPUT_2
-                    ),
+                    lo_input=api_pb2.RFDownConvUpdate.LOInput.LO_INPUT_1
+                    if params.use_main_lo
+                    else api_pb2.RFDownConvUpdate.LOInput.LO_INPUT_2,
                     rf_input=rf_input,
                 )
             ),
@@ -508,11 +507,9 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                     index=4,
                     gain=UInt32Value(value=0xFFFF),
                     synth_output_power=api_pb2.SynthUpdate.SynthOutputPower.SYNTH_OUTPUT_POWER_POS5DB,
-                    main_output=(
-                        api_pb2.SynthUpdate.MainOutput.MAIN_OUTPUT_MAIN
-                        if params.use_main_lo
-                        else api_pb2.SynthUpdate.MainOutput.MAIN_OUTPUT_OFF
-                    ),
+                    main_output=api_pb2.SynthUpdate.MainOutput.MAIN_OUTPUT_MAIN
+                    if params.use_main_lo
+                    else api_pb2.SynthUpdate.MainOutput.MAIN_OUTPUT_OFF,
                     secondary_output=api_pb2.SynthUpdate.SecondaryOutput.SECONDARY_OUTPUT_OFF,
                 )
             ),
@@ -520,19 +517,15 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                 if_down_conv=api_pb2.IFDownConvUpdate(
                     index=CALIBRATION_INPUT,
                     channel1=api_pb2.IFDownConvUpdate.Channel(
-                        mode=(
-                            api_pb2.IFDownConvUpdate.Mode.MODE_BYPASS
-                            if params.dconv_quadrature != DConvQuadrature.I
-                            else api_pb2.IFDownConvUpdate.Mode.MODE_OFF
-                        ),
+                        mode=api_pb2.IFDownConvUpdate.Mode.MODE_BYPASS
+                        if params.dconv_quadrature != DConvQuadrature.I
+                        else api_pb2.IFDownConvUpdate.Mode.MODE_OFF,
                         coupling=api_pb2.IFDownConvUpdate.Coupling.COUPLING_AC,
                     ),
                     channel2=api_pb2.IFDownConvUpdate.Channel(
-                        mode=(
-                            api_pb2.IFDownConvUpdate.Mode.MODE_BYPASS
-                            if params.dconv_quadrature != DConvQuadrature.Q
-                            else api_pb2.IFDownConvUpdate.Mode.MODE_OFF
-                        ),
+                        mode=api_pb2.IFDownConvUpdate.Mode.MODE_BYPASS
+                        if params.dconv_quadrature != DConvQuadrature.Q
+                        else api_pb2.IFDownConvUpdate.Mode.MODE_OFF,
                         coupling=api_pb2.IFDownConvUpdate.Coupling.COUPLING_AC,
                     ),
                 )
@@ -569,7 +562,7 @@ class OctaveMixerCalibrationBase(metaclass=abc.ABCMeta):
                         rf_up_conv=api_pb2.RFUpConvUpdate(
                             index=index,
                             fast_switch_mode=api_pb2.RFUpConvUpdate.FastSwitchMode.FAST_SWITCH_MODE_OFF,
-                            enabled=BoolValue(value=True),
+                            enabled=BoolValue(value=True)
                             # YR - I added the enabled update to make the assertion down the code pass
                         )
                     )

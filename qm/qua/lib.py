@@ -550,15 +550,18 @@ class Math:
 
     @staticmethod
     @overload
-    def dot(x: Union[Vector[int], Vector[bool]], y: Union[Vector[int], Vector[bool]]) -> QuaLibFunctionOutput[int]: ...
+    def dot(x: Union[Vector[int], Vector[bool]], y: Union[Vector[int], Vector[bool]]) -> QuaLibFunctionOutput[int]:
+        ...
 
     @staticmethod
     @overload
-    def dot(x: Vector[float], y: VectorOfAnyType) -> QuaLibFunctionOutput[float]: ...
+    def dot(x: Vector[float], y: VectorOfAnyType) -> QuaLibFunctionOutput[float]:
+        ...
 
     @staticmethod
     @overload
-    def dot(x: VectorOfAnyType, y: Vector[float]) -> QuaLibFunctionOutput[float]: ...
+    def dot(x: VectorOfAnyType, y: Vector[float]) -> QuaLibFunctionOutput[float]:
+        ...
 
     @staticmethod
     def dot(x: VectorOfAnyType, y: VectorOfAnyType) -> Union[QuaLibFunctionOutput[float], QuaLibFunctionOutput[int]]:

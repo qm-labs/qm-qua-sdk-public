@@ -1,5 +1,5 @@
 from typing import Iterable
-from typing import Optional, overload
+from typing import Optional
 from typing import Iterable as IterableClass
 from typing import Tuple, Union, Literal, Mapping
 
@@ -8,11 +8,11 @@ from qm.type_hinting import NumberT
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.qua._dsl.variable_handling import declare
+from qm.qua._dsl.measure.measure import MeasurePulseType
 from qm.qua._dsl._utils import _standardize_timestamp_label
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.stream_processing.stream_processing import StreamType
 from qm.qua._expressions import Scalar, QuaArrayVariable, to_scalar_pb_expression, create_qua_scalar_expression
-from qm.qua._dsl.amplitude import AmpValuesType, MeasurePulseType, AmplitudeScaleTypes, standardize_pulse_and_amplitude
 
 PlayPulseType = Union[MeasurePulseType, inc_qua_pb2.QuaProgram.RampPulse]
 
@@ -38,40 +38,6 @@ See the ChirpUnits type for the complete list of supported units.
 """
 
 
-@overload
-def play(
-    pulse: str,
-    element: str,
-    duration: Optional[Scalar[int]] = None,
-    condition: Optional[Scalar[bool]] = None,
-    chirp: Optional[ChirpType] = None,
-    truncate: Optional[Scalar[int]] = None,
-    timestamp_stream: Optional[StreamType] = None,
-    continue_chirp: bool = False,
-    target: str = "",
-    *,
-    amplitude_scale: AmplitudeScaleTypes = None,
-) -> None:
-    pass
-
-
-@overload
-def play(
-    pulse: Union[inc_qua_pb2.QuaProgram.RampPulse, tuple[str, AmpValuesType]],
-    element: str,
-    duration: Optional[Scalar[int]] = None,
-    condition: Optional[Scalar[bool]] = None,
-    chirp: Optional[ChirpType] = None,
-    truncate: Optional[Scalar[int]] = None,
-    timestamp_stream: Optional[StreamType] = None,
-    continue_chirp: bool = False,
-    target: str = "",
-    *,
-    amplitude_scale: None = None,
-) -> None:
-    pass
-
-
 def play(
     pulse: PlayPulseType,
     element: str,
@@ -82,8 +48,6 @@ def play(
     timestamp_stream: Optional[StreamType] = None,
     continue_chirp: bool = False,
     target: str = "",
-    *,
-    amplitude_scale: AmplitudeScaleTypes = None,
 ) -> None:
     r"""Play a `pulse` based on an 'operation' defined in `element`.
 
@@ -128,7 +92,6 @@ def play(
             ``label``.
         continue_chirp (bool): When performing a chirp, passing `True` will make the chirp continue until a new chirp command is given. Defaults to `False`. Not available in OPX1.0.
         target (str): Allows to select a specific input of the element to play the pulse on. Only allowed (and required) when the element is defined with `singleInputCollection`.
-        amplitude_scale (Union[float, Qua expression of type fixed, tuple of four float/Qua fixed expressions]): indicate the amplitude multiplier of the pulse. Cannot be used with ramp
 
     Note:
         Arbitrary waveforms cannot be compressed and can only be expanded up to
@@ -149,9 +112,9 @@ def play(
             v1 = declare(fixed)
             assign(v1, 0.3)
             play('pulse1', 'element1')
-            play('pulse1', 'element1', amplitude_scale=0.5)
-            play('pulse1', 'element1', amplitude_scale=v1)
-            play('pulse1', 'element_iq_pair', amplitude_scale=(0.9, v1, -v1, 0.9))
+            play('pulse1' * amp(0.5), 'element1')
+            play('pulse1' * amp(v1), 'element1')
+            play('pulse1' * amp(0.9, v1, -v1, 0.9), 'element_iq_pair')
             time_stream = declare_output_stream()
             # Supported on QOP2.2+
             play('pulse1', 'element1', duration=16, timestamp_stream='t1')
@@ -166,12 +129,9 @@ def play(
     truncate_ = to_scalar_pb_expression(truncate) if truncate is not None else None
     timestamp_label = _standardize_timestamp_label(timestamp_stream)
 
-    if isinstance(pulse, inc_qua_pb2.QuaProgram.RampPulse):
-        if amplitude_scale is not None:
-            raise QmQuaException("Amplitude cannot be used with `ramp`.")
-        amp = None
-    else:
-        pulse, amp = standardize_pulse_and_amplitude(pulse, amplitude_scale)
+    amp = None
+    if isinstance(pulse, tuple):
+        pulse, amp = pulse
 
     loc = _get_loc()
     play_statement = inc_qua_pb2.QuaProgram.PlayStatement(

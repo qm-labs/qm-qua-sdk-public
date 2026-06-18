@@ -378,10 +378,10 @@ def for_each_(
         x=declare(fixed)
         y=declare(fixed)
         with for_each_(x, [0.1, 0.4, 0.6]):
-            play('pulse', 'element', amplitude_scale=x)
+            play('pulse' * amp(x), 'element')
         with for_each_((x, y), ([0.1, 0.4, 0.6], [0.3, -0.2, 0.1])):
-            play('pulse1', 'element', amplitude_scale=x)
-            play('pulse2', 'element', amplitude_scale=y)
+            play('pulse1' * amp(x), 'element')
+            play('pulse2' * amp(y), 'element')
         ```
 
     Warning:

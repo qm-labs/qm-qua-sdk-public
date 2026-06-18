@@ -147,29 +147,32 @@ def declare_input_stream(
 
 
 @overload
-def declare_input_stream(t: type[NumberT], name: str) -> QuaVariableInputStream[NumberT]: ...
+def declare_input_stream(t: type[NumberT], name: str) -> QuaVariableInputStream[NumberT]:
+    ...
 
 
 @overload
-def declare_input_stream(
-    t: type[NumberT], name: str, value: Literal[None], size: int
-) -> QuaArrayInputStream[NumberT]: ...
+def declare_input_stream(t: type[NumberT], name: str, value: Literal[None], size: int) -> QuaArrayInputStream[NumberT]:
+    ...
 
 
 @overload
-def declare_input_stream(t: type[NumberT], name: str, *, size: int) -> QuaArrayInputStream[NumberT]: ...
+def declare_input_stream(t: type[NumberT], name: str, *, size: int) -> QuaArrayInputStream[NumberT]:
+    ...
 
 
 @overload
 def declare_input_stream(
     t: type[NumberT], name: str, value: Union[int, bool, float]
-) -> QuaVariableInputStream[NumberT]: ...
+) -> QuaVariableInputStream[NumberT]:
+    ...
 
 
 @overload
 def declare_input_stream(
     t: type[NumberT], name: str, value: Sequence[Union[int, bool, float]]
-) -> QuaArrayInputStream[NumberT]: ...
+) -> QuaArrayInputStream[NumberT]:
+    ...
 
 
 def declare_input_stream(

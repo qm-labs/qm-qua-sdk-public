@@ -71,7 +71,7 @@ class QuaIterableRange(QuaIterableBase[T]):
         ```python
         with program() as prog:
             for amp_scale in QuaIterableRange("amp_scale", 0.1, 1.0, 0.05):
-                play("pulse", "element", amplitude_scale=amp_scale)
+                play("pulse" * amp(amp_scale), "element")
         ```
 
         This is equivalent to:
@@ -80,7 +80,7 @@ class QuaIterableRange(QuaIterableBase[T]):
         with program() as prog:
             amp_scale = declare(fixed)
             with for_(amp_scale, 0.1, amp_scale < 1.0, amp_scale + 0.05):
-                play("pulse", "element", amplitude_scale=amp_scale)
+                play("pulse" * amp(amp_scale), "element")
         ```
     """
 
@@ -100,7 +100,8 @@ class QuaIterableRange(QuaIterableBase[T]):
         step: int = 1,
         *,
         metadata: Optional[MetaDataType] = None,
-    ): ...
+    ):
+        ...
 
     @overload
     def __init__(
@@ -111,7 +112,8 @@ class QuaIterableRange(QuaIterableBase[T]):
         step: Number = 1,
         *,
         metadata: Optional[MetaDataType] = None,
-    ): ...
+    ):
+        ...
 
     def __init__(self, name: str, /, *args: Number, metadata: Optional[MetaDataType] = None):  # type: ignore[misc]
         self._start: Number
@@ -182,7 +184,7 @@ class QuaIterable(QuaIterableBase[T]):
         ```python
         with program() as prog:
             for amp_scale in QuaIterable("amp_scale", np.linspace(0.1, 0.6, 10)):
-                play("pulse", "element", amplitude_scale=amp_scale)
+                play("pulse" * amp(amp_scale), "element")
         ```
 
         This is equivalent to:
@@ -191,7 +193,7 @@ class QuaIterable(QuaIterableBase[T]):
         with program() as prog:
             amp_scale = declare(fixed)
             with for_each_(amp_scale, np.linspace(0.1, 0.6, 10)):
-                play("pulse", "element", amplitude_scale=amp_scale)
+                play("pulse" * amp(amp_scale), "element")
         ```
     """
 
@@ -202,7 +204,8 @@ class QuaIterable(QuaIterableBase[T]):
         array: QuaIterableArrayInputInt,
         *,
         metadata: Optional[MetaDataType] = None,
-    ): ...
+    ):
+        ...
 
     @overload
     def __init__(
@@ -211,7 +214,8 @@ class QuaIterable(QuaIterableBase[T]):
         array: QuaIterableArrayInputFloat,
         *,
         metadata: Optional[MetaDataType] = None,
-    ): ...
+    ):
+        ...
 
     def __init__(
         self,

@@ -75,7 +75,8 @@ def _handle_connection_error(timeout: Optional[float]) -> Generator[None, None, 
 
 @runtime_checkable
 class GrpcStub(Protocol):
-    def __init__(self, channel: Channel) -> None: ...
+    def __init__(self, channel: Channel) -> None:
+        ...
 
     ...
 

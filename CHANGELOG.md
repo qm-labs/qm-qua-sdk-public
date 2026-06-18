@@ -6,60 +6,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+
+## [1.3.1] - 2026-06-18
+
+- Requires Python >=3.10, <3.15
+- Tested against QOP 2.4.4, 2.6.0, 3.5.1, 3.6.2, 3.7.1
+
 ### Added
-- QOP 3.7 - Added key `lo_mode` to the MW-FEM analog input port configuration, with the options of "auto" (default) and "always_on".
-- Added support for Python 3.13
-- Added support for plotly 6 (changed requirements to be `>=5` instead of `^5.13.0`)
-- Improved safeguards in `generate_qua_script` to prevent unintended or arbitrary code execution.
-- Added `QOP` to DevicesVersion string representation returned by `qmm.version()`.
-- Introduced the wait_for_execution_timeout argument to the execute method.
-- Introduced declare_with_stream API to create qua variables with built-in implicit stream processing.
-- Added NativeIterable, NativeIterableRange, QuaIterable, and QuaIterableRange to simplify writing QUA programs containing loops.
+- QOP 3.7 — Added key `lo_mode` to the MW-FEM analog input port configuration, with the options `"auto"` and `"always_on"`.
+- Added support for Python 3.13 and Python 3.14.
 - Added support for protobuf 7.
-- Added support for Python 3.14.
+- Added support for plotly 6 (changed requirement to `>=5` instead of `^5.13.0`).
 - Added `qmm.close()` to release the gRPC channel and free its TCP connection. After `close()`, any RPC method on the QMM raises `QMConnectionError`.
+- Introduced the `wait_for_execution_timeout` argument to the `execute` method.
+- Introduced the `declare_with_stream` API to create QUA variables with built-in implicit stream processing.
+- Added `PythonIterable`, `PythonIterableRange`, `QuaIterable`, and `QuaIterableRange` (importable from `qm.qua.extensions`) to simplify writing QUA programs containing loops. `PythonIterable`, `PythonIterableRange` were first named `NativeIterable`, `NativeIterableRange` in 1.3.0a1. They are now deprecated.
+- Exposed `STREAM_NAME_SEPARATOR` in the `qm.qua` namespace — the separator that `declare_with_stream` uses to join a stream name with its Python loop-context values.
+- Added `QOP` to the `DevicesVersion` string representation returned by `qmm.version()`.
+- Improved safeguards in `generate_qua_script` to prevent unintended or arbitrary code execution.
 
 ### Changed
-- Updated the `high_pass` warning message to indicate the correct behavior and marked it as a DeprecationWarning.
-- Changed the signature of `for_` and `while_` loops so they will not hold `None` Defaults. This will prevent propagation of errors due to missing arguments.
-- Increased the default qmm timeout from 60 seconds to 120 seconds.
-- Removed betterproto dependency, grpc is now compiled with protoc.
-- Updated the timeout exception message to be more descriptive.
 - Unified the various input and output stream APIs:
     - Input streams are declared using `declare_input_stream()`.
     - Output streams are declared using `declare_output_stream()`.
     - Input streams can receive data using `receive_from_stream()`.
     - Data can be sent to output streams using `send_to_stream()`.
-- Changed the signature of `declare_input_stream()` to support OPNIC streams. This is a backward-compatible change.
-- Changed `QuaZip` to raise `QmQuaException` when the provided QUA iterables do not all have the same length.
+- Changed the signature of `declare_input_stream()` to support OPNIC streams. This is a backward-compatible change (Changed from 1.3.0a1).
+- Changed the signature of `for_` and `while_` loops so they no longer hold `None` defaults, preventing propagation of errors due to missing arguments.
+- Changed `QuaZip` to raise `QmQuaException` when the provided QUA iterables do not all have the same length (Changed from 1.3.0a1).
+- Increased the default `qmm` timeout from 60 seconds to 120 seconds, and made the timeout exception message more descriptive.
+- Updated the `high_pass` warning message to indicate the correct behavior and marked it as a `DeprecationWarning`.
+- Removed the betterproto dependency; gRPC is now compiled with `protoc`.
+- `lo_mode` on MW-FEM analog input ports no longer defaults to `"auto"` in the SDK (Changed from 1.3.0a1).
 
 ### Fixed
-- Fixed a bug where passing a non-integer value to the deprecated arguments `duration_limit`, `data_limit`, `force_execution`, or `dry_run` in `execute()` would be silently ignored instead of raising an error.
-- Fixed a bug when opening a qm with the flag `"validate_with_protobuf"=True` when the config had string keys.
-- Fixed a bug in `job.get_simulated_samples()` when using OPX+ with NumPy 2
-- Update the dependency of marshmallow to avoid a vulnerability issue.
-- Fix a bug in config validation - an element that had RF inputs or outputs, but did not have an Octave, did not raise an error.
-- Fix a bug that made an element named `""` (empty string) appear in the waveform report.
-- Using `wait_until()` on a specific state will now also return if a following state is reached. E.g., `wait_until("RUNNING")` will return if the state is "PROCESSING" or "DONE".
-- Fixed the warning message for unsupported QOP versions so it no longer displays an incorrect version number.
-- Fixed a dependency incompatibility issue of protobuf, that caused due to a too-new proto-files generation (too-advanced grpcio-tool version)
 - Fixed a bug where configuring Octave ports that share a synthesizer (upconverters 2 & 3, upconverters 4 & 5, and upconverter 1 / downconverter 1) with internal LO source and different LO frequencies was silently accepted; this now raises `OctaveLoFrequencyConflict`.
-- Fixed a bug that prevented setting negative intermediate-frequency when calibrating an Octave (bug introduced in 1.3.0a1).
-- Fixed missing license metadata in the qm-qua PyPI package distribution
+- Fixed a bug in config validation — an element with RF inputs or outputs but no Octave did not raise an error.
+- Fixed a bug that made an element named `""` (empty string) appear in the waveform report.
+- Fixed a bug when opening a QM with `"validate_with_protobuf"=True` and the config had string keys.
+- Fixed a bug in `job.get_simulated_samples()` when using OPX+ with NumPy 2.
+- `wait_until()` on a specific state now also returns if a following state is reached (e.g. `wait_until("RUNNING")` returns if the state is "PROCESSING" or "DONE").
+- `declare_input_stream()` and `declare_output_stream()` now raise `QmQuaException` when given a type other than the supported numeric types, instead of failing later (Changed from 1.3.0a1).
+- Declaring an input or output stream with an unsupported target now raises a clear `QmQuaException` listing the supported targets (Changed from 1.3.0a1).
+- Fixed a bug where sending a `bool` value to an `int` stream was silently accepted; it now raises `QmQuaException` (QUA treats `bool` as distinct from `int`), while sending `fixed` to a `float` stream remains valid (bug introduced in 1.3.0a1).
+- Fixed the warning message for unsupported QOP versions so it no longer displays an incorrect version number.
 - Improved the error message when fetching simulation results before the simulation has finished, to indicate that `job.wait_until("Done")` should be called first.
-- Fixed an ambiguous error raised when using an IO variable (`IO1`, `IO2`) where it is not allowed. Now a clear `IoVariableImproperUsage` is raised advising to assign it to a regular QUA variable first.
+- Updated the marshmallow dependency to avoid a vulnerability issue.
+- Fixed missing license metadata in the qm-qua PyPI package distribution.
+- Fixed a dependency incompatibility issue of protobuf, that was caused by a too-new proto-files generation (too-advanced grpcio-tool version) (bug introduced in 1.3.0a1).
+- Fixed a bug that prevented setting negative intermediate-frequency when calibrating an Octave (bug introduced in 1.3.0a1).
 
 ### Deprecated
 - The `declare_stream()` function is deprecated and has been replaced by `declare_output_stream()`.
 - The `declare_external_stream()` function is deprecated and has been replaced by `declare_input_stream()` and `declare_output_stream()`.
 - The `send_to_external_stream()` function is deprecated and has been replaced by `send_to_stream()`.
 - The `receive_from_external_stream()` function is deprecated and has been replaced by `receive_from_stream()`.
-- `amp` function in the dsl is deprecated. Instead, one can use the keyword argument `amplitude_scale` in the `play` and `measure` commands.
 
 ### Removed
-- Dropped support of 4 <= protobuf < 4.25
 - Dropped support for Python 3.9.
-
+- Dropped support for `4 <= protobuf < 4.25`.
 
 ## [1.2.6] - 2026-02-25
 

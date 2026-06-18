@@ -1645,11 +1645,17 @@ class ElementSchema(Schema):
     multipleInputs = fields.Nested(MultipleInputsSchema)
     MWInput = fields.Nested(MWInputSchema)
     time_of_flight = fields.Int(
-        metadata={"description": """The delay time, in ns, from the start of pulse until it reaches 
-            back into the controller. Needs to be calibrated by looking at the raw ADC data."""}
+        metadata={
+            "description": """The delay time, in ns, from the start of pulse until it reaches 
+            back into the controller. Needs to be calibrated by looking at the raw ADC data."""
+        }
     )
-    smearing = fields.Int(metadata={"description": """Padding time, in ns, to add to both the start and end of the raw 
-            ADC data window during a measure command."""})
+    smearing = fields.Int(
+        metadata={
+            "description": """Padding time, in ns, to add to both the start and end of the raw 
+            ADC data window during a measure command."""
+        }
+    )
     outputs = fields.Dict(
         keys=fields.String(),
         values=PortReferenceSchema,
@@ -1829,16 +1835,20 @@ class QuaConfigSchema(Schema):
     oscillators = fields.Dict(
         keys=fields.String(),
         values=fields.Nested(OscillatorSchema),
-        metadata={"description": """The oscillators used to drive the elements. 
-        Can be used to share oscillators between elements"""},
+        metadata={
+            "description": """The oscillators used to drive the elements. 
+        Can be used to share oscillators between elements"""
+        },
     )
 
     elements = fields.Dict(
         keys=fields.String(),
         values=fields.Nested(ElementSchema),
-        metadata={"description": """The elements. Each element represents and
+        metadata={
+            "description": """The elements. Each element represents and
          describes a controlled entity which is connected to the ports of the 
-         controller."""},
+         controller."""
+        },
     )
 
     controllers = fields.Dict(
@@ -1856,21 +1866,27 @@ class QuaConfigSchema(Schema):
     integration_weights = fields.Dict(
         keys=fields.String(),
         values=fields.Nested(IntegrationWeightSchema),
-        metadata={"description": """The integration weight vectors used in the integration 
-        and demodulation of data returning from a element."""},
+        metadata={
+            "description": """The integration weight vectors used in the integration 
+        and demodulation of data returning from a element."""
+        },
     )
 
     waveforms = fields.Dict(
         keys=fields.String(),
         values=_waveform_poly_field,
-        metadata={"description": """The analog waveforms sent to an element when a pulse is 
-        played."""},
+        metadata={
+            "description": """The analog waveforms sent to an element when a pulse is 
+        played."""
+        },
     )
     digital_waveforms = fields.Dict(
         keys=fields.String(),
         values=fields.Nested(DigitalWaveFormSchema),
-        metadata={"description": """The digital waveforms sent to an element when a pulse is 
-        played."""},
+        metadata={
+            "description": """The digital waveforms sent to an element when a pulse is 
+        played."""
+        },
     )
     pulses = fields.Dict(
         keys=fields.String(),
@@ -1880,9 +1896,11 @@ class QuaConfigSchema(Schema):
     mixers = fields.Dict(
         keys=fields.String(),
         values=fields.List(fields.Nested(MixerSchema)),
-        metadata={"description": """The IQ mixer calibration properties, used to post-shape the pulse
+        metadata={
+            "description": """The IQ mixer calibration properties, used to post-shape the pulse
          to compensate for imperfections in the mixers used for up-converting the 
-         analog waveforms."""},
+         analog waveforms."""
+        },
     )
 
     class Meta:

@@ -22,7 +22,7 @@ class IterableBase(ABC, Generic[V]):
         return self._metadata
 
     # Return type intentionally omitted: subclasses declare specific return types
-    # (QuaIteratorType[V], NativeIteratorType[V], MultiIteratorType). Annotating the
+    # (QuaIteratorType[V], PythonIteratorType[V], MultiIteratorType). Annotating the
     # base with the IteratorType union (which collapses to Iterator[Any]) prevents
     # IDEs from resolving the narrower subclass types.
     @abstractmethod
