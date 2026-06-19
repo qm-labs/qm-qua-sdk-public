@@ -166,7 +166,9 @@ class SimulatedJob(RunningQmJob):
             if result.ok:
                 _write_simulator_result(result, writer, data_writer)
             else:
-                raise QMSimulationError("Error while pulling samples")
+                raise QMSimulationError(
+                    'Error while pulling simulation results, please ensure that the simulation has finished running by running `job.wait_until("Done")`.'
+                )
 
     def _get_np_simulated_samples(self, include_analog: bool = True, include_digital: bool = True) -> NumpyArray:
         writer = BytesIO()

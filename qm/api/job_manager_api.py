@@ -82,11 +82,11 @@ class JobManagerBaseApi(BaseApi[JobStubType], metaclass=ABCMeta):
         stream_name = create_input_stream_name(stream_name)
         request = job_manager_pb2.InsertInputStreamRequest(jobId=job_id, streamName=stream_name)
 
-        if all(type(element) == bool for element in data):
+        if all(type(element) is bool for element in data):
             request.boolStreamData.CopyFrom(job_manager_pb2.BoolStreamData(data=cast(List[bool], data)))
-        elif all(type(element) == int for element in data):
+        elif all(type(element) is int for element in data):
             request.intStreamData.CopyFrom(job_manager_pb2.IntStreamData(data=cast(List[int], data)))
-        elif all(type(element) == float for element in data):
+        elif all(type(element) is float for element in data):
             request.fixedStreamData.CopyFrom(job_manager_pb2.FixedStreamData(data=cast(List[float], data)))
         else:
             raise QmValueError(

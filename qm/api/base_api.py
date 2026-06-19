@@ -115,9 +115,17 @@ class BaseApi(Generic[StubType], metaclass=ABCMeta):
 
         Returns:
             The response message from the gRPC call
+
+        Raises:
+            QMConnectionError: if the connection has been closed, or if
+                the gRPC call itself surfaces a connection error.
+            QMTimeoutError: if the call exceeds ``timeout``.
         """
         if timeout is None:
             timeout = self._timeout
+
+        # Guard before gRPC: invoking on a closed channel segfaults cygrpc.
+        self._connection_details.raise_if_closed()
 
         with _handle_connection_error(timeout):
             return grpc_method(request, timeout=timeout)
@@ -142,7 +150,14 @@ class BaseApi(Generic[StubType], metaclass=ABCMeta):
 
         Returns:
             The Iterator of response messages from the function
+
+        Raises:
+            QMConnectionError: if the connection has been closed, or if
+                the gRPC call itself surfaces a connection error.
+            QMTimeoutError: if the call exceeds ``timeout``.
         """
+        # Guard before gRPC: invoking on a closed channel segfaults cygrpc.
+        self._connection_details.raise_if_closed()
 
         with _handle_connection_error(timeout):
             for response in stub_func(request, timeout=timeout, metadata=metadata):  # type: ignore[call-arg]

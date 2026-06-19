@@ -36,9 +36,9 @@ from qm.api.models.server_details import ConnectionDetails
 from qm.program._dict_to_pb_converter import build_iw_sample
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.utils.protobuf_utils import update_map, serialized_on_wire
-from qm.exceptions import OpenQmException, OctaveLoopbackError, NoOutputPortDeclared
 from qm.octave._calibration_names import COMMON_OCTAVE_PREFIX, CalibrationElementsNames
 from qm.utils.config_utils import get_fem_config, get_logical_pb_config, get_controller_pb_config
+from qm.exceptions import OpenQmException, OctaveLoopbackError, NoOutputPortDeclared, ConfigValidationException
 from qm.octave.octave_mixer_calibration import (
     AutoCalibrationParams,
     DeprecatedCalibrationResult,
@@ -505,6 +505,10 @@ class OctaveManager:
             # we still want to skip the batch mode.
             return
         for octave_name, octave_config in octaves_config.items():
+            # Validate conflicts before starting setting the octaves.
+            _validate_octave_contradicting_frequencies(octave_config, octave_name)
+
+        for octave_name, octave_config in octaves_config.items():
             pb_loopbacks = octave_config.loopbacks
             loopbacks = get_loopbacks_from_pb(pb_loopbacks, octave_name)
             connection_info = self._octave_config.devices[octave_name]
@@ -743,36 +747,39 @@ def _add_calibration_entries_to_config(
     dummy_mixer_name = f"{COMMON_OCTAVE_PREFIX}dummy_mixer"
     dummy_lo_frequency_double = [0.0, float(dummy_lo_frequency)][frequency_idx]
 
+    def _create_mix_inputs(
+        set_dummy_ports: bool, _channel_connections: OctaveConnection
+    ) -> inc_qua_config_pb2.QuaConfig.MixInputs:
+        if set_dummy_ports:
+            i, q = _find_dummy_controller_outputs(_channel_connections.adcs.I, pb_config, all_octave_connections)
+        else:
+            i, q = _channel_connections.dacs.I, _channel_connections.dacs.Q
+
+        return inc_qua_config_pb2.QuaConfig.MixInputs(
+            I=i,
+            Q=q,
+            loFrequency=dummy_lo_frequency,
+            loFrequencyDouble=dummy_lo_frequency_double,
+            mixer=dummy_mixer_name,
+        )
+
+    def create_analyzer_element(
+        intermediate_frequency: float, _channel_connections: OctaveConnection
+    ) -> inc_qua_config_pb2.QuaConfig.ElementDec:
+        return inc_qua_config_pb2.QuaConfig.ElementDec(
+            intermediateFrequency=UInt64Value(value=abs(int(intermediate_frequency))),
+            intermediateFrequencyDouble=[0.0, abs(float(intermediate_frequency))][frequency_idx],
+            intermediateFrequencyNegative=intermediate_frequency < 0,
+            mixInputs=_create_mix_inputs(True, _channel_connections),
+            operations={"Analyze": f"{COMMON_OCTAVE_PREFIX}Analyze_pulse"},
+            outputs={"out1": _channel_connections.adcs.I, "out2": _channel_connections.adcs.Q},
+            timeOfFlight=UInt32Value(value=time_of_flight),
+            smearing=UInt32Value(value=0),
+        )
+
     for octave_name, octave_connections in all_octave_connections.items():
         for upconverter_index, channel_connections in octave_connections.items():
             names = CalibrationElementsNames(octave_name, upconverter_index)
-
-            def _create_mix_inputs(set_dummy_ports: bool) -> inc_qua_config_pb2.QuaConfig.MixInputs:
-                if set_dummy_ports:
-                    i, q = _find_dummy_controller_outputs(channel_connections.adcs.I, pb_config, all_octave_connections)
-                else:
-                    i, q = channel_connections.dacs.I, channel_connections.dacs.Q
-
-                return inc_qua_config_pb2.QuaConfig.MixInputs(
-                    I=i,
-                    Q=q,
-                    loFrequency=dummy_lo_frequency,
-                    loFrequencyDouble=dummy_lo_frequency_double,
-                    mixer=dummy_mixer_name,
-                )
-
-            def create_analyzer_element(intermediate_frequency: float) -> inc_qua_config_pb2.QuaConfig.ElementDec:
-
-                return inc_qua_config_pb2.QuaConfig.ElementDec(
-                    intermediateFrequency=UInt64Value(value=abs(int(intermediate_frequency))),
-                    intermediateFrequencyDouble=[0.0, abs(float(intermediate_frequency))][frequency_idx],
-                    intermediateFrequencyNegative=intermediate_frequency < 0,
-                    mixInputs=_create_mix_inputs(True),
-                    operations={"Analyze": f"{COMMON_OCTAVE_PREFIX}Analyze_pulse"},
-                    outputs={"out1": channel_connections.adcs.I, "out2": channel_connections.adcs.Q},
-                    timeOfFlight=UInt32Value(value=time_of_flight),
-                    smearing=UInt32Value(value=0),
-                )
 
             i_offset = inc_qua_config_pb2.QuaConfig.ElementDec(
                 singleInput=inc_qua_config_pb2.QuaConfig.SingleInput(port=channel_connections.dacs.I),
@@ -786,7 +793,7 @@ def _add_calibration_entries_to_config(
                 logical_pb_config.elements,
                 {
                     names.iq_mixer: inc_qua_config_pb2.QuaConfig.ElementDec(
-                        mixInputs=_create_mix_inputs(False),
+                        mixInputs=_create_mix_inputs(False, channel_connections),
                         intermediateFrequency=UInt64Value(value=abs(int(dummy_if_frequency))),
                         intermediateFrequencyDouble=[0.0, abs(float(dummy_if_frequency))][frequency_idx],
                         operations={"calibration": f"{COMMON_OCTAVE_PREFIX}calibration_pulse"},
@@ -794,9 +801,13 @@ def _add_calibration_entries_to_config(
                     ),
                     names.i_offset: i_offset,
                     names.q_offset: q_offset,
-                    names.signal_analyzer: create_analyzer_element(dummy_if_frequency - dummy_down_mixer_offset),
-                    names.lo_analyzer: create_analyzer_element(-dummy_down_mixer_offset),
-                    names.image_analyzer: create_analyzer_element(-dummy_if_frequency - dummy_down_mixer_offset),
+                    names.signal_analyzer: create_analyzer_element(
+                        dummy_if_frequency - dummy_down_mixer_offset, channel_connections
+                    ),
+                    names.lo_analyzer: create_analyzer_element(-dummy_down_mixer_offset, channel_connections),
+                    names.image_analyzer: create_analyzer_element(
+                        -dummy_if_frequency - dummy_down_mixer_offset, channel_connections
+                    ),
                 },
             )
 
@@ -944,3 +955,51 @@ def get_device(
     if fan is not None:
         client._set_fan(fan)
     return client
+
+
+class OctaveLoFrequencyConflict(ConfigValidationException):
+    pass
+
+
+def _validate_octave_contradicting_frequencies(
+    config: inc_qua_config_pb2.QuaConfig.Octave.Config, device_name: str
+) -> None:
+    """
+    Checks only the case of internal LO source.
+    If upconverter 2 and upconverter 3 are both defined, with internal LO source, and with different LO frequencies - raise
+    The same for upconverter 4 and upconverter 5.
+    Also for upconverter 1 and downconverter 1.
+    """
+    internal = inc_qua_config_pb2.QuaConfig.Octave.LOSourceInput.internal
+    rf_outputs = config.rf_outputs
+    rf_inputs = config.rf_inputs
+
+    def _check_upconverter_pair(idx_a: int, idx_b: int) -> None:
+        if idx_a not in rf_outputs or idx_b not in rf_outputs:
+            return
+        out_a = rf_outputs[idx_a]
+        out_b = rf_outputs[idx_b]
+        if out_a.LO_source != internal or out_b.LO_source != internal:
+            return
+        if out_a.LO_frequency != out_b.LO_frequency:
+            raise OctaveLoFrequencyConflict(
+                f"Octave '{device_name}': upconverters {idx_a} and {idx_b} share a synthesizer "
+                f"but are configured with internal LO source and different LO frequencies "
+                f"({out_a.LO_frequency} vs {out_b.LO_frequency})."
+            )
+
+    upconverters_pairs_sharing_synth = [(2, 3), (4, 5)]
+    for _idx_a, _idx_b in upconverters_pairs_sharing_synth:
+        _check_upconverter_pair(_idx_a, _idx_b)
+
+    common_synth_upconverter_downconverter_pair = (1, 1)
+    upconverter_idx, downconverter_idx = common_synth_upconverter_downconverter_pair
+    if upconverter_idx in rf_outputs and downconverter_idx in rf_inputs:
+        out = rf_outputs[upconverter_idx]
+        inp = rf_inputs[downconverter_idx]
+        if out.LO_source == internal and inp.LO_source == internal and out.LO_frequency != inp.LO_frequency:
+            raise OctaveLoFrequencyConflict(
+                f"Octave '{device_name}': upconverter 1 and downconverter 1 share a synthesizer "
+                f"but are configured with internal LO source and different LO frequencies "
+                f"({out.LO_frequency} vs {inp.LO_frequency})."
+            )

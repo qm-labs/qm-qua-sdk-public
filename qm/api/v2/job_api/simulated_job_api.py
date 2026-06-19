@@ -67,7 +67,9 @@ class SimulatedJobApi(JobApi):
             if isinstance(response, job_api_pb2.PullSamplesResponse.PullSamplesResponseSuccess):
                 bare_results[response.controller].append(response)
             else:
-                raise QMSimulationError("Error while pulling samples")
+                raise QMSimulationError(
+                    'Error while pulling simulation results, please ensure that the simulation has finished running by running `job.wait_until("Done")`.'
+                )
         return dict(bare_results)
 
     def get_simulated_samples(self, include_analog: bool = True, include_digital: bool = True) -> SimulatorSamples:

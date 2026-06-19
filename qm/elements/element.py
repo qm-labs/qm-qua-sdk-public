@@ -43,7 +43,8 @@ class Element(Generic[ElementInputGRPCType]):
         logger.debug(f"Setting element '{self._name}' intermediate frequency to '{freq}'.")
         self._frontend.set_intermediate_frequency(self._id, self._name, freq)
         self._config.intermediateFrequencyDouble = float(freq) if self._set_frequency_as_double else 0.0
-        self._config.intermediateFrequency.value = int(freq)
+        self._config.intermediateFrequency.value = abs(int(freq))
+        self._config.intermediateFrequencyNegative = freq < 0
 
     @property
     def intermediate_frequency(self) -> float:

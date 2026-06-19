@@ -54,8 +54,8 @@ class QuaIterableRange(QuaIterableBase[T]):
     """
     QUA-side range iterator.
 
-    Use this helper when a sweep axis should execute on the QOP as a
-    [`for_`][qm.qua.for_] loop rather than in Python.
+    Use this helper when iterating over a range of values that should run
+    on the QOP as a [`for_`][qm.qua.for_] loop (rather than in Python).
 
     ``QuaIterableRange(name, stop)`` behaves like ``range(stop)``.
     ``QuaIterableRange(name, start, stop, step)`` behaves like
@@ -153,7 +153,7 @@ class QuaIterableRange(QuaIterableBase[T]):
         """
         Return the Python values represented by this iterable.
         """
-        return np.arange(self._start, self._stop, self._step).tolist()  # type: ignore[return-value]
+        return np.arange(self._start, self._stop, self._step).tolist()
 
     def __iter__(self) -> QuaIteratorType[T]:
         var = self.declare_var()
@@ -168,8 +168,8 @@ class QuaIterable(QuaIterableBase[T]):
     """
     QUA-side iterable over an explicit sequence of numeric values.
 
-    Use this helper when a sweep axis should execute on the QOP rather than in
-    Python.
+    Use this helper when iterating over a sequence of values that should run
+    on the QOP rather than in Python.
 
     If the values are uniformly spaced, the iterator may be optimized to a
     [`for_`][qm.qua.for_] loop. Otherwise it is compiled as a
@@ -225,7 +225,7 @@ class QuaIterable(QuaIterableBase[T]):
         metadata: Optional[MetaDataType] = None,
     ):
         raw_array = array.tolist() if isinstance(array, np.ndarray) else list(array)
-        dtype: type = int if all([type(v) == int for v in raw_array]) else float
+        dtype: type = int if all([type(v) is int for v in raw_array]) else float
         if dtype is float:
             self._array: QuaIterableArrayType[T] = cast(QuaIterableArrayType[T], [float(v) for v in raw_array])
             # Mypy doesn't propagate the self-type from overloads into the implementation

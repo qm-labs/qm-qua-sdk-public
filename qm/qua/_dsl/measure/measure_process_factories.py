@@ -24,7 +24,7 @@ DEFAULT_OUT1 = "out1"
 DEFAULT_OUT2 = "out2"
 
 
-class _AccumulationMethod(metaclass=abc.ABCMeta):
+class _AccumulationMethod(abc.ABC):  # noqa: B024
     loc = ""
 
     @classmethod

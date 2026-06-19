@@ -1437,7 +1437,7 @@ class StickySchema(Schema):
 
 
 class MixInputSchema(Schema):
-    I = PortReferenceSchema
+    I = PortReferenceSchema  # noqa: E741
     Q = PortReferenceSchema
     mixer = fields.String(
         metadata={

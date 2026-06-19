@@ -14,24 +14,24 @@ MetaDataType = Mapping[str, Any]
 QuaIterableArrayInputInt = Union[np.typing.NDArray[np.integer[Any]], QuaIterableArrayType[int]]
 QuaIterableArrayInputFloat = Union[np.typing.NDArray[np.floating[Any]], QuaIterableArrayType[float]]
 QuaIterableArrayInput = Union[QuaIterableArrayInputInt, QuaIterableArrayInputFloat]
-NativeArrayType = Sequence[Any]
+PythonArrayType = Sequence[Any]
 
 QuaIterablesDType = type[Number]
-MultiIteratorsValuesType = List[Union[NativeArrayType, AnyQuaIterableArrayType]]
+MultiIteratorsValuesType = List[Union[PythonArrayType, AnyQuaIterableArrayType]]
 
-NativeIteratorItemType = Any  # Supporting any iterable for native type
+PythonIteratorItemType = Any  # Supporting any iterable for Python type
 QuaVariableTypes = Union[QuaVariable[float], QuaVariable[int]]
 
 IteratorContentTypes = Union[
-    NativeArrayType, AnyQuaIterableArrayType, NativeIteratorItemType, QuaVariableTypes, "QuaNamedTuple"
+    PythonArrayType, AnyQuaIterableArrayType, PythonIteratorItemType, QuaVariableTypes, "QuaNamedTuple"
 ]
 
 # iterator types
 QuaIteratorType = Iterator[QuaVariable[T]]
 AnyQuaIteratorType = Union[QuaIteratorType[float], QuaIteratorType[int]]
 MultiIteratorType = Iterator["QuaNamedTuple"]
-NativeIteratorType = Iterator[V]
-IteratorType = Union[AnyQuaIteratorType, MultiIteratorType, NativeIteratorType[Any]]
+PythonIteratorType = Iterator[V]
+IteratorType = Union[AnyQuaIteratorType, MultiIteratorType, PythonIteratorType[Any]]
 
 
 class QuaNamedTuple:

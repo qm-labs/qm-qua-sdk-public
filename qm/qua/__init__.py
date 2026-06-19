@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING, Any
+
 from qm.qua._dsl.other import L
 from qm.qua._expressions import fixed
 from qm.exceptions import QmQuaException
@@ -19,22 +21,14 @@ from qm.qua._dsl.stream_processing.map_functions.map_functions import FUNCTIONS
 from qm.qua._dsl.phase_reset import reset_phase, reset_if_phase, reset_global_phase
 from qm.qua._dsl._type_hints import OneOrMore, MessageVarType, MessageExpressionType
 from qm.qua._dsl.streams.input_streams.receive_from_stream import receive_from_stream
-from qm.qua._dsl.stream_processing.direct_stream_processing import declare_with_stream
 from qm.qua._dsl.streams.input_streams.declare_input_stream import declare_input_stream
 from qm.qua._dsl.calibration_params_update import set_dc_offset, update_frequency, update_correction
 from qm.qua.lib import Cast, Math, Util, Random, call_library_function, call_vectors_library_function
 from qm.qua._dsl.streams.output_streams.declare_output_stream import declare_stream, declare_output_stream
 from qm.qua._dsl.frame_rotation import reset_frame, frame_rotation, frame_rotation_2pi, fast_frame_rotation
+from qm.qua._dsl.stream_processing.direct_stream_processing import STREAM_NAME_SEPARATOR, declare_with_stream
 from qm.qua._dsl.measure.measure_process_factories import demod, counting, dual_demod, integration, time_tagging
 from qm.qua._dsl.variable_handling import DeclarationType, save, assign, declare, declare_struct, advance_input_stream
-from qm.qua.extensions.qua_iterators import (
-    QuaZip,
-    QuaProduct,
-    QuaIterable,
-    NativeIterable,
-    QuaIterableRange,
-    NativeIterableRange,
-)
 from qm.qua._dsl.streams.external_streams import (
     QuaStreamDirection,
     declare_external_stream,
@@ -137,13 +131,53 @@ __all__ = [
     "receive_from_external_stream",
     "send_to_external_stream",
     "declare_with_stream",
-    "QuaIterable",
-    "QuaIterableRange",
-    "NativeIterable",
-    "NativeIterableRange",
-    "QuaZip",
-    "QuaProduct",
     "declare_input_stream",
     "receive_from_stream",
     "send_to_stream",
+    "STREAM_NAME_SEPARATOR",
 ]
+
+# The QUA iterator helpers have moved to ``qm.qua.extensions.qua_iterators``.
+# Importing them from ``qm.qua`` is deprecated; they remain accessible here
+# (with a deprecation warning) for backward compatibility only.
+_DEPRECATED_ITERATOR_NAMES = (
+    "QuaZip",
+    "QuaProduct",
+    "QuaIterable",
+    "NativeIterable",
+    "PythonIterable",
+    "QuaIterableRange",
+    "NativeIterableRange",
+    "PythonIterableRange",
+)
+
+if TYPE_CHECKING:
+    from qm.qua.extensions.qua_iterators import (
+        QuaZip,
+        QuaProduct,
+        QuaIterable,
+        NativeIterable,
+        PythonIterable,
+        QuaIterableRange,
+        NativeIterableRange,
+        PythonIterableRange,
+    )
+
+
+def __getattr__(name: str) -> Any:
+    if name in _DEPRECATED_ITERATOR_NAMES:
+        from qm.qua.extensions import qua_iterators
+        from qm.utils.deprecation_utils import throw_warning, deprecation_message
+
+        throw_warning(
+            deprecation_message(
+                f"Importing '{name}' from qm.qua",
+                "1.3.0",
+                "2.0.0",
+                "Import it from qm.qua.extensions.qua_iterators instead.",
+            ),
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return getattr(qua_iterators, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -82,7 +82,7 @@ class DemodWeightsData:
 
 
 class DConvQuadrature:
-    I = DemodWeightsData(
+    I = DemodWeightsData(  # noqa: E741
         i=IntegrationWeights(out1="integW_cos", out2="integW_zero"),
         q=IntegrationWeights(out1="integW_minus_sin", out2="integW_zero"),
     )

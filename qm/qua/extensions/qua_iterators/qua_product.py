@@ -13,7 +13,7 @@ class QuaProduct:
     The first iterable becomes the outermost loop and the last iterable becomes
     the innermost loop, so reordering the list changes the loop nesting order.
 
-    A product can mix QUA iterables and native iterables. The yielded value is
+    A product can mix QUA iterables and Python iterables. The yielded value is
     a named tuple whose field names match the iterable names.
 
     Note:
@@ -27,7 +27,7 @@ class QuaProduct:
             for args in QuaProduct(
                 [
                     QuaIterableRange("shot", 100),
-                    NativeIterable("element", ["q1", "q2"]),
+                    PythonIterable("element", ["q1", "q2"]),
                     QuaZip(
                         [
                             QuaIterable("amp", [0.2, 0.5, 0.8]),

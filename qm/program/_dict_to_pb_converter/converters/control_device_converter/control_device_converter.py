@@ -208,15 +208,8 @@ class ControlDeviceConverter(
             analog_input.downconverter.frequency = data_with_defaults["downconverter_frequency"]
 
         if self._capabilities.supports(QopCaps.lo_mode):
-            data_with_defaults = self._apply_defaults(  # type: ignore[assignment]
-                data_with_defaults,
-                default_schema={"lo_mode": "auto"},
-            )
-            if "lo_mode" in data_with_defaults:
-                lo_mode_value = data_with_defaults.get("lo_mode")
-                # mypy
-                if lo_mode_value is None:
-                    raise ConfigValidationException("'lo_mode' is required.")
+            lo_mode_value = data_with_defaults.get("lo_mode")
+            if lo_mode_value is not None:
                 analog_input.lo_mode = getattr(
                     inc_qua_config_pb2.QuaConfig.MicrowaveAnalogInputPortDec.LoMode, lo_mode_value.upper()
                 )
@@ -570,7 +563,7 @@ class ControlDeviceConverter(
                 "downconverter_frequency": data.downconverter.frequency,
             },
         )
-        if self._capabilities.supports(QopCaps.lo_mode):
+        if self._capabilities.supports(QopCaps.lo_mode) and data.HasField("lo_mode"):
             ret["lo_mode"] = cast(
                 Literal["auto", "always_on"],
                 inc_qua_config_pb2.QuaConfig.MicrowaveAnalogInputPortDec.LoMode.Name(data.lo_mode).lower(),

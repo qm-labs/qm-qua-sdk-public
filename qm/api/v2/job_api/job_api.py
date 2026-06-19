@@ -209,11 +209,11 @@ class JobApi(JobGenericApi):
             data: The data to be pushed. The data's size & type must match
                 the size & type of the input stream.
         """
-        if all(type(element) == bool for element in data):
+        if all(type(element) is bool for element in data):
             self._typed_push_to_input_stream(stream_name, bool, data)
-        elif all(type(element) == int for element in data):
+        elif all(type(element) is int for element in data):
             self._typed_push_to_input_stream(stream_name, int, data)
-        elif all(type(element) == float for element in data):
+        elif all(type(element) is float for element in data):
             self._typed_push_to_input_stream(stream_name, float, data)
         else:
             raise QmValueError(

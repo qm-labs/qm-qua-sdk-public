@@ -794,11 +794,6 @@ def create_qua_scalar_expression(value: "Scalar[NumberT]") -> "QuaScalar[NumberT
     raise NotImplementedError
 
 
-def validate_scalar_of_any_type(data_type: Any) -> None:
-    if not isinstance(data_type, (QuaScalarExpression, bool, int, float)):
-        raise QmQuaException(f"Data type must be a ScalarOfAnyType (QUA scalar value), got {type(data_type).__name__}.")
-
-
 class fixed(float):
     pass
 
@@ -826,3 +821,13 @@ ScalarOfAnyType = Union[Scalar[bool], Scalar[int], Scalar[float]]
 
 VectorOfAnyType = Union[Vector[bool], Vector[int], Vector[float]]
 """A type representing a vector value in QUA, or the equivalent python type."""
+
+
+def get_scalar_dtype(data: Scalar[NumberT]) -> Type[NumberT]:
+    if not isinstance(data, (QuaScalarExpression, bool, int, float)):
+        raise QmQuaException(f"Data type must be a ScalarOfAnyType (QUA scalar value), got {type(data).__name__}.")
+
+    if isinstance(data, QuaScalarExpression):
+        return data.dtype
+    else:
+        return type(data)

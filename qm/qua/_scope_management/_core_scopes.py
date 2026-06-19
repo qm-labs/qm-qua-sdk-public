@@ -30,7 +30,7 @@ def _get_scopes_stack() -> Deque["_BaseScope"]:
     return cast(Deque["_BaseScope"], _thread_local.scopes_stack)
 
 
-class _BaseScope(abc.ABC):
+class _BaseScope(abc.ABC):  # noqa: B024
     def __init__(self) -> None:
         self._statements: List[inc_qua_pb2.QuaProgram.AnyStatement] = []
 
@@ -127,7 +127,7 @@ class _ProgramScope(_BaseScope):
 
     def auto_stream_processing(self) -> None:
         """Process all auto-processing streams added to the program scope."""
-        # to avoid calling similar stream processing multiple times in case of code duplication because of native loops
+        # to avoid calling similar stream processing multiple times in case of code duplication because of Python loops scopes
         current_processed_streams: set[str] = set()
         for stream in self._auto_processing_streams:
             stream.stream_processing(current_processed_streams)
@@ -254,13 +254,13 @@ class _LoopScope(_LeadingScope, abc.ABC):
         return frozenset(self._averaged_streams)
 
 
-class _PythonNativeScope(_LoopScope):
+class _PythonScope(_LoopScope):
     def __init__(self, loc: str) -> None:
         super().__init__(loc)
         self._current_value_idx: Optional[str] = None
 
     def _create_statement(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
-        raise QmQuaException("Native Python loops do not generate Qua statements")
+        raise QmQuaException("Python loops scope do not generate Qua statements")
 
     def _on_clean_exit(self) -> None:
         scopes_stack = _get_scopes_stack()
@@ -271,7 +271,7 @@ class _PythonNativeScope(_LoopScope):
     @property
     def current_value_name(self) -> str:
         if self._current_value_idx is None:
-            raise QmQuaException("Current value name is not set for the native Python loop scope")
+            raise QmQuaException("Current value name is not set for the Python loop scope")
         return self._current_value_idx
 
     def set_current_iteration_number(self, idx: int) -> None:

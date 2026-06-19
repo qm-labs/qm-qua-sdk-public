@@ -33,14 +33,16 @@ include = [
     {path="qm/grpc/VERSION", format=["sdist", "wheel"]},
 ]
 
-
 [tool.poetry.dependencies]
-python = ">=3.9, <3.14"
+python = ">=3.10, <3.15"
 grpcio = "^1.57"
-protobuf = ">=4.25, <7"
+protobuf = ">=4.25, <8"
 marshmallow = ">=3,<4"
 marshmallow-polyfield = "^5.7"
-numpy = "<3"
+numpy = [
+  { version = "<3", python = ">=3.10,<3.14" },
+  { version = "<3,>=2.4.4", python = ">=3.14" }
+]
 tinydb = "^4.6.1"
 certifi = { version = "*", optional = true }
 datadog-api-client = "^2.6.0"
@@ -51,9 +53,7 @@ httpx = { version = ">=0.27.0,<1", extras = ["http2"] }  # Note: httpx 0.28.0+ h
 multidict = "^6.7.0"
 
 [tool.poetry.group.dev.dependencies]
-boto3 = "^1.42.30"
 poethepoet = "^0.16.0"
-grpcio-tools = "==1.68.1"
 pytest-asyncio = "^0.20.3"
 pytest-benchmark = { extras = ["aspect"], version = "^4.0.0" }
 pytest = "^7.0.0"
@@ -63,21 +63,29 @@ pytest-xdist = "^3.8"
 poetry ="<=2.1.3"
 coverage = "^7.0.1"
 black = "^22.6.0"
-flake8 = "^3.9.2"
-flake8-bugbear = "^21.11.29"
+flake8 = "^7"
+flake8-bugbear = "*"
 
 apispec = "^5.1.1"
 poetry-dynamic-versioning = { extras = ["plugin"], version = "^1.0.0" }
 mypy = "^1.14"
 isort = "^5.11.5"
-qm-saas = "^1.1.7"
+qm-saas = "^1.1.8"
+python-dev-scripts = "0.1.0.dev20260507131531+6d6aa2a"
+
+
+[[tool.poetry.source]]
+name = "qm-pypi"
+url = "https://quantum-machines-439440158105.d.codeartifact.us-east-1.amazonaws.com/pypi/qm-pypi/simple/"
+priority = "supplemental"
+
 
 [tool.poetry.extras]
 simulation = ["certifi"]
 
 [tool.black]
 line-length = 120
-target-version = ["py39"]
+target-version = ["py310"]
 extend-exclude = '''
 /(
   | qm/grpc/.*
@@ -96,42 +104,16 @@ extra_standard_library = ["typing_extensions"]
 
 [tool.poe.tasks]
 
-clean-proto.sequence = [
-    { script = "shutil:rmtree('qm/proto', ignore_errors=True)" },
+generate-grpc.cmd = "python -m qm_python_dev_scripts.proto_generation.generate_grpc --python-version ${PYTHON_VERSION} --qua-proto-version=${QUA_PROTO_VERSION} --output-dir qm/grpc --download_octave"
+generate-grpc.args = [
+  { name = "PYTHON_VERSION", options = ["--python-version"], default = "3.11" },
+  { name = "QUA_PROTO_VERSION", options = ["--qua-proto-version"], default = "" }
 ]
 
-clean-grpc.sequence = [
-    { script = "shutil:rmtree('qm/grpc', ignore_errors=True)" },
-    { script = "shutil:rmtree('qm/pb', ignore_errors=True)" },
-    { script = "shutil:rmtree('qm/io', ignore_errors=True)" },
-    { script = "os:mkdir('qm/grpc')" },
-]
-
-download-proto = "python scripts/download_proto.py"
-
-create-grpc.shell = "bash scripts/generate_grpc.sh $PROTO_SRC_PATH"
-create-grpc.args = [
-  { name = "PROTO_SRC_PATH", positional = true, default = "." }
-]
-
-copy-version-grpc = "cp proto/VERSION qm/grpc/VERSION"
-postprocess-protobuf = "python scripts/postprocess_proto_generation.py"
-
-generate-grpc-from-dir.sequence = [
-    "clean-grpc",
-    "create-grpc $PROTO_SRC_PATH",
-    "copy-version-grpc",
-    "postprocess-protobuf"
-]
+generate-grpc-from-dir.cmd = "python -m qm_python_dev_scripts.proto_generation.generate_grpc --skip-download ${PROTO_SRC_PATH} --python-version ${PYTHON_VERSION}"
 generate-grpc-from-dir.args = [
-  { name = "PROTO_SRC_PATH", positional = true, default = "./" }
-]
-
-
-generate-grpc.sequence = [
-    "clean-proto",
-    "download-proto",
-    "generate-grpc-from-dir",
+  { name = "PROTO_SRC_PATH", positional = true, default = "." },
+  { name = "PYTHON_VERSION", options = ["--python-version"], default = "3.11" }
 ]
 
 check-grpc-breaking-changes = "buf breaking --against '.git#branch=main'"
@@ -160,12 +142,6 @@ check.ignore_fail = true
 pre-commit-hook.sequence = ["format", "lint", "generate-files-for-docs-website"]
 pre-commit-hook.ignore_fail = true
 
-
-[tool.coverage.report]
-skip_empty = true
-
-[tool.coverage.run]
-branch = true
 
 [tool.poetry-dynamic-versioning]
 enable = true

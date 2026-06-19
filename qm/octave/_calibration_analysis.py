@@ -213,7 +213,9 @@ def _get_and_analyze_lo_data(
         ll = min(iq, lo_res - 1 - iq, ii, lo_res - 1 - ii, 7)
         if ll > 3:
             fit = _paraboloid2d_fit(
-                q[iq - ll : iq + ll + 1], i[ii - ll : ii + ll + 1], lo[ii - ll : ii + ll + 1, iq - ll : iq + ll + 1]
+                q[iq - ll : iq + ll + 1],  # noqa: E203
+                i[ii - ll : ii + ll + 1],  # noqa: E203
+                lo[ii - ll : ii + ll + 1, iq - ll : iq + ll + 1],  # noqa: E203
             )
         else:
             fit = _paraboloid2d_fit(q, i, lo)
@@ -285,10 +287,10 @@ def _get_and_analyze_image_data(
         ig, ip = divmod(int(np.argmin(image)), image_res)
         ll = min(ip, image_res - 1 - ip, ig, image_res - 1 - ig, 5)
 
-        sg = g[ig - ll : ig + ll + 1]
-        sp = p[ip - ll : ip + ll + 1]
+        sg = g[ig - ll : ig + ll + 1]  # noqa: E203
+        sp = p[ip - ll : ip + ll + 1]  # noqa: E203
 
-        s_im = image[ig - ll : ig + ll + 1, ip - ll : ip + ll + 1]
+        s_im = image[ig - ll : ig + ll + 1, ip - ll : ip + ll + 1]  # noqa: E203
 
         fit = _paraboloid2d_fit(sp, sg, s_im)
 
