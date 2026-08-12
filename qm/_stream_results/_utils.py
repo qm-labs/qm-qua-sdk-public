@@ -60,5 +60,5 @@ def log_execution_errors(header: JobNamedResultHeader, name: str, log_error: boo
     if log_error and header.has_execution_errors:
         logger.error(
             f"Runtime errors were detected for stream named '{name}'. "
-            f"Please fetch the execution report using job.execution_report() for more information."
+            f"Please fetch the execution report using job.execution_report() for more information"
         )

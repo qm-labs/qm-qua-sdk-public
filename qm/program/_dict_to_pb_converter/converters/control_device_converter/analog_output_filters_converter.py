@@ -32,7 +32,7 @@ class AnalogOutputFiltersConverter(
             value = cast(AnalogOutputFilterConfigTypeQop33, data)["high_pass"]
             warnings.warn(
                 f"Setting the `high_pass` to {value} is equivalent to setting the `exponential_dc_gain` field "
-                f"to 0 and adding an exponential filter of (1, {value}). The `high_pass` field will be deprecated in QUA 2.0.",
+                f"to 0 and adding an exponential filter of (1, {value}). The `high_pass` field will be deprecated in QUA 2.0",
                 DeprecationWarning,
             )
 

@@ -20,6 +20,13 @@ class QmmException(QmQuaException):
     pass
 
 
+class InvalidCredentialsError(QmmException):
+    """Raised when the TLS/mTLS credentials passed to ``QuantumMachinesManager`` are invalid,
+    e.g. a client certificate without its matching key, or an unreadable/malformed PEM file."""
+
+    pass
+
+
 class OctaveConfigDeprecationException(QmmException):
     def __init__(self) -> None:
         super().__init__(

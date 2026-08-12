@@ -40,7 +40,7 @@ class Element(Generic[ElementInputGRPCType]):
             raise TypeError("freq must be a float")
 
         freq = float(freq)
-        logger.debug(f"Setting element '{self._name}' intermediate frequency to '{freq}'.")
+        logger.debug(f"Setting element '{self._name}' intermediate frequency to '{freq}'")
         self._frontend.set_intermediate_frequency(self._id, self._name, freq)
         self._config.intermediateFrequencyDouble = float(freq) if self._set_frequency_as_double else 0.0
         self._config.intermediateFrequency.value = abs(int(freq))
@@ -86,7 +86,7 @@ class Element(Generic[ElementInputGRPCType]):
         self._config.digitalInputs[digital_input].buffer = buffer
 
     def set_input_dc_offset(self, output: str, offset: float) -> None:
-        logger.debug(f"Setting DC offset of output '{output}' on element '{self._name}' to '{offset}'.")
+        logger.debug(f"Setting DC offset of output '{output}' on element '{self._name}' to '{offset}'")
         if not isinstance(output, str):
             raise TypeError("output must be a string")
         if output not in self._config.outputs:

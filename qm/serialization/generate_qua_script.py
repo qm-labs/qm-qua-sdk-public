@@ -34,11 +34,21 @@ logger = logging.getLogger(__name__)
 
 
 def standardize_program_for_comparison(prog: QuaProgram) -> QuaProgram:
-    """There are things in the PB model that if they are different, the programs behaves exactly the same.
-    These 3 things are
-    1. the value of the loc field, that tells where the command was defined
-    2. the names of the variables, as long as the commands are the same.
-    3. the order of the variables in the result analysis
+    """Returns a normalized copy of a program for structural equality comparison.
+
+    Some differences between two ``QuaProgram`` protobuf messages do not affect runtime
+    behavior. This function returns a copy with those differences removed, so that two
+    programs that behave identically compare as equal:
+
+    1. ``loc`` fields (the source location where each command was defined) are stripped.
+    2. Variable and stream names are canonicalized, as long as the commands are the same.
+    3. The result-analysis model list is sorted into a deterministic order.
+
+    Args:
+        prog: The program to normalize. It is not modified in place.
+
+    Returns:
+        A normalized copy of ``prog``.
     """
     prog_copy = QuaProgram()
     prog_copy.CopyFrom(prog)
@@ -60,12 +70,50 @@ def standardize_program_for_comparison(prog: QuaProgram) -> QuaProgram:
 
 
 def assert_programs_are_equal(prog1: QuaProgram, prog2: QuaProgram) -> None:
+    """Asserts that two QUA programs are structurally equivalent.
+
+    Both programs are first normalized with ``standardize_program_for_comparison``, so that
+    differences that do not affect runtime behavior (source locations, variable and stream
+    names, result-analysis ordering) are ignored.
+
+    Args:
+        prog1: The first program to compare.
+        prog2: The second program to compare.
+
+    Raises:
+        AssertionError: If the two programs are not structurally equivalent.
+    """
     prog1 = standardize_program_for_comparison(prog1)
     prog2 = standardize_program_for_comparison(prog2)
     assert MessageToDict(prog1) == MessageToDict(prog2)
 
 
 def generate_qua_script(prog: Program, config: Optional[FullQuaConfig] = None) -> str:
+    """Serializes a QUA program into a runnable QUA Python script.
+
+    The returned string is standalone Python source that reconstructs the given program,
+    useful for debugging, sharing, or archiving a program.
+
+    Note:
+        This function must be called outside of a ``program()`` scope.
+
+    Note:
+        In some cases the serialization may be incomplete. When that happens, the generated
+        script silently contains a ``SERIALIZATION WAS NOT COMPLETE`` comment block with the
+        raw protobuf representation of the program. This indicates a problem in the
+        serialization itself and should be reported to Quantum Machines.
+
+    Args:
+        prog: The QUA ``program()`` object to serialize.
+        config: A QUA configuration to embed in the generated script. When omitted, the
+            script is generated without a configuration.
+
+    Returns:
+        The generated QUA Python script as a string.
+
+    Raises:
+        RuntimeError: If called inside a QUA program scope, or if the given config is invalid.
+    """
     if prog.is_in_scope():
         raise RuntimeError("Can not generate script inside the qua program scope")
 

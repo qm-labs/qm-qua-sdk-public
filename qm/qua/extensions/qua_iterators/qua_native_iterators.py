@@ -5,6 +5,7 @@ This module was renamed to
 backward-compatible shim and will be removed in a future release. Import from
 the new module instead.
 """
+
 from qm.utils.deprecation_utils import throw_warning, deprecation_message
 from qm.qua.extensions.qua_iterators.qua_python_iterators import (  # noqa: F401
     NativeIterable,

@@ -37,7 +37,7 @@ class QuaProduct:
                     ),
                 ]
             ):
-                play("x90" * amp(args.drive.amp), args.element)
+                play("x90", args.element, amplitude_scale=args.drive.amp)
                 wait(args.drive.tau)
         ```
     """

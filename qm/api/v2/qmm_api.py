@@ -33,6 +33,15 @@ FemTypes = Literal["LF", "MW"]
 FEM_TYPES_MAPPING: Dict[int, FemTypes] = {1: "LF", 2: "MW"}
 
 
+@dataclass(frozen=True)
+class ControllerMetrics:
+    cpu_utilization_percent: float
+    memory_available_gb: float
+    qop_cpu_percent: float
+    qop_memory_percent: float
+    disk_available_gb: float
+
+
 @dataclass
 class ControllerBase:
     name: str
@@ -51,7 +60,7 @@ class Controller(ControllerBase):
         if self._temperature is None:
             logger.warning(
                 "Temperature is not available for this controller, "
-                "Either because it uses an old gateway or its state is not known."
+                "Either because it uses an old gateway or its state is not known"
             )
         return self._temperature
 
@@ -62,9 +71,11 @@ class Controller(ControllerBase):
 
 @dataclass
 class ControllerOPX1000(ControllerBase):
+    _caps: ServerCapabilities
     hostname: str
     fems: Dict[int, FemTypes]
     _temperatures: Optional[Dict[str, float]]
+    _metrics: Optional[ControllerMetrics]
 
     @property
     def controller_type(self) -> ControllerTypes:
@@ -74,9 +85,20 @@ class ControllerOPX1000(ControllerBase):
     def temperatures(self) -> Optional[Mapping[str, float]]:
         if self._temperatures is None:
             logger.warning(
-                f"Temperatures are not supported in this QOP {QopCaps.device_temperatures.from_qop_version} version"
+                f"Temperatures are not supported in this QOP version. Supported from {QopCaps.device_temperatures.from_qop_version}."
             )
         return self._temperatures
+
+    @property
+    def metrics(self) -> Optional[ControllerMetrics]:
+        if self._metrics is None:
+            if not self._caps.supports(QopCaps.device_metrics):
+                logger.warning(
+                    f"Metrics are not supported in this QOP version. Supported from {QopCaps.device_metrics.from_qop_version}."
+                )
+            else:
+                logger.warning("Metrics are not available for this controller.")
+        return self._metrics
 
 
 class QmmApi(BaseApiV2[QmmServiceStub]):
@@ -143,7 +165,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
     def open_qm(self, config: inc_qua_config_pb2.QuaConfig, close_other_machines: Optional[bool] = None) -> QmApi:
         if close_other_machines is None:
             warnings.warn(
-                "close_other_machines is not set, as from 2.0.0 default will be False, now setting to True. Please set it explicitly to remove this message and keep the wanted behavior in future versions.",
+                "close_other_machines is not set, as from 2.0.0 default will be False, now setting to True. Please set it explicitly to remove this message and keep the wanted behavior in future versions",
                 DeprecationWarning,
             )
             close_other_machines = True
@@ -185,9 +207,9 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         response: qmm_api_pb2.HealthCheckResponse.HealthCheckResponseSuccess = self._run(
             self._stub.HealthCheck, qmm_api_pb2.HealthCheckRequest(), timeout=self._timeout
         )
-        msg = "Cluster healthcheck completed successfully."
+        msg = "Cluster healthcheck completed successfully"
         if response.details:
-            msg += " Details:"
+            msg += ". Details:"
             for k, v in response.details.items():
                 msg += f"\n  {k}: {v}"
         logger.info(msg)
@@ -210,6 +232,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         for name, value in response.control_devices.items():
             if value.controller_type == 1:
                 to_return[name] = ControllerOPX1000(
+                    _caps=self._caps,
                     name=name,
                     hostname=value.hostname,
                     fems={
@@ -217,9 +240,22 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
                         for i, f in value.fems.items()
                         if f.type > 0
                     },
-                    _temperatures=proto_map_to_dict(value.temperatures)
-                    if self._caps.supports(QopCaps.device_temperatures)
-                    else None,
+                    _temperatures=(
+                        proto_map_to_dict(value.temperatures)
+                        if self._caps.supports(QopCaps.device_temperatures)
+                        else None
+                    ),
+                    _metrics=(
+                        ControllerMetrics(
+                            cpu_utilization_percent=value.metric.cpu_utilization,
+                            memory_available_gb=value.metric.memory_available,
+                            qop_cpu_percent=value.metric.qop_cpu_utilization,
+                            qop_memory_percent=value.metric.qop_memory,
+                            disk_available_gb=value.metric.disk_available,
+                        )
+                        if value.HasField("metric")
+                        else None
+                    ),
                 )
             else:
                 raise NotImplementedError(f"Controller type {value.controller_type} is not supported.")
@@ -252,7 +288,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
             simulate=simulate,
             controller_connections=controller_connections,
         )
-        logger.info("Simulating program.")
+        logger.info("Simulating program")
 
         with handle_simulation_error():
             response: qmm_api_pb2.SimulationSuccess = self._run(self._stub.Simulate, request, timeout=self._timeout)

@@ -268,10 +268,10 @@ def _get_synth_attenuation(lo_freq: float) -> int:
             18.4: 8.0,
         }
         if 18e9 < lo_freq <= 18.4e9:
-            logger.warning("LO frequency is above 18 GHz, this frequency is supported but performance is degraded.")
+            logger.warning("LO frequency is above 18 GHz, this frequency is supported but performance is degraded")
     else:
         if 1.6e9 <= lo_freq < 2e9:
-            logger.warning("LO frequency is below 2 GHz, this frequency is supported but performance is degraded.")
+            logger.warning("LO frequency is below 2 GHz, this frequency is supported but performance is degraded")
         attn_table = {
             1.6: 32.0,
             1.8: 32.0,
@@ -546,7 +546,7 @@ class RFInput:
         ignore_shared_errors: bool = False,
         check_conflict: bool = False,
     ) -> None:
-        (octave_lo_source, synth_index) = convert_rf_in_enum_to_octave_lo_input(
+        octave_lo_source, synth_index = convert_rf_in_enum_to_octave_lo_input(
             name,
             self._context.connectivity.synth_by_rf_out(),
             self._context.connectivity.synth_by_lo_source(),
@@ -857,9 +857,9 @@ class RFOutput:
         }
 
         if 18e9 < frequency <= 18.4e9:
-            logger.warning("LO frequency is above 18 GHz, this frequency is supported but performance is degraded.")
+            logger.warning("LO frequency is above 18 GHz, this frequency is supported but performance is degraded")
         if 1.6e9 <= frequency < 2e9:
-            logger.warning("LO frequency is below 2 GHz, this frequency is supported but performance is degraded.")
+            logger.warning("LO frequency is below 2 GHz, this frequency is supported but performance is degraded")
         total_attn_0db = _interp_freq_to_attenuation(frequency, attn_table)
 
         # The gain is given in dB, hence we need to multiply by 2 (to match the units)

@@ -60,6 +60,7 @@ class QopCaps:
     device_temperatures = Capability("qm.device_temperatures", "3.6")
     port_voltage_limits = Capability("qm.port_voltage_limits", "3.7")
     lo_mode = Capability("qm.lo_mode", "3.7")
+    device_metrics = Capability("qm.device_metrics", "3.8")
 
     @staticmethod
     def get_all() -> Set[Capability]:
@@ -105,7 +106,7 @@ class ServerCapabilities:
         if self.supports(QopCaps.fast_frame_rotation_deprecated) and QopCaps.fast_frame_rotation in capabilities:
             warnings.warn(
                 "The fast_frame_rotation is deprecated as it is no longer faster than frame_rotation_2pi "
-                "(and in fact, it is less efficient). It will be removed in future versions.",
+                "(and in fact, it is less efficient). It will be removed in future versions",
                 DeprecationWarning,
             )
 

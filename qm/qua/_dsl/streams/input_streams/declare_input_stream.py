@@ -60,14 +60,17 @@ def _declare_any_input_stream(
     dtype: Union[type[NumberT], type[StructT]],
     *,
     size: Optional[int] = None,
+    value: Optional[OneOrMore[Union[int, bool, float]]] = None,
 ) -> Union[QuaExternalIncomingStream[StructT], QuaVariableInputStream[NumberT], QuaArrayInputStream[NumberT]]:
     if source == "client":
         _validate_number_type(dtype, "input")
-        return _declare_client_input_stream(cast(type[NumberT], dtype), str(stream_id), size=size)
+        return _declare_client_input_stream(cast(type[NumberT], dtype), str(stream_id), value=value, size=size)
 
     elif source == "opnic":
         if size is not None and size != 1:
             raise QmQuaException("Opnic input streams currently do not support the 'size' parameter.")
+        if value is not None:
+            raise QmQuaException("Opnic input streams currently do not support the 'value' parameter.")
         if not isinstance(stream_id, int):
             raise QmQuaException("stream_id must be an integer when declaring an opnic stream")
         return cast(
@@ -82,7 +85,11 @@ def _declare_any_input_stream(
 
 @overload
 def declare_input_stream(
-    source: Literal["client"], stream_id: Union[int, str], dtype: type[NumberT]
+    source: Literal["client"],
+    stream_id: Union[int, str],
+    dtype: type[NumberT],
+    *,
+    value: Union[int, bool, float] = ...,
 ) -> QuaVariableInputStream[NumberT]:
     """
     Declare a client input stream that carries scalar values.
@@ -96,16 +103,21 @@ def declare_input_stream(
         stream_id (Union[int, str]): A unique identifier for the stream.
         dtype (type[NumberT]): The scalar type carried by the stream, such as ``int``, ``fixed``,
             ``float``, or ``bool``.
+        value (Union[int, bool, float]): Optional initial value.
     """
     ...
 
 
 @overload
 def declare_input_stream(
-    source: Literal["client"], stream_id: Union[int, str], dtype: type[NumberT], *, size: int
+    source: Literal["client"],
+    stream_id: Union[int, str],
+    dtype: type[NumberT],
+    *,
+    size: int,
 ) -> QuaArrayInputStream[NumberT]:
     """
-    Declare a client input stream that carries arrays.
+    Declare a client input stream that carries arrays of a given length, uninitialized.
 
     The client pushes arrays into the stream with [qm.jobs.base_job.QmBaseJob.push_to_input_stream][],
     and the QUA program consumes them with [qm.qua.receive_from_stream][] or
@@ -117,6 +129,32 @@ def declare_input_stream(
         dtype (type[NumberT]): The element type carried by the stream, such as ``int``, ``fixed``,
             ``float``, or ``bool``.
         size (int): The array length. Any positive integer, including ``1``, declares array data.
+    """
+    ...
+
+
+@overload
+def declare_input_stream(
+    source: Literal["client"],
+    stream_id: Union[int, str],
+    dtype: type[NumberT],
+    *,
+    value: Sequence[Union[int, bool, float]],
+) -> QuaArrayInputStream[NumberT]:
+    """
+    Declare a client input stream that carries arrays, with an initial value (length inferred).
+
+    The client pushes arrays into the stream with [qm.jobs.base_job.QmBaseJob.push_to_input_stream][],
+    and the QUA program consumes them with [qm.qua.receive_from_stream][] or
+    [qm.qua.advance_input_stream][].
+
+    Args:
+        source (Literal["client"]): The endpoint type. Must be ``"client"``.
+        stream_id (Union[int, str]): A unique identifier for the stream.
+        dtype (type[NumberT]): The element type carried by the stream, such as ``int``, ``fixed``,
+            ``float``, or ``bool``.
+        value (Sequence[Union[int, bool, float]]): Initial values; the array length is inferred from
+            its length. Cannot be combined with ``size``.
     """
     ...
 
@@ -147,32 +185,29 @@ def declare_input_stream(
 
 
 @overload
-def declare_input_stream(t: type[NumberT], name: str) -> QuaVariableInputStream[NumberT]:
-    ...
+def declare_input_stream(t: type[NumberT], name: str) -> QuaVariableInputStream[NumberT]: ...
 
 
 @overload
-def declare_input_stream(t: type[NumberT], name: str, value: Literal[None], size: int) -> QuaArrayInputStream[NumberT]:
-    ...
+def declare_input_stream(
+    t: type[NumberT], name: str, value: Literal[None], size: int
+) -> QuaArrayInputStream[NumberT]: ...
 
 
 @overload
-def declare_input_stream(t: type[NumberT], name: str, *, size: int) -> QuaArrayInputStream[NumberT]:
-    ...
+def declare_input_stream(t: type[NumberT], name: str, *, size: int) -> QuaArrayInputStream[NumberT]: ...
 
 
 @overload
 def declare_input_stream(
     t: type[NumberT], name: str, value: Union[int, bool, float]
-) -> QuaVariableInputStream[NumberT]:
-    ...
+) -> QuaVariableInputStream[NumberT]: ...
 
 
 @overload
 def declare_input_stream(
     t: type[NumberT], name: str, value: Sequence[Union[int, bool, float]]
-) -> QuaArrayInputStream[NumberT]:
-    ...
+) -> QuaArrayInputStream[NumberT]: ...
 
 
 def declare_input_stream(
@@ -223,13 +258,15 @@ def declare_input_stream(
         ```
 
     """
-    if isinstance(args[0], str):
+    is_new_form = isinstance(args[0], str) if args else "source" in kwargs
+
+    if is_new_form:
         return _declare_any_input_stream(*args, **kwargs)
     else:
         warnings.warn(
             "The signature `declare_input_stream(t, name , ...)`, which implicitly treats the "
             "stream as a Client stream, is deprecated and will be removed in a future release. "
-            'Please use `declare_input_stream("client", stream_id=name, dtype=t, ...) instead.',
+            'Please use `declare_input_stream("client", stream_id=name, dtype=t, ...) instead',
             DeprecationWarning,
             stacklevel=2,
         )

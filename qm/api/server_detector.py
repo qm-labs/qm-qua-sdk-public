@@ -6,6 +6,7 @@ from typing import Set, Dict, List, Tuple, Optional
 from qm.utils import SERVICE_HEADER_NAME
 from qm.api.frontend_api import FrontendApi
 from qm.api.models.info import QuaMachineInfo
+from qm.api.models.channel import TlsFilePaths
 from qm.api.models.debug_data import DebugData
 from qm.exceptions import QmServerDetectionError
 from qm.api.info_service_api import InfoServiceApi
@@ -25,6 +26,7 @@ def detect_server(
     port_from_user_config: Optional[int],
     user_provided_port: Optional[int],
     add_debug_data: bool,
+    tls_paths: Optional[TlsFilePaths] = None,
     timeout: Optional[float] = None,
     max_message_size: Optional[int] = None,
     extra_headers: Optional[Dict[str, str]] = None,
@@ -48,6 +50,7 @@ def detect_server(
             port=port,
             user_token=user_token,
             ssl_context=ssl_context,
+            tls_paths=tls_paths,
             max_message_size=max_message_size if max_message_size else MAX_MESSAGE_SIZE,
             headers=headers,
             timeout=timeout if timeout else BASE_TIMEOUT,
@@ -90,7 +93,7 @@ def detect_server(
         f"Tried connecting to {targets}."
     )
     errors_msgs = "\n".join([f"{dst}: {error}" for dst, error in errors])
-    logger.error(f"{message}\nErrors:\n{errors_msgs}.")
+    logger.error(f"{message}\nErrors:\n{errors_msgs}")
     raise QmServerDetectionError(message)
 
 

@@ -198,7 +198,7 @@ class StreamsManager(Mapping[str, Optional[AnySingleStreamFetcher]]):
                 self._wait_until_func("Done", timeout if timeout else VERY_LONG_TIME)
                 return True
             except JobFailedError:
-                logger.warning("Job failed or canceled, data processing has stopped, not all data is available.")
+                logger.warning("Job failed or canceled, data processing has stopped, not all data is available")
                 return False
         else:
 
@@ -211,7 +211,7 @@ class StreamsManager(Mapping[str, Optional[AnySingleStreamFetcher]]):
             def on_complete() -> bool:
                 if all(fetcher.get_job_state().done for fetcher in self._single_stream_fetchers.values()):
                     return True
-                logger.warning("Job failed or canceled, data processing has stopped, not all data is available.")
+                logger.warning("Job failed or canceled, data processing has stopped, not all data is available")
                 return False
 
             return run_until_with_timeout(

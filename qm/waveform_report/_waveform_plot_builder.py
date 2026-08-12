@@ -274,6 +274,11 @@ class _WaveformPlotBuilder:
             k: "x" + k.removeprefix("xaxis") if k.removeprefix("xaxis").isnumeric() else "" for k in all_x_axis_names
         }
         bottommost_x_axis = all_x_axis_names[-1]
+        shared_args = {k + ".matches": all_xaxis_names_short[bottommost_x_axis] for k in all_x_axis_names}
+        # `active=0` only highlights the "Shared" button; it does not apply its relayout args. Apply
+        # them to the layout up front so the axes actually zoom together on the initial render,
+        # rather than requiring the user to toggle "Distinct" then "Shared".
+        self._figure.update_layout(shared_args)
         self._figure.update_layout(
             updatemenus=[
                 dict(
@@ -283,9 +288,7 @@ class _WaveformPlotBuilder:
                     buttons=list(
                         [
                             dict(
-                                args=[
-                                    {k + ".matches": all_xaxis_names_short[bottommost_x_axis] for k in all_x_axis_names}
-                                ],
+                                args=[shared_args],
                                 label="Shared",
                                 method="relayout",
                             ),

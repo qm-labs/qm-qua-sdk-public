@@ -136,7 +136,7 @@ class SimulationApi(BaseApi[FrontendStub]):
             logger.log(lvl, msg)
 
         if not response.success:
-            logger.error("Job " + job_id + " failed. Failed to execute program.")
+            logger.error("Job " + job_id + " failed. Failed to execute program")
             for error in response.simulated.errors:
                 logger.error(f"Simulation error: {error}")
             raise FailedToExecuteJobException(job_id)

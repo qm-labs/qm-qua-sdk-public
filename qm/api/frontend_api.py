@@ -201,8 +201,8 @@ class FrontendApi(BaseApi[FrontendStub]):
 
         job_id = response.jobId
         if not response.ok:
-            logger.error(f"Job {job_id} failed. Failed to execute program.")
-            raise FailedToAddJobToQueueException(f"Job {job_id} failed. Failed to execute program.")
+            logger.error(f"Job {job_id} failed. Failed to execute program")
+            raise FailedToAddJobToQueueException(f"Job {job_id} failed. Failed to execute program")
 
         return job_id
 
@@ -229,8 +229,8 @@ class FrontendApi(BaseApi[FrontendStub]):
             logger.error(err.message)
 
         if not response.ok:
-            logger.error(f"Job {job_id} failed. Failed to execute program.")
-            raise FailedToAddJobToQueueException(f"Job {job_id} failed. Failed to execute program.")
+            logger.error(f"Job {job_id} failed. Failed to execute program")
+            raise FailedToAddJobToQueueException(f"Job {job_id} failed. Failed to execute program")
 
         return job_id
 

@@ -58,7 +58,7 @@ class LoopbackInterface(
         cls, connection: SupportedConnectionTypes, fem_number_in_simulator: int
     ) -> frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.Loopback.Connections:
         if not connection:
-            logger.warning("No loopback was defined, treating as no loopback.")
+            logger.warning("No loopback was defined, treating as no loopback")
         if not isinstance(connection, tuple):
             raise Exception("each connection must be of type tuple")
         if len(connection) == 6:

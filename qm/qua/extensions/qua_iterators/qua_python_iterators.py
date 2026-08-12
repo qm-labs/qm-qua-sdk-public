@@ -73,8 +73,7 @@ class PythonIterableRange(PythonIterableBase[Any]):
     @overload
     def __init__(
         self, name: str, start: Number, stop: Number, step: Number = 1, *, metadata: Optional[MetaDataType] = None
-    ):
-        ...
+    ): ...
 
     def __init__(self, name: str, *args: Number, metadata: Optional[MetaDataType] = None):  # type: ignore[misc]
         super().__init__(name, metadata)

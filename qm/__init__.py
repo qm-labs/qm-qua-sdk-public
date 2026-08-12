@@ -16,7 +16,7 @@ from qm.api.models.capabilities import QopCaps  # noqa: E402
 from qm.type_hinting import DictQuaConfig, FullQuaConfig  # noqa: E402
 from qm.api.models.compiler import CompilerOptionArguments  # noqa: E402
 from qm.quantum_machines_manager import QuantumMachinesManager  # noqa: E402
-from qm.serialization.generate_qua_script import generate_qua_script  # noqa: E402
+from qm.serialization.generate_qua_script import generate_qua_script, assert_programs_are_equal  # noqa: E402
 from qm.simulate import (  # noqa: E402
     InterOpxAddress,
     InterOpxChannel,
@@ -53,6 +53,7 @@ __all__ = [
     "Program",
     "CompilerOptionArguments",
     "generate_qua_script",
+    "assert_programs_are_equal",
     "config_loggers",
     "UserConfig",
     "SimulationConfig",

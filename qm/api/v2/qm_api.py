@@ -1,4 +1,5 @@
 import logging
+import warnings
 import contextlib
 from typing import (
     List,
@@ -20,7 +21,6 @@ from typing import (
 )
 
 from qm.type_hinting import Number
-from qm.utils import LOG_LEVEL_MAP
 from qm.octave import QmOctaveConfig
 from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.program import Program, load_config
@@ -28,6 +28,7 @@ from qm.elements_db import init_octave_elements
 from qm.octave.octave_manager import OctaveManager
 from qm.simulate.interface import SimulationConfig
 from qm.grpc.qm.grpc.v2 import qm_api_pb2, qmm_api_pb2
+from qm.utils import LOG_LEVEL_MAP, deprecation_message
 from qm.api.models.server_details import ConnectionDetails
 from qm.utils.config_utils import get_controller_pb_config
 from qm.utils.protobuf_utils import proto_repeated_to_list
@@ -37,6 +38,8 @@ from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.elements.up_converted_input import UpconvertedInputNewApi
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.program._dict_to_pb_converter import DictToQuaConfigConverter
+from qm.type_hinting.execution_overrides import ExecutionOverridesType
+from qm.program._execution_overrides_schema import ExecutionOverridesSchema
 from qm.program._fill_defaults_in_config_v1 import fill_defaults_in_config_v1
 from qm.octave.qm_octave import QmOctaveForNewApi, create_dc_offset_octave_update
 from qm.grpc.qm.pb import compiler_pb2, frontend_pb2, qm_manager_pb2, inc_qua_config_pb2
@@ -50,6 +53,7 @@ from qm.octave.octave_mixer_calibration import (
     NewApiOctaveMixerCalibration,
 )
 from qm.exceptions import (
+    QmQuaException,
     QopResponseError,
     CompilationException,
     JobNotFoundException,
@@ -293,8 +297,10 @@ class QmApi(BaseApiV2[QmServiceStub]):
         _log_messages(response.messages)
         return response.program_id
 
-    def _add_compiled(self, program_id: str) -> JobApi:
+    def _add_compiled(self, program_id: str, overrides: Optional[ExecutionOverridesType]) -> JobApi:
         request = qm_api_pb2.QmServiceAddCompiledToQueueRequest(quantum_machine_id=self._id, program_id=program_id)
+        if overrides:
+            request.overrides.CopyFrom(ExecutionOverridesSchema().load(overrides))
         response: qm_api_pb2.AddCompiledToQueueResponse.AddCompiledToQueueResponseSuccess = self._run(
             self._stub.AddCompiledToQueue, request, timeout=self._timeout
         )
@@ -313,7 +319,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
         return self._get_job(response.job_id)
 
     @overload
-    def add_to_queue(self, program: str) -> JobApi:
+    def add_to_queue(self, program: str, *, overrides: Optional[ExecutionOverridesType] = None) -> JobApi:
         pass
 
     @overload
@@ -332,6 +338,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
         *,
         config: Optional[Union[FullQuaConfig, LogicalQuaConfig]] = None,
         compiler_options: Optional[CompilerOptionArguments] = None,
+        overrides: Optional[ExecutionOverridesType] = None,
     ) -> JobApi:
         """
         Adds a QmJob to the queue.
@@ -343,19 +350,35 @@ class QmApi(BaseApiV2[QmServiceStub]):
                 The configuration used with the program. The logical config is required if it was not supplied to the `QuantumMachine`.
                 A full configuration (containing both logical and controller configs), can be used to override the default `QuantumMachine` settings.
             compiler_options: Optional arguments for compilation
+            overrides: Waveforms to run the compiled program with, overriding the
+                values defined in the program. Only valid when `program` is a
+                compiled program id.
 
         Returns:
             A job object
         """
-        logger.info("Adding program to queue.")
+        logger.info("Adding program to queue")
 
         if isinstance(program, str):
             if compiler_options:
                 raise ValueError("Cannot add compiler options to a compiled program.")
             if config is not None:
                 raise ValueError("Cannot add a config to a compiled program.")
-            job = self._add_compiled(program)
+            if overrides is not None:
+                warnings.warn(
+                    deprecation_message(
+                        method="The `overrides` argument of `add_to_queue`",
+                        deprecated_in="1.4.0",
+                        removed_in="2.0.0",
+                        details="The API for passing overrides is expected to change.",
+                    ),
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            job = self._add_compiled(program, overrides=overrides)
         else:
+            if overrides is not None:
+                raise QmQuaException("Cannot add overrides to a program, only to a compiled program.")
             self._caps.validate(program.used_capabilities)
             pb_config = self._convert_config_param_to_pb(config, self.add_to_queue.__name__)
 
@@ -460,7 +483,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
         """
         self._caps.validate(program.used_capabilities)
 
-        logger.info("Simulating program.")
+        logger.info("Simulating program")
         request = self._create_simulate_request(
             program, simulate, compiler_options, config=config, strict=strict, flags=flags
         )

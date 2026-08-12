@@ -87,7 +87,7 @@ class SingleStreamSingleResultFetcher(BaseSingleStreamFetcher[Optional[NumpyArra
         """
         # We assume here that we have at most a single value in array (or nothing)
         if len(fetched_data) == 0:
-            logger.warning("Nothing to fetch: no results were found. Please wait until the results are ready.")
+            logger.warning("Nothing to fetch: no results were found. Please wait until the results are ready")
             return None
         if flat_struct:
             data = fetched_data

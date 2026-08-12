@@ -14,10 +14,10 @@ def deprecation_message(method: str, deprecated_in: str, removed_in: str, detail
     Generates a deprecation message for deprecation a function.
 
     This call:
-        warnings.warn(deprecation_message("foo", "1.0.0", "1.1.0", "reason), category=DeprecationWarning)
+        warnings.warn(deprecation_message("foo", "1.0.0", "1.1.0", "reason"), category=DeprecationWarning)
 
     Will result in:
-        "foo is deprecated since "1.0.0" and will be removed in "1.1.1. reason"
+        'foo is deprecated since "1.0.0" and will be removed in "1.1.0". reason'
 
     Args:
         method: The name of the deprecated method.
@@ -33,6 +33,8 @@ def deprecation_message(method: str, deprecated_in: str, removed_in: str, detail
     to_return = f'{method} is deprecated since "{deprecated_in}" and will be removed in "{removed_in}".'
     if details:
         to_return += f" {details}"
+    if to_return.endswith(".") and not to_return.endswith("..."):
+        to_return = to_return[:-1]
     return to_return
 
 

@@ -47,6 +47,6 @@ class PulseConverter(BaseDictToPbConverter[PulseConfigType, inc_qua_config_pb2.Q
                 inc_qua_config_pb2.QuaConfig.PulseDec.Operation.Name(operation).lower(),
             ),
         }
-        if isinstance(output_data.digitalMarker, str):
-            temp_dict["digital_marker"] = output_data.digitalMarker
+        if output_data.HasField("digitalMarker"):
+            temp_dict["digital_marker"] = output_data.digitalMarker.value
         return temp_dict

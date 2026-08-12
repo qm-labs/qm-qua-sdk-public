@@ -55,7 +55,7 @@ def static_set_mixer_correction(
         logger.warning(
             "At least one of the correction values are out of range. "
             f"values should be between -2 and 2 - 2 ** (-16), got {float_values}. "
-            f"Not setting the correction matrix."
+            f"Not setting the correction matrix"
         )
         return
     correction_matrix = general_messages_pb2.Matrix(
@@ -162,7 +162,7 @@ class MixInputs(ElementInput[inc_qua_config_pb2.QuaConfig.MixInputs]):
 
     def _set_config_lo_frequency(self, value: float) -> None:
         freq = float(value)
-        logger.debug(f"Setting element '{self._name}' LO frequency to '{freq}'.")
+        logger.debug(f"Setting element '{self._name}' LO frequency to '{freq}'")
         self._config.loFrequency = int(freq)
         self._config.loFrequencyDouble = 0.0
         if self._set_frequency_as_double:

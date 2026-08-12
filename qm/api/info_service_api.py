@@ -21,8 +21,8 @@ class InfoServiceApi(BaseApi[InfoServiceStub]):
                 name=response.implementation.name,
                 version=response.implementation.version,
                 url=response.implementation.url,
-                proto_version=response.implementation.proto_version
-                if response.implementation.HasField("proto_version")
-                else None,
+                proto_version=(
+                    response.implementation.proto_version if response.implementation.HasField("proto_version") else None
+                ),
             ),
         )

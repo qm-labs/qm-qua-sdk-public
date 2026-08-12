@@ -1,7 +1,10 @@
-from typing import Tuple, Optional, overload
+import warnings
+from collections.abc import Sequence
+from typing import Tuple, Union, Optional, overload
 
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
+from qm.utils import deprecation_message
 from qm.qua._dsl._type_hints import MessageExpressionType
 from qm.qua._expressions import Scalar, to_scalar_pb_expression
 
@@ -11,6 +14,40 @@ AmpValuesType = Tuple[
     Optional[MessageExpressionType],
     Optional[MessageExpressionType],
 ]
+AmplitudeScaleTypes = Optional[Union[Scalar[float], tuple[Scalar[float], Scalar[float], Scalar[float], Scalar[float]]]]
+
+MeasurePulseType = Union[str, Tuple[str, AmpValuesType]]
+
+
+def standardize_pulse_and_amplitude(
+    pulse: MeasurePulseType,
+    amplitude: AmplitudeScaleTypes,
+) -> Tuple[str, Optional[AmpValuesType]]:
+    """
+    Function that helps us deprecate old amplitude API.
+    """
+    amp_to_return = None
+    if isinstance(pulse, tuple):
+        pulse, amp_to_return = pulse
+        if amplitude is not None:
+            raise QmQuaException(
+                "Amplitude ambiguity - please use only the `amplitude_scale` keyword argument and not the `amp` function"
+            )
+
+    if amplitude is not None:
+        if isinstance(amplitude, Sequence):
+            if not len(amplitude) == 4:
+                raise QmQuaException("amp can be one value or a matrix of 4.")
+            amp_inst = _PulseAmp(
+                to_scalar_pb_expression(amplitude[0]),
+                to_scalar_pb_expression(amplitude[1]),
+                to_scalar_pb_expression(amplitude[2]),
+                to_scalar_pb_expression(amplitude[3]),
+            )
+        else:
+            amp_inst = _PulseAmp(to_scalar_pb_expression(amplitude), None, None, None)
+        amp_to_return = amp_inst.value()
+    return pulse, amp_to_return
 
 
 # Although _PulseAmp is a protected class, it is used by QUAM.
@@ -50,13 +87,11 @@ class _PulseAmp:
 
 
 @overload
-def amp(v1: Scalar[float]) -> _PulseAmp:
-    ...
+def amp(v1: Scalar[float]) -> _PulseAmp: ...
 
 
 @overload
-def amp(v1: Scalar[float], v2: Scalar[float], v3: Scalar[float], v4: Scalar[float]) -> _PulseAmp:
-    ...
+def amp(v1: Scalar[float], v2: Scalar[float], v3: Scalar[float], v4: Scalar[float]) -> _PulseAmp: ...
 
 
 def amp(
@@ -65,7 +100,9 @@ def amp(
     v3: Optional[Scalar[float]] = None,
     v4: Optional[Scalar[float]] = None,
 ) -> _PulseAmp:
-    """To be used only within a [play][qm.qua.play] or [measure][qm.qua.measure] command, as a multiplication to
+    """
+    **Deprecated - please use the `amplitude_scale` keyword argument in `play` and `measure`**.
+    To be used only within a [play][qm.qua.play] or [measure][qm.qua.measure] command, as a multiplication to
     the `operation`.
 
     It is possible to scale the pulse's amplitude dynamically by using the following syntax:
@@ -99,6 +136,11 @@ def amp(
         v4: The forth element in the amplitude matrix which multiples
             the `pulse` associated with the `operation`.
     """
+    warnings.warn(
+        deprecation_message("amp", "1.3.0", "2.0.0", "Use the `amplitude_scale` argument in play and measure instead"),
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     def _cast_number(v: Optional[Scalar[float]]) -> Optional[inc_qua_pb2.QuaProgram.AnyScalarExpression]:
         if v is None:

@@ -141,10 +141,20 @@ class Math:
         return _create_output_expression(Math.pow, float, base, x)
 
     @staticmethod
+    @overload
+    def div(x: Scalar[int], y: Scalar[int]) -> Any: ...
+
+    @staticmethod
+    @overload
+    def div(x: Scalar[float], y: Scalar[float]) -> QuaLibFunctionOutput[float]: ...
+
+    @staticmethod
     def div(x: Scalar[NumberT], y: Scalar[NumberT]) -> QuaLibFunctionOutput[float]:
         r"""Computes the division between two same-type variables $x/y$.
         Takes integer and fixed variables as long as both are of the same type.
-        When both inputs are integer, the return type can be either a fixed point number or an integer, in which case $floor(x/y)$ is outputted.
+        When both inputs are integer, the actual result type (int or fixed) is determined by how the
+        result is used - e.g. the type of the variable it is assigned to. When assigned to an int
+        variable, the result is $floor(x/y)$.
 
         Args:
             x: a QUA int or fixed
@@ -237,7 +247,7 @@ class Math:
         Returns:
             a QUA fixed
         """
-        return _create_output_expression(Math.sqrt, float, x)
+        return _create_output_expression(Math.inv_sqrt, float, x)
 
     @staticmethod
     def inv(x: Scalar[float]) -> QuaLibFunctionOutput[float]:
@@ -550,18 +560,15 @@ class Math:
 
     @staticmethod
     @overload
-    def dot(x: Union[Vector[int], Vector[bool]], y: Union[Vector[int], Vector[bool]]) -> QuaLibFunctionOutput[int]:
-        ...
+    def dot(x: Union[Vector[int], Vector[bool]], y: Union[Vector[int], Vector[bool]]) -> QuaLibFunctionOutput[int]: ...
 
     @staticmethod
     @overload
-    def dot(x: Vector[float], y: VectorOfAnyType) -> QuaLibFunctionOutput[float]:
-        ...
+    def dot(x: Vector[float], y: VectorOfAnyType) -> QuaLibFunctionOutput[float]: ...
 
     @staticmethod
     @overload
-    def dot(x: VectorOfAnyType, y: Vector[float]) -> QuaLibFunctionOutput[float]:
-        ...
+    def dot(x: VectorOfAnyType, y: Vector[float]) -> QuaLibFunctionOutput[float]: ...
 
     @staticmethod
     def dot(x: VectorOfAnyType, y: VectorOfAnyType) -> Union[QuaLibFunctionOutput[float], QuaLibFunctionOutput[int]]:

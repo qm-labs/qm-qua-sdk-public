@@ -36,7 +36,7 @@ class RawInterface(
             raise Exception("each connection must be of type tuple")
         if len(connection) == 4:
             cls._validate_connection_type(
-                connection, [str, int, str, list], "(from_controller, from_fem, from_port, to_samples)"
+                connection, [str, int, int, list], "(from_controller, from_fem, from_port, to_samples)"
             )
             tuple_4 = cast(Tuple[str, int, int, List[float]], connection)
             return frontend_pb2.ExecutionRequest.Simulate.SimulationInterface.RawInterface.Connections(

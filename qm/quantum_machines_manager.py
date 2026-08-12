@@ -4,7 +4,7 @@ import logging
 import warnings
 from pathlib import Path
 from dataclasses import field, dataclass
-from typing import Any, Dict, List, Union, Mapping, Iterable, Optional, TypedDict, Collection
+from typing import Any, Dict, List, Tuple, Union, Mapping, Iterable, Optional, TypedDict, Collection
 
 import marshmallow
 import packaging.version
@@ -18,6 +18,7 @@ from qm.program import Program, load_config
 from qm.type_hinting.general import PathLike
 from qm.api.v2.job_api.job_api import JobData
 from qm.quantum_machine import QuantumMachine
+from qm.api.models.channel import TlsFilePaths
 from qm.api.models.debug_data import DebugData
 from qm.jobs.simulated_job import SimulatedJob
 from qm.logging_utils import set_logging_level
@@ -40,9 +41,10 @@ from qm.api.simulation_api import SimulationApi, create_simulation_request
 from qm.type_hinting.config_types import FullQuaConfig, ControllerQuaConfig
 from qm.octave.octave_manager import OctaveManager, prep_config_for_calibration
 from qm.api.v2.qmm_api import Controller, ControllerBase, QmmApiWithDeprecations
-from qm.exceptions import QmmException, ConfigSchemaError, ConfigValidationException
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params
 from qm.api.models.capabilities import QopCaps, Capability, ServerCapabilities, offline_capabilities
+from qm.simulate.credentials import CredentialOverrides, create_credentials, validate_client_cert_pair
+from qm.exceptions import QmmException, ConfigSchemaError, InvalidCredentialsError, ConfigValidationException
 
 from ._stream_results import StreamsManager
 from .program._dict_to_pb_converter import DictToQuaConfigConverter
@@ -129,6 +131,40 @@ class Devices:
     octaves: Dict[str, OctaveDetails]
 
 
+def _resolve_credentials(
+    credentials: Optional[Union[ssl.SSLContext, CredentialOverrides]],
+) -> Tuple[Optional[ssl.SSLContext], Optional[TlsFilePaths]]:
+    """Normalize ``credentials`` into an SSLContext plus the PEM file paths gRPC needs.
+
+    grpcio cannot consume an ``ssl.SSLContext`` (it requires raw PEM bytes) and Python's
+    SSLContext does not expose the loaded private key / client certificate. To support a
+    custom root CA and mutual TLS (mTLS) we therefore also pass the PEM file paths down to
+    the gRPC channel.
+
+    - ``None`` -> insecure / default connection (no SSLContext, no paths).
+    - ``CredentialOverrides`` -> build an SSLContext (used by the non-gRPC redirection path)
+      and return the CA / client-cert / client-key paths for the gRPC channel.
+    - ``ssl.SSLContext`` -> legacy path: returned as-is with no PEM paths. A custom root CA
+      or client certificate cannot be recovered from an SSLContext, so for mTLS or a custom
+      CA use ``CredentialOverrides`` instead.
+    """
+    if credentials is None:
+        return None, None
+    if isinstance(credentials, CredentialOverrides):
+        validate_client_cert_pair(credentials.client_cert_path, credentials.client_key_path)
+        try:
+            ssl_context = create_credentials(credentials)
+        except (OSError, ssl.SSLError) as e:
+            raise InvalidCredentialsError(f"Failed to load TLS credentials from the provided paths: {e}") from e
+        tls_paths = TlsFilePaths(
+            ca_cert_path=credentials.certificate_path or None,
+            client_cert_path=credentials.client_cert_path or None,
+            client_key_path=credentials.client_key_path or None,
+        )
+        return ssl_context, tls_paths
+    return credentials, None
+
+
 class QuantumMachinesManager:
     def __init__(
         self,
@@ -140,7 +176,7 @@ class QuantumMachinesManager:
         log_level: Union[int, str] = logging.INFO,
         connection_headers: Optional[Dict[str, str]] = None,
         add_debug_data: bool = False,
-        credentials: Optional[ssl.SSLContext] = None,
+        credentials: Optional[Union[ssl.SSLContext, CredentialOverrides]] = None,
         store: Optional[BaseStore] = None,
         file_store_root: Optional[str] = None,
         octave: Optional[QmOctaveConfig] = None,
@@ -168,7 +204,7 @@ class QuantumMachinesManager:
         host = host or self._user_config.manager_host or ""
         octave_calibration_db_path = octave_calibration_db_path or self._user_config.octave_calibration_db_path
         if host is None:
-            message = "Failed to connect to QuantumMachines server. No host given."
+            message = "Failed to connect to QuantumMachines server. No host given"
             logger.error(message)
             raise QmmException(message)
 
@@ -220,7 +256,7 @@ class QuantumMachinesManager:
                 warnings.warn(
                     "QMM was opened with OctaveConfig. Please note that from QOP2.4.0 the octave devices "
                     "are managed by the cluster setting in the QM-app. It is recommended to remove the "
-                    "OctaveConfig from the QMM instantiation.",
+                    "OctaveConfig from the QMM instantiation",
                     category=DeprecationWarning,
                 )
             else:
@@ -266,16 +302,18 @@ class QuantumMachinesManager:
         port: Optional[int],
         timeout: Optional[float],
         add_debug_data: bool,
-        credentials: Optional[ssl.SSLContext],
+        credentials: Optional[Union[ssl.SSLContext, CredentialOverrides]],
         connection_headers: Optional[Dict[str, str]],
         follow_gateway_redirections: bool,
         async_follow_redirects: bool,
         async_trust_env: bool,
     ) -> ServerDetails:
+        ssl_context, tls_paths = _resolve_credentials(credentials)
         server_details = detect_server(
             cluster_name=self._cluster_name,
             user_token=self._user_config.user_token,
-            ssl_context=credentials,
+            ssl_context=ssl_context,
+            tls_paths=tls_paths,
             host=host,
             port_from_user_config=self._user_config.manager_port,
             user_provided_port=port,
@@ -364,7 +402,7 @@ class QuantumMachinesManager:
             if local_proto_version < qop_proto_version:
                 logger.warning(
                     "You are using an outdated version of `qm-qua` which was not tested against the current QOP "
-                    "version. Please consider updating to the latest qm-qua version."
+                    "version. Please consider updating to the latest qm-qua version"
                 )
 
     def version_dict(self) -> Version:
@@ -471,7 +509,7 @@ class QuantumMachinesManager:
             A quantum machine obj that can be used to execute programs
         """
         if kwargs:
-            logger.warning(f"unused kwargs: {list(kwargs)}, please remove them.")
+            logger.warning(f"Unused kwargs: {list(kwargs)}, please remove them")
 
         loaded_config = self._load_config(config, disable_marshmallow_validation=validate_with_protobuf)
 

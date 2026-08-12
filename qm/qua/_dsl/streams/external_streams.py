@@ -19,15 +19,13 @@ class QuaStreamDirection(Enum):
 @overload
 def declare_external_stream(
     struct_type: type[StructT], stream_id: int, direction: Literal[QuaStreamDirection.INCOMING]
-) -> QuaExternalIncomingStream[StructT]:
-    ...
+) -> QuaExternalIncomingStream[StructT]: ...
 
 
 @overload
 def declare_external_stream(
     struct_type: type[StructT], stream_id: int, direction: Literal[QuaStreamDirection.OUTGOING]
-) -> QuaExternalOutgoingStream[StructT]:
-    ...
+) -> QuaExternalOutgoingStream[StructT]: ...
 
 
 def declare_external_stream(

@@ -6,38 +6,63 @@ from qm._loc import _get_loc
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
 from qm.qua._expressions import QuaVariable
-from qm.qua._dsl.amplitude import AmpValuesType
 from qm.qua._dsl._utils import _standardize_timestamp_label
 from qm.qua._dsl.measure.measure_process_factories import demod
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.measure.analog_measure_process import MeasureProcessAbstract
 from qm.qua._dsl.stream_processing.stream_processing import StreamType, ResultStreamSource
 from qm.qua._dsl.streams.output_streams.declare_output_stream import declare_output_stream
+from qm.qua._dsl.amplitude import AmpValuesType, MeasurePulseType, AmplitudeScaleTypes, standardize_pulse_and_amplitude
 
 logger = logging.getLogger(__name__)
-
-MeasurePulseType = Union[str, Tuple[str, AmpValuesType]]
 
 
 @overload
 def measure(
-    pulse: MeasurePulseType,
+    pulse: Tuple[str, AmpValuesType],
     element: str,
     *outputs: Union[Tuple[str, QuaVariable[float]], Tuple[str, str, QuaVariable[float]], MeasureProcessAbstract],
     timestamp_stream: Optional[StreamType] = None,
     adc_stream: Optional[StreamType] = None,
+    amplitude_scale: None = None,
 ) -> None:
     pass
 
 
 @overload
 def measure(
-    pulse: MeasurePulseType,
+    pulse: Tuple[str, AmpValuesType],
     element: str,
     stream: Optional[StreamType],
     *outputs: Union[Tuple[str, QuaVariable[float]], Tuple[str, str, QuaVariable[float]], MeasureProcessAbstract],
     timestamp_stream: Optional[StreamType] = None,
     adc_stream: Optional[StreamType] = None,
+    amplitude_scale: None = None,
+) -> None:
+    pass
+
+
+@overload
+def measure(
+    pulse: str,
+    element: str,
+    *outputs: Union[Tuple[str, QuaVariable[float]], Tuple[str, str, QuaVariable[float]], MeasureProcessAbstract],
+    timestamp_stream: Optional[StreamType] = None,
+    adc_stream: Optional[StreamType] = None,
+    amplitude_scale: AmplitudeScaleTypes = None,
+) -> None:
+    pass
+
+
+@overload
+def measure(
+    pulse: str,
+    element: str,
+    stream: Optional[StreamType],
+    *outputs: Union[Tuple[str, QuaVariable[float]], Tuple[str, str, QuaVariable[float]], MeasureProcessAbstract],
+    timestamp_stream: Optional[StreamType] = None,
+    adc_stream: Optional[StreamType] = None,
+    amplitude_scale: AmplitudeScaleTypes = None,
 ) -> None:
     pass
 
@@ -54,6 +79,7 @@ def measure(
     stream: Optional[StreamType] = None,
     timestamp_stream: Optional[StreamType] = None,
     adc_stream: Optional[StreamType] = None,
+    amplitude_scale: AmplitudeScaleTypes = None,
 ) -> None:
     """Perform a measurement of `element` using `pulse` based on 'operation' as defined in the 'element'.
 
@@ -96,6 +122,7 @@ def measure(
                  as the stream will no longer be treated as an ADC stream.
                 If you are using the deprecated `declare_stream` function, note that streaming ADC data without specifying
                  `declare_stream(adc_trace=True)` may also cause performance issues.
+        amplitude_scale (Union[float, Qua expression of type fixed, tuple of four float/Qua fixed expressions]): indicate the amplitude multiplier of the pulse.
 
 
     Example:
@@ -131,27 +158,27 @@ def measure(
                 adc_stream = outputs[0]
                 if isinstance(adc_stream, ResultStreamSource):
                     warnings.warn(
-                        "Saving an adc stream now requires defining it at the end of the measure command with the `adc_stream` argument, e.g. `adc_stream=adc_st`. The current syntax is deprecated and will be removed in a 1.3.",
+                        "Saving an adc stream now requires defining it at the end of the measure command with the `adc_stream` argument, e.g. `adc_stream=adc_st`. The current syntax is deprecated and will be removed in a 1.3",
                         DeprecationWarning,
                         stacklevel=2,
                     )
                 else:
                     warnings.warn(
-                        f"Saving an adc stream now requires defining it at the end of the measure command with the `adc_stream` argument, e.g. `adc_stream='{adc_stream}'`. The current syntax is deprecated and will be removed in a 1.3.",
+                        f"Saving an adc stream now requires defining it at the end of the measure command with the `adc_stream` argument, e.g. `adc_stream='{adc_stream}'`. The current syntax is deprecated and will be removed in a 1.3",
                         DeprecationWarning,
                         stacklevel=2,
                     )
                 outputs = outputs[1:]
             elif outputs[0] is None:
                 warnings.warn(
-                    "Putting `None` to indicate no adc streaming is no longer required, please remove it from the measure call.",
+                    "Putting `None` to indicate no adc streaming is no longer required, please remove it from the measure call",
                     DeprecationWarning,
                     stacklevel=2,
                 )
                 outputs = outputs[1:]
     else:
         warnings.warn(
-            "The `stream` argument is deprecated and will be removed in a 1.3. Use the `adc_stream` argument instead.",
+            "The `stream` argument is deprecated and will be removed in a 1.3. Use the `adc_stream` argument instead",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -191,7 +218,7 @@ def measure(
             warnings.warn(
                 "Using a single stream for both a `measure` command and a `save`/`send` statement may cause performance issues. "
                 "This option is deprecated and will be removed in QUA 2.0.0. "
-                "If you are using the deprecated `declare_stream` API, streaming ADC data without specifying `declare_stream(adc_trace=True)` may also cause performance issues.",
+                "If you are using the deprecated `declare_stream` API, streaming ADC data without specifying `declare_stream(adc_trace=True)` may also cause performance issues",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -202,9 +229,7 @@ def measure(
     timestamp_label = _standardize_timestamp_label(timestamp_stream)
     processes = [x.unwrapped for x in measure_process]
 
-    amp = None
-    if isinstance(pulse, tuple):
-        pulse, amp = pulse
+    pulse, amp = standardize_pulse_and_amplitude(pulse, amplitude_scale)
 
     loc = _get_loc()
     statement = inc_qua_pb2.QuaProgram.AnyStatement(

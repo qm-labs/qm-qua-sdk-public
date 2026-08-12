@@ -1,14 +1,31 @@
 import ssl
 import atexit
 import logging
+from dataclasses import dataclass
 from typing import Dict, Optional
 
 import grpc
 
+from qm.type_hinting.general import PathLike
 from qm.api.models.debug_data import DebugData
+from qm.simulate.credentials import validate_client_cert_pair
 from qm.api.models.grpc_interceptors import DebugInterceptor, AddHeadersInterceptor
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TlsFilePaths:
+    """PEM file paths that gRPC needs to build channel credentials.
+
+    grpcio cannot consume an ``ssl.SSLContext`` (it requires raw PEM bytes) and an SSLContext
+    does not expose its loaded private key / client certificate, so these paths travel
+    alongside the SSLContext down to ``create_channel`` to support a custom root CA and mTLS.
+    """
+
+    ca_cert_path: Optional[PathLike] = None
+    client_cert_path: Optional[PathLike] = None
+    client_key_path: Optional[PathLike] = None
 
 
 def _create_debug_data_event(debug_data: DebugData, channel: grpc.Channel) -> grpc.Channel:
@@ -24,6 +41,14 @@ def _create_add_headers_event(headers: Dict[str, str], channel: grpc.Channel) ->
     return grpc.intercept_channel(channel, interceptor)
 
 
+def _read_pem(path: Optional[PathLike]) -> Optional[bytes]:
+    """Read PEM bytes from ``path``; return ``None`` if no path is given."""
+    if not path:
+        return None
+    with open(path, "rb") as pem_file:
+        return pem_file.read()
+
+
 def create_channel(
     host: str,
     port: int,
@@ -31,6 +56,7 @@ def create_channel(
     max_message_size: int,
     headers: Dict[str, str],
     debug_data: Optional[DebugData] = None,
+    tls_paths: Optional[TlsFilePaths] = None,
 ) -> grpc.Channel:
     """
     Create a gRPC channel equivalent to a grpc Channel configuration.
@@ -40,6 +66,8 @@ def create_channel(
         port: Server port
         max_message_size: Max message size in bytes (used for flow control + message limits)
         ssl_context: Optional ssl.SSLContext. If provided, a secure channel is created.
+        tls_paths: Optional PEM file paths for a custom root CA and/or mTLS. When a field is
+            omitted, gRPC's default trust roots are used and/or no client certificate is sent.
 
     Returns:
         grpc.Channel
@@ -56,23 +84,12 @@ def create_channel(
 
     # ---- TLS channel ----
     if ssl_context is not None:
-        # grpc does NOT accept SSLContext directly.
-        # We extract what grpc needs from it.
-
-        # Root CAs
-        root_certs = None
-        if ssl_context.verify_mode != ssl.CERT_NONE:
-            try:
-                root_certs_list = ssl_context.get_ca_certs(binary_form=True)
-                # get_ca_certs returns a list; grpc expects bytes
-                root_certs = b"".join(root_certs_list) if root_certs_list else None
-            except Exception:
-                root_certs = None
-
+        tls_paths = tls_paths or TlsFilePaths()
+        validate_client_cert_pair(tls_paths.client_cert_path, tls_paths.client_key_path)
         credentials = grpc.ssl_channel_credentials(
-            root_certificates=root_certs,
-            private_key=None,
-            certificate_chain=None,
+            root_certificates=_read_pem(tls_paths.ca_cert_path),
+            private_key=_read_pem(tls_paths.client_key_path),
+            certificate_chain=_read_pem(tls_paths.client_cert_path),
         )
 
         channel = grpc.secure_channel(

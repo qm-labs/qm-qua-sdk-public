@@ -224,7 +224,7 @@ def load_config_from_calibration_db(
         lo_cal = calibration_db.get_lo_cal(octave_channel, lo_freq, output_gain)
         if lo_cal is None:
             logger.debug(
-                f"the calibration db has no LO cal for element '{element_name}' (lo_freq = {lo_freq / 1e9:0.3f} GHz)"
+                f"The calibration db has no LO cal for element '{element_name}' (lo_freq = {lo_freq / 1e9:0.3f} GHz)"
             )
             continue
 
@@ -258,7 +258,7 @@ def load_config_from_calibration_db(
         curr_mixer = mix_inputs.mixer
 
         if curr_mixer not in controller_pb_config.mixers:
-            logger.debug(f"Element '{element_name}' is using mixer '{curr_mixer}' which is not found.")
+            logger.debug(f"Element '{element_name}' is using mixer '{curr_mixer}' which is not found")
             continue
 
         old_if_cals = controller_pb_config.mixers[curr_mixer]

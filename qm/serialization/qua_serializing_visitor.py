@@ -97,6 +97,7 @@ class QuaSerializingVisitor(QuaNodeVisitor):
         self._lines: list[str] = []
         self.tags: list[str] = []
         self._used_global_vars: bool = False
+        self._stream_declarations: list[str] = []
 
     def _format_imports(self) -> str:
         output = ""
@@ -123,7 +124,7 @@ from qm.qua import *
             if struct.variable_name:
                 struct_declarations.append(struct.get_struct_declaration())
 
-        self._lines = self._lines[0:1] + struct_declarations + self._lines[1:]
+        self._lines = self._lines[0:1] + struct_declarations + self._stream_declarations + self._lines[1:]
         output += "\n".join(self._lines)
         return output
 
@@ -132,7 +133,7 @@ from qm.qua import *
 
     def _default_enter(self, node: Node) -> bool:
         if not isinstance(node, tuple(_dont_print)):
-            logger.info(f"entering {type(node).__module__}.{type(node).__name__}")
+            logger.info(f"Entering {type(node).__module__}.{type(node).__name__}")
         statement: Optional[Callable[[Node, "QuaSerializingVisitor"], str]] = _statements.get(type(node), None)  # type: ignore[assignment]
 
         if statement is not None:
@@ -143,6 +144,18 @@ from qm.qua import *
         if block is not None:
             self._enter_block(block(node, self))
         return statement is None
+
+    def _add_output_stream_declaration(self, stream_id: str, adc_trace: bool = False) -> None:
+        """Emit `declare_output_stream` at program scope."""
+        if stream_id in self.tags:
+            return
+        args = [f"stream_id={_safe_str(stream_id)}"]
+        if adc_trace:
+            args.append("adc_trace=True")
+        self._stream_declarations.append(
+            f'    {_safe_identifier(stream_id)} = declare_output_stream("client", {", ".join(args)})'
+        )
+        self.tags.append(stream_id)
 
     @staticmethod
     def _search_auto_added_stream(values: MutableSequence[Value]) -> bool:
@@ -163,13 +176,12 @@ from qm.qua import *
         is_auto_added_stream = self._search_auto_added_stream(node.values)
         if is_auto_added_stream:
             self._lines.pop()
-            line_to_remove_index = None
+            # Drop the auto-added stream declaration so the legacy-form save uses the tag directly.
+            self._stream_declarations = [
+                line for line in self._stream_declarations if f"{trace_name} = declare_output_stream" not in line
+            ]
             for i in range(len(self._lines)):
-                if self._lines[i].find(f"{trace_name} = declare_output_stream") > 0:
-                    line_to_remove_index = i
                 self._lines[i] = re.sub(r"(?<=\W|\^)" + trace_name + r"(?=\W|\$)", f'"{save_name}"', self._lines[i])
-            if line_to_remove_index:
-                self._lines.pop(line_to_remove_index)
 
     @property
     def _node_to_enter(self) -> Mapping[type, Callable[[Any], bool]]:
@@ -203,9 +215,7 @@ from qm.qua import *
             return False
 
     def enter_save(self, node: QuaProgram.SaveStatement) -> bool:
-        if node.tag not in self.tags:
-            self._line(f"{_safe_identifier(node.tag)} = declare_output_stream()")
-            self.tags.append(node.tag)
+        self._add_output_stream_declaration(node.tag)
         save_line = f"save({self.serialize_expression(node.source)}, {_safe_identifier(node.tag)})"
         self._line(save_line)
         return False
@@ -313,15 +323,11 @@ from qm.qua import *
         return args
 
     def enter_measure(self, node: QuaProgram.MeasureStatement) -> bool:
-        if node.timestampLabel and node.timestampLabel not in self.tags:
-            self._line(f"{_safe_identifier(node.timestampLabel)} = declare_output_stream()")
-            self.tags.append(node.timestampLabel)
-        if node.streamAs and node.streamAs not in self.tags:
-            if node.streamAs.startswith("atr_"):  # Support for legacy adc stream naming
-                self._line(f"{_safe_identifier(node.streamAs)} = declare_output_stream(adc_trace=True)")
-            else:
-                self._line(f"{_safe_identifier(node.streamAs)} = declare_output_stream()")
-            self.tags.append(node.streamAs)
+        if node.timestampLabel:
+            self._add_output_stream_declaration(node.timestampLabel)
+        if node.streamAs:
+            # Legacy adc stream naming: names starting with "atr_" need adc_trace=True to preserve behavior.
+            self._add_output_stream_declaration(node.streamAs, adc_trace=node.streamAs.startswith("atr_"))
         return self._default_enter(node)
 
     @property
@@ -385,17 +391,6 @@ from qm.qua import *
             raise QmQuaException(f"Unknown pulse type {pulse_one_of}")
 
         element = node.qe.name
-        amp = ""
-        if serialized_on_wire(node.amp):
-            v0 = self.serialize_expression(node.amp.v0)
-            v1 = self.serialize_expression(node.amp.v1)
-            v2 = self.serialize_expression(node.amp.v2)
-            v3 = self.serialize_expression(node.amp.v3)
-            if v0 != "":
-                if v1 != "":
-                    amp = f"*amp({v0}, {v1}, {v2}, {v3})"
-                else:
-                    amp = f"*amp({v0})"
         args = []
 
         _, duration = which_one_of(node.duration, "expression_oneof")
@@ -448,10 +443,19 @@ from qm.qua import *
             args.append(f"truncate={self.serialize_expression(truncate)}")
 
         if node.timestampLabel:
-            if node.timestampLabel not in self.tags:
-                self._line(f"{_safe_identifier(node.timestampLabel)} = declare_output_stream()")
-                self.tags.append(node.timestampLabel)
+            self._add_output_stream_declaration(node.timestampLabel)
             args.append(f"timestamp_stream={_safe_identifier(node.timestampLabel)}")
+
+        if serialized_on_wire(node.amp):
+            v0 = self.serialize_expression(node.amp.v0)
+            v1 = self.serialize_expression(node.amp.v1)
+            v2 = self.serialize_expression(node.amp.v2)
+            v3 = self.serialize_expression(node.amp.v3)
+            if v0 != "":
+                if v1 != "":
+                    args.append(f"amplitude_scale=({v0}, {v1}, {v2}, {v3})")
+                else:
+                    args.append(f"amplitude_scale={v0}")
 
         # TODO maybe make sure no other fields?
 
@@ -463,7 +467,7 @@ from qm.qua import *
         if serialized_on_wire(node.port_condition):
             self._line(f"with port_condition({self.serialize_expression(node.port_condition)}):")
             indent = " " * 4
-        self._line(f"{indent}play({pulse}{amp}, {_safe_str(element)}{args_str})")
+        self._line(f"{indent}play({pulse}, {_safe_str(element)}{args_str})")
 
     def _default_leave(self, node: Message) -> None:
         if isinstance(node, tuple(_blocks)):
@@ -504,18 +508,7 @@ def _ramp_to_zero_statement(node: QuaProgram.RampToZeroStatement, visitor: QuaSe
 def _measure_statement(node: QuaProgram.MeasureStatement, visitor: QuaSerializingVisitor) -> str:
     args = []
 
-    amp = ""
-    v0 = visitor.serialize_expression(node.amp.v0)
-    v1 = visitor.serialize_expression(node.amp.v1)
-    v2 = visitor.serialize_expression(node.amp.v2)
-    v3 = visitor.serialize_expression(node.amp.v3)
-    if v0 != "":
-        if v1 != "":
-            amp = f"*amp({v0}, {v1}, {v2}, {v3})"
-        else:
-            amp = f"*amp({v0})"
-
-    args.append(f"{_safe_str(node.pulse.name)}{amp}")
+    args.append(f"{_safe_str(node.pulse.name)}")
     args.append(_safe_str(node.qe.name))
 
     if len(node.measureProcesses) > 0:
@@ -525,6 +518,15 @@ def _measure_statement(node: QuaProgram.MeasureStatement, visitor: QuaSerializin
         args.append(f"timestamp_stream={_safe_identifier(node.timestampLabel)}")
     if node.streamAs:
         args.append(f"adc_stream={_safe_identifier(node.streamAs)}")
+    v0 = visitor.serialize_expression(node.amp.v0)
+    v1 = visitor.serialize_expression(node.amp.v1)
+    v2 = visitor.serialize_expression(node.amp.v2)
+    v3 = visitor.serialize_expression(node.amp.v3)
+    if v0 != "":
+        if v1 != "":
+            args.append(f"amplitude_scale=({v0}, {v1}, {v2}, {v3})")
+        else:
+            args.append(f"amplitude_scale={v0}")
     return f'measure({", ".join(args)})'
 
 
@@ -771,25 +773,14 @@ def _stream_processing_operator(array: MutableSequence[Value]) -> str:
         chain = _default_stream_processing_chain(array)
         return f"{chain}.auto_reshape()"
 
-    if operator == "+":
+    if operator in ("+", "-", "/", "*"):
+        # Use operator syntax rather than the method form (e.g. `.add()`), so a scalar literal on
+        # the left-hand side (such as `1 - stream`) serializes to valid Python. `1.subtract(stream)`
+        # is a syntax error since `1.` is parsed as a float literal. Parentheses preserve the
+        # operand order and grouping of the original expression.
         left = _stream_processing_statement(array[1])
         right = _stream_processing_statement(array[2])
-        return f"{left}.add({right})"  # arithmetic stream
-
-    if operator == "-":
-        left = _stream_processing_statement(array[1])
-        right = _stream_processing_statement(array[2])
-        return f"{left}.subtract({right})"  # arithmetic stream
-
-    if operator == "/":
-        left = _stream_processing_statement(array[1])
-        right = _stream_processing_statement(array[2])
-        return f"{left}.divide({right})"  # arithmetic stream
-
-    if operator == "*":
-        left = _stream_processing_statement(array[1])
-        right = _stream_processing_statement(array[2])
-        return f"{left}.multiply({right})"  # arithmetic stream
+        return f"({left} {operator} {right})"  # arithmetic stream
 
     if operator == "zip":
         left = _stream_processing_statement(array[1])

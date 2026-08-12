@@ -82,7 +82,7 @@ class UpconvertedInput(MixInputs):
         if self._gain is not None:
             self._client.set_gain(self._gain, self.lo_frequency, self._use_input_attenuators)
         else:
-            logger.warning("Gain is not set, so the input attenuators cannot be set.")
+            logger.warning("Gain is not set, so the input attenuators cannot be set")
 
     def set_lo_source(self, lo_port: OctaveLOSource) -> None:
         """

@@ -43,9 +43,7 @@ def _get_correct_config_part(
     pass
 
 
-def _get_correct_config_part(
-    part: Literal["controller", "logical"], pb_config: inc_qua_config_pb2.QuaConfig
-) -> Union[
+def _get_correct_config_part(part: Literal["controller", "logical"], pb_config: inc_qua_config_pb2.QuaConfig) -> Union[
     inc_qua_config_pb2.QuaConfig.ControllerConfig,
     inc_qua_config_pb2.QuaConfig.LogicalConfig,
     inc_qua_config_pb2.QuaConfig.QuaConfigV1,

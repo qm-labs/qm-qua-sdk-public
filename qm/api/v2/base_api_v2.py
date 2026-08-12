@@ -10,12 +10,10 @@ SuccessType = TypeVar("SuccessType", covariant=True)
 
 
 class ResponseMessageTypeV2(Protocol[SuccessType]):
-    def HasField(self, name: str) -> bool:
-        ...
+    def HasField(self, name: str) -> bool: ...
 
     @property
-    def success(self) -> SuccessType:
-        ...
+    def success(self) -> SuccessType: ...
 
 
 class BaseApiV2(BaseApi[StubType], metaclass=ABCMeta):

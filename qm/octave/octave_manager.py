@@ -184,7 +184,7 @@ class OctaveManager:
         opx_q_port: StandardPort,
     ) -> Optional[Tuple[str, int]]:
         warnings.warn(
-            "This function is deprecated since 1.1.6 and will be removed in 1.2.0.",
+            "This function is deprecated since 1.1.6 and will be removed in 1.2.0",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -445,7 +445,7 @@ class OctaveManager:
         #     category=DeprecationWarning,
         # )
         if kwargs:
-            logger.warning(f"unused kwargs: {list(kwargs)}, please remove them.")
+            logger.warning(f"Unused kwargs: {list(kwargs)}, please remove them")
 
         lo_to_if_mapping = _create_lo_to_if_mapping(lo_if_frequencies_tuple_list)
         lo_freq = list(lo_to_if_mapping)[0]
@@ -672,13 +672,13 @@ def prep_config_for_calibration(
     all_octave_connections = _add_octave_connections_from_octave_config(octave_config)
     all_octave_connections.update(_add_octave_connections_from_pb_config(pb_config))
     if not all_octave_connections:
-        logger.debug("No octave configuration found.")
+        logger.debug("No octave configuration found")
         return pb_config
     all_octave_connections = _filter_only_valid_connections(all_octave_connections, pb_config)
     if not all_octave_connections:
         logger.warning(
             "No valid channels found for calibration, make sure you connect I and Q to the same device, "
-            "and that you declare the relevant ports in the config."
+            "and that you declare the relevant ports in the config"
         )
         return pb_config
 

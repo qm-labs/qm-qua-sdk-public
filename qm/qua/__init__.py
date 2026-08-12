@@ -5,13 +5,13 @@ from qm.qua._expressions import fixed
 from qm.exceptions import QmQuaException
 from qm.qua._expressions import IO1, IO2
 from qm.qua._dsl.broadcast import broadcast
+from qm.qua._dsl.measure.measure import measure
 from qm.qua._qua_struct import QuaArray, qua_struct
-from qm.qua._dsl.amplitude import AmpValuesType, amp
 from qm.qua._expressions import QuaVariable as Variable
 from qm.qua._dsl.pulses_utils import ramp_to_zero, load_waveform
-from qm.qua._dsl.measure.measure import MeasurePulseType, measure
 from qm.qua._dsl.play import ChirpType, PlayPulseType, play, ramp
 from qm.qua._dsl.wait import wait, align, pause, wait_for_trigger
+from qm.qua._dsl.amplitude import AmpValuesType, MeasurePulseType, amp
 from qm.qua._dsl.stream_processing.stream_processing import StreamType
 from qm.qua._dsl.stream_processing.stream_processing_utils import bins
 from qm.qua._dsl.measure.analog_measure_process import AnalogMeasureProcess

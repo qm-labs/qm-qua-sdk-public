@@ -42,7 +42,7 @@ class QuaZip(IterableBase[Any]):
                     QuaIterable("tau", [16, 32, 64]),
                 ]
             ):
-                play("x90" * amp(pair.amp), "q1")
+                play("x90", "q1", amplitude_scale=pair.amp)
                 wait(pair.tau)
         ```
     """
@@ -99,7 +99,7 @@ class QuaZipIterable(ZipIterableBase):
     def __iter__(self) -> MultiIteratorType:
         qua_vars = [itr.declare_var() for itr in self._iterables]
         qua_values = [itr.values for itr in self._iterables]
-        with (for_each_(qua_vars, cast(List[AnyQuaIterableArrayType], qua_values))):
+        with for_each_(qua_vars, cast(List[AnyQuaIterableArrayType], qua_values)):
             self._add_to_current_scope()
             yield QuaNamedTuple(self._iterable_names, qua_vars)
             self._set_averaged_streams()
@@ -115,7 +115,7 @@ class PythonZipIterable(ZipIterableBase):
 
     def __iter__(self) -> MultiIteratorType:
         python_scope = _PythonScope(_get_loc())
-        with (python_scope):
+        with python_scope:
             self._add_to_current_scope()
             for i, args in enumerate(zip(*[itr.values for itr in self._iterables])):
                 python_scope.set_current_iteration_number(i)

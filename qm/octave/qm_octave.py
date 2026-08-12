@@ -106,7 +106,7 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
         """
         warnings.warn(
             "lo_frequency is now set directly from config when a QuantumMachine is created, no need to do it directly. "
-            "If you want, you can run over the elements and do set_frequency.",
+            "If you want, you can run over the elements and do set_frequency",
             category=DeprecationWarning,
             stacklevel=2,
         )
@@ -300,7 +300,7 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
     ) -> Tuple[AbstractLOCalibration, AbstractIFCalibration]:
         assert isinstance(qe.input, UpconvertedInput)
         if qe.input._calibration_db is None:
-            logger.warning(f"No calibration DB is attached for element {qe.name}, not changing anything.")
+            logger.warning(f"No calibration DB is attached for element {qe.name}, not changing anything")
             raise NoCalibrationDbAttachedError(qe.name)
         db = qe.input._calibration_db
 

@@ -225,7 +225,7 @@ class ResultStream(metaclass=abc.ABCMeta):
         """
         if mode is None:
             warnings.warn(
-                "mode=None is deprecated, use empty-string or (recommended) don't write the mode at-all.",
+                "mode=None is deprecated, use empty-string or (recommended) don't write the mode at-all",
                 DeprecationWarning,
             )
             mode = ""
@@ -239,7 +239,7 @@ class ResultStream(metaclass=abc.ABCMeta):
         """
         if mode is None:
             warnings.warn(
-                "mode=None is deprecated, use empty-string or (recommended) don't write the mode at-all.",
+                "mode=None is deprecated, use empty-string or (recommended) don't write the mode at-all",
                 DeprecationWarning,
             )
             mode = ""

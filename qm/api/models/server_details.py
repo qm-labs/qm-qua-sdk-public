@@ -8,8 +8,8 @@ from grpc import Channel
 from qm.exceptions import QMConnectionError
 from qm.api.models.info import QuaMachineInfo
 from qm.api.models.debug_data import DebugData
-from qm.api.models.channel import create_channel
 from qm.api.models.capabilities import ServerCapabilities
+from qm.api.models.channel import TlsFilePaths, create_channel
 
 MAX_MESSAGE_SIZE = 1024 * 1024 * 100  # 100 mb in bytes
 BASE_TIMEOUT = 120
@@ -23,6 +23,7 @@ class ConnectionDetails:
     port: int
     user_token: Optional[str] = dataclasses.field(default=None)
     ssl_context: Optional[ssl.SSLContext] = dataclasses.field(default=None)
+    tls_paths: Optional[TlsFilePaths] = dataclasses.field(default=None)
     max_message_size: int = dataclasses.field(default=MAX_MESSAGE_SIZE)
     headers: Dict[str, str] = dataclasses.field(default_factory=dict)
     timeout: float = dataclasses.field(default=BASE_TIMEOUT)
@@ -50,7 +51,13 @@ class ConnectionDetails:
         self.raise_if_closed()
         if self._channel is None:
             self._channel = create_channel(
-                self.host, self.port, self.ssl_context, self.max_message_size, self.headers, self.debug_data
+                self.host,
+                self.port,
+                self.ssl_context,
+                self.max_message_size,
+                self.headers,
+                self.debug_data,
+                tls_paths=self.tls_paths,
             )
 
         return self._channel
@@ -79,6 +86,7 @@ class ConnectionDetails:
                 self.port,
                 self.user_token,
                 self.ssl_context,
+                self.tls_paths,
                 self.max_message_size,
                 tuple(sorted(self.headers.items())),
                 self.timeout,
