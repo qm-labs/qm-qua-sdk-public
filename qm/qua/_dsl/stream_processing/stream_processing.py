@@ -521,7 +521,10 @@ class ResultStreamSource(ResultStream, OutputStreamInterface):
         )
 
     def timestamps(self) -> "ResultStreamSource":
-        """Get a stream with only the timestamps of the stream-items"""
+        """Get a stream with only the timestamps of the stream-items.
+
+        Deprecated since 1.2.3; will be removed in 2.0.0. Use ``with_timestamps()`` instead.
+        """
         warnings.warn(
             deprecation_message(
                 method="timestamps",

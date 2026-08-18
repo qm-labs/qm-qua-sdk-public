@@ -329,6 +329,10 @@ class QuantumMachinesManager:
 
     @property
     def store(self) -> BaseStore:
+        """The persistence store.
+
+        Deprecated since 1.2.3; will be removed in 2.0.0.
+        """
         warnings.warn(
             deprecation_message("qmm.store", "1.2.3", "2.0.0"),
             DeprecationWarning,
@@ -340,10 +344,12 @@ class QuantumMachinesManager:
 
     @property
     def capabilities(self) -> ServerCapabilities:
+        """The capabilities supported by the connected QOP server."""
         return self._caps
 
     @property
     def octave_manager(self) -> OctaveManager:
+        """The Octave manager for this QMM instance."""
         # warnings.warn(
         #     "Do not use OctaveManager, it will be removed in the next version", DeprecationWarning, stacklevel=2
         # )
@@ -364,6 +370,7 @@ class QuantumMachinesManager:
 
     @property
     def cluster_name(self) -> str:
+        """The name of the cluster this QMM is connected to, or ``"any"`` if none was specified."""
         return self._cluster_name or "any"
 
     def perform_healthcheck(self, strict: bool = True) -> None:
@@ -406,7 +413,10 @@ class QuantumMachinesManager:
                 )
 
     def version_dict(self) -> Version:
-        """
+        """Returns a dictionary with the qm-qua and QOP versions.
+
+        Deprecated since 1.3.0; will be removed in 2.0.0. Use ``qmm.version()`` instead.
+
         Returns:
             A dictionary with the qm-qua and QOP versions
         """
@@ -581,6 +591,8 @@ class QuantumMachinesManager:
     def open_qm_from_file(self, filename: str, close_other_machines: bool = True) -> Union[QuantumMachine, QmApi]:
         """Opens a new quantum machine with config taken from a file on the local file system
 
+        Deprecated since 1.2.0; will be removed in 2.0.0.
+
         Args:
             filename: The path to the file that contains the config
             close_other_machines: Flag whether to close all other
@@ -701,6 +713,10 @@ class QuantumMachinesManager:
             return self._frontend.list_open_quantum_machines()
 
     def list_open_quantum_machines(self) -> List[str]:
+        """Returns a list of open quantum machines.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Renamed to ``qmm.list_open_qms()``.
+        """
         warnings.warn(
             deprecation_message(
                 "qmm.list_open_quantum_machines",
@@ -776,6 +792,10 @@ class QuantumMachinesManager:
         self._server_details.connection_details.close()
 
     def close_all_quantum_machines(self) -> None:
+        """Closes all open quantum machines.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Renamed to ``qmm.close_all_qms()``.
+        """
         warnings.warn(
             deprecation_message(
                 "qmm.close_all_quantum_machines",
@@ -789,7 +809,10 @@ class QuantumMachinesManager:
         self.close_all_qms()
 
     def get_controllers(self) -> List[ControllerBase]:
-        """Returns a list of all the controllers that are available"""
+        """Returns a list of all the controllers that are available.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. The return type will change.
+        """
         if self._api:
             warnings.warn(
                 deprecation_message(
@@ -821,6 +844,11 @@ class QuantumMachinesManager:
             }
 
     def get_devices(self) -> Devices:
+        """Returns all devices connected to the system, including controllers and Octaves.
+
+        Returns:
+            A ``Devices`` object holding the connected controllers and Octaves.
+        """
         controllers = self._get_controllers_as_dict()
         octaves: Dict[str, OctaveDetails] = {}
         if self._octave_config is not None:
@@ -830,7 +858,10 @@ class QuantumMachinesManager:
         return Devices(controllers=controllers, octaves=octaves)
 
     def clear_all_job_results(self) -> None:
-        """Deletes all data from all previous jobs"""
+        """Deletes all data from all previous jobs.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0.
+        """
         if self._api:
             warnings.warn(
                 deprecation_message(

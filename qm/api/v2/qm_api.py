@@ -149,6 +149,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
 
     @property
     def octave(self) -> QmOctaveForNewApi:
+        """The Octave interface for this quantum machine."""
         return self._octave
 
     @property

@@ -84,14 +84,17 @@ class QuantumMachine:
 
     @property
     def id(self) -> str:
+        """The unique identifier of this quantum machine."""
         return self._id
 
     @property
     def queue(self) -> Union[QmQueue, QmQueueWithDeprecations]:
+        """The job queue for this quantum machine."""
         return self._queue
 
     @property
     def octave(self) -> QmOctave:
+        """The Octave interface for this quantum machine."""
         return self._octave
 
     def close(self) -> bool:
@@ -649,18 +652,22 @@ class QuantumMachine:
 
     @property
     def io1(self) -> Dict[str, Value]:
+        """Gets the data stored in ``IO1``. Equivalent to ``get_io1_value()``."""
         return self.get_io1_value()
 
     @io1.setter
     def io1(self, value: Value) -> None:
+        """Sets the value of ``IO1``. Equivalent to ``set_io1_value(value)``."""
         self.set_io1_value(value)
 
     @property
     def io2(self) -> Dict[str, Value]:
+        """Gets the data stored in ``IO2``. Equivalent to ``get_io2_value()``."""
         return self.get_io1_value()
 
     @io2.setter
     def io2(self, value: Value) -> None:
+        """Sets the value of ``IO2``. Equivalent to ``set_io2_value(value)``."""
         self.set_io2_value(value)
 
     def set_io1_value(self, value_1: Value) -> None:

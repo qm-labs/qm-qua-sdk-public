@@ -120,11 +120,15 @@ class QuaNumericExpression(Generic[S, NumberT], QuaExpression[S], metaclass=abc.
         return isinstance(self, InputStreamOldInterface)
 
     def empty(self) -> bool:
+        """Returns whether the expression is empty.
+
+        Deprecated since 1.1.0; will be removed in 2.0.0.
+        """
         warnings.warn(
             deprecation_message(
                 method="QuaExpression.empty()",
                 deprecated_in="1.1.0",
-                removed_in="1.2.0",
+                removed_in="2.0.0",
                 details="This function is going to be removed, as it's not needed.",
             ),
             DeprecationWarning,
@@ -132,11 +136,15 @@ class QuaNumericExpression(Generic[S, NumberT], QuaExpression[S], metaclass=abc.
         return self._expression is None
 
     def isFixed(self) -> bool:
+        """Returns whether the variable is of ``fixed`` type.
+
+        Deprecated since 1.1.0; will be removed in 2.0.0. Use ``is_fixed()`` instead.
+        """
         warnings.warn(
             deprecation_message(
                 method="QuaVariable.isFixed",
                 deprecated_in="1.1.0",
-                removed_in="1.2.0",
+                removed_in="2.0.0",
                 details="use: 'QuaVariable.is_fixed()' instead",
             ),
             DeprecationWarning,
@@ -144,11 +152,15 @@ class QuaNumericExpression(Generic[S, NumberT], QuaExpression[S], metaclass=abc.
         return self.is_fixed()
 
     def isInt(self) -> bool:
+        """Returns whether the variable is of ``int`` type.
+
+        Deprecated since 1.1.0; will be removed in 2.0.0. Use ``is_int()`` instead.
+        """
         warnings.warn(
             deprecation_message(
                 method="QuaVariable.isInt",
                 deprecated_in="1.1.0",
-                removed_in="1.2.0",
+                removed_in="2.0.0",
                 details="use: 'QuaVariable.is_int()' instead",
             ),
             DeprecationWarning,
@@ -156,11 +168,15 @@ class QuaNumericExpression(Generic[S, NumberT], QuaExpression[S], metaclass=abc.
         return self.is_int()
 
     def isBool(self) -> bool:
+        """Returns whether the variable is of ``bool`` type.
+
+        Deprecated since 1.1.0; will be removed in 2.0.0. Use ``is_bool()`` instead.
+        """
         warnings.warn(
             deprecation_message(
                 method="QuaVariable.isBool",
                 deprecated_in="1.1.0",
-                removed_in="1.2.0",
+                removed_in="2.0.0",
                 details="use: 'QuaVariable.is_bool()' instead",
             ),
             DeprecationWarning,

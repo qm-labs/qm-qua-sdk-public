@@ -909,6 +909,8 @@ class JobApi(JobGenericApi):
             element (str): The name of the element to update the correction for
             frequency_hz (float): The frequency to set to the given element
             update_component (str): The component to update the frequency for: "upconverter", "downconverter", or "both"
+
+        Deprecated since 1.2.2; will be removed in 2.0.0. Use ``job.set_converter_frequency()`` instead.
         """
         deprecation_message(
             method="job.update_oscillator_frequency",
@@ -1020,7 +1022,10 @@ class JobApiWithDeprecations(JobApi):
         super().push_to_input_stream(name, data)
 
     def halt(self) -> bool:
-        """Halts the job on the opx"""
+        """Halts the job on the opx.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Renamed to ``job.cancel()``.
+        """
         warnings.warn(
             deprecation_message(
                 method="job.halt",

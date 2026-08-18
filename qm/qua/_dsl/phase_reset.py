@@ -7,6 +7,10 @@ from qm.qua._scope_management.scopes_manager import scopes_manager
 
 
 def reset_phase(element: str) -> None:
+    """Resets the intermediate frequency phase of the oscillator associated with ``element``.
+
+    Deprecated since 1.2.2; will be removed in 2.0.0. Use ``reset_if_phase()`` instead.
+    """
     warnings.warn(
         deprecation_message(
             method="reset_phase",

@@ -25,6 +25,10 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
 
     @property
     def pending_jobs(self) -> Tuple[JobApiWithDeprecations, ...]:
+        """The pending jobs in the queue.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Use ``qm.get_jobs("In queue")`` instead.
+        """
         warnings.warn(
             deprecation_message(
                 method="queue.pending_jobs",
@@ -57,6 +61,8 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
     ) -> JobApi:
         """Adds a QmJob to the queue.
         Programs in the queue will play as soon as possible.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Use ``qm.add_to_queue()`` instead.
 
         Args:
             program: A QUA program
@@ -113,6 +119,8 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
     def remove_by_id(self, job_id: str) -> int:
         """Removes the pending job with a specific job id
 
+        Deprecated since 1.2.0; will be removed in 2.0.0. Use ``qm.clear_queue([job_id])`` or ``job.cancel()`` instead.
+
         Args:
             job_id: a QMJob id
 
@@ -141,6 +149,8 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
     def remove_by_user_id(self, user_id: str) -> int:
         """Removes all pending jobs with a specific user id
 
+        Deprecated since 1.2.0; will be removed in 2.0.0. Use ``qm.clear_queue(user_ids=[user_id])`` or ``job.cancel()`` instead.
+
         Args:
             user_id: a user id
 
@@ -166,6 +176,8 @@ class QmQueueWithDeprecations(QmQueueBase[JobApi]):
 
     def clear(self) -> int:
         """Empties the queue from all pending jobs
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Use ``qm.clear_queue()`` instead.
 
         Returns:
             The number of jobs removed

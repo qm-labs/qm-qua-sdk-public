@@ -96,6 +96,8 @@ class SimulatedJob(RunningQmJob):
         """
         Return the results of the simulation of elements and analog outputs.
 
+        Deprecated since 1.1.0; will be removed in 2.0.0. Use ``get_simulated_waveform_report()`` instead.
+
         The returned dictionary has the following keys and entries:
 
         - **elements**: a dictionary containing the outputs with timestamps and values arranged by elements.
@@ -120,7 +122,7 @@ class SimulatedJob(RunningQmJob):
             deprecation_message(
                 method="SimulatedJob.simulated_analog_waveforms",
                 deprecated_in="1.1.0",
-                removed_in="1.2.0",
+                removed_in="2.0.0",
                 details="use 'get_simulated_waveform_report' instead.",
             ),
             DeprecationWarning,
@@ -131,6 +133,8 @@ class SimulatedJob(RunningQmJob):
     def simulated_digital_waveforms(self) -> Optional[WaveformInPortsType]:
         """
         Return the results of the simulation of digital outputs.
+
+        Deprecated since 1.1.0; will be removed in 2.0.0. Use ``get_simulated_waveform_report()`` instead.
 
         - **controllers**: a dictionary containing the outputs with timestamps and values arranged by controllers.
 
@@ -151,7 +155,7 @@ class SimulatedJob(RunningQmJob):
             deprecation_message(
                 method="SimulatedJob.simulated_digital_waveforms",
                 deprecated_in="1.1.0",
-                removed_in="1.2.0",
+                removed_in="2.0.0",
                 details="use 'get_simulated_waveform_report' instead.",
             ),
             DeprecationWarning,

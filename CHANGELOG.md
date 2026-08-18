@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 
+
+## [1.4.1] - 2026-08-18
+
+- Requires Python >=3.10, <3.15
+
+### Changed
+- Removed the deprecation warning for the `amp` API. The previous deprecation timeline was premature given the API's current usage. Any future deprecation will be communicated with an appropriate migration period.
+
+### Fixed
+- Fixed the deprecation warning for `qm.get_io1_value()` which incorrectly named the method `qm.get_io2_value`.
+
+
 ## [1.4.0] - 2026-08-09
 
 - Requires Python >=3.10, <3.15
@@ -14,32 +26,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
-- Added `metrics` property to `ControllerOPX1000` (returned by `qmm.get_devices()`) exposing per-controller OS metrics — `cpu_utilization_percent`, `qop_cpu_percent`, `memory_available_gb`, `qop_memory_percent`, and `disk_available_gb`.
-- `assert_programs_are_equal` is now exported from the top-level `qm` namespace, and the public serialization functions (`generate_qua_script`, `assert_programs_are_equal`) now have docstrings.
+- Added `assert_programs_are_equal` to the top-level `qm` namespace exports; the public serialization functions (`generate_qua_script`, `assert_programs_are_equal`) now have docstrings.
 - Added `client_cert_path` and `client_key_path` to `CredentialOverrides`, and `QuantumMachinesManager` now accepts a `CredentialOverrides` for its `credentials` argument, enabling connections that use a custom root CA and mutual TLS (mTLS) by passing PEM file paths.
 - Added the `overrides` argument to `add_to_queue`, allowing analog waveforms of a precompiled program to be overridden when it is queued (e.g. `qm.add_to_queue(program_id, overrides={"waveforms": {"my_wf": [0.1, 0.2]}})`).
+- Added an `amplitude_scale` keyword argument to the `play` and `measure` commands that multiplies the waveform. This is similar to the `*amp()` option, and the two cannot be used together.
 
 ### Fixed
 - Fixed a bug where connecting through a TLS-terminating proxy with a custom root CA or mutual TLS (mTLS) failed with `Could not load any root certificate` / `TSI_INVALID_ARGUMENT`; custom CA verification and client certificates now work again.
 - Fixed a bug where providing a client certificate without its matching key (or vice versa) crashed the entire process; invalid or incomplete TLS credentials now raise a clear `InvalidCredentialsError`.
 - Fixed a bug where passing a non-integer value to the deprecated `execute()` arguments `duration_limit`, `data_limit`, `force_execution`, or `dry_run` was silently ignored instead of raising an error.
-- Fixed an ambiguous error when using an IO variable (`IO1`, `IO2`) where it is not allowed; it now raises a clear `IoVariableImproperUsage` advising to assign it to a regular QUA variable first.
-- QOP 3 - Fixed a bug where `queue.add_compiled()` raised a `TypeError` when passing the `overrides` argument; overriding analog waveforms of a precompiled program now works again on QOP 3.
+- Fixed an ambiguous error when using an IO variable (`IO1`, `IO2`) where it is not allowed; it now raises a clear `IoVariableImproperUsage` advising the user to assign it to a regular QUA variable first.
+- QOP 3 — Fixed a bug where `queue.add_compiled()` raised a `TypeError` when passing the `overrides` argument; overriding analog waveforms of a precompiled program now works again.
 - Fixed a bug where the new `declare_input_stream("client", ...)` API did not accept the `value=` keyword argument.
 - Fixed a bug where `declare_input_stream` raised `IndexError` when all arguments were passed by keyword (e.g. `declare_input_stream(source="client", stream_id="tau", dtype=int)`).
 - Standardized log and deprecation-warning message style across the SDK to a single convention (capitalized first word, no trailing period).
 - Fixed a bug in generate_qua_script where an output stream was incorrectly declared inside a for_/if_ block despite being shared across multiple blocks.
 - Fixed a bug where a custom `stream_id` on `declare_output_stream` was dropped from the serialized script, causing "SERIALIZATION WAS NOT COMPLETE" on round-trip.
 - Fixed a bug where the `digital_marker` key was silently dropped when deconverting a pulse config from its protobuf representation.
-- Fixed a silent bug where comparing a QUA array with `==`/`!=` (e.g. `assign(b, a == 3)`) always evaluated to `False`/`True` instead of raising; it now raises a clear `NotAllowedOperationArrayComparison`, since comparison is not defined for QUA arrays.
+- Fixed a bug where comparing a QUA array with `==`/`!=` (e.g. `assign(b, a == 3)`) silently evaluated to `False`/`True` instead of raising an error; it now raises a clear `NotAllowedOperationArrayComparison`, since comparison is not defined for QUA arrays.
 - Fixed a bug where the 4-tuple `RawInterface` simulation connection `(from_controller, from_fem, from_port, to_samples)` incorrectly required `from_port` to be a string; it is now correctly validated as an integer.
-- Fixed `Math.div`'s type hints so that calling it with two `int` arguments no longer forces a mypy error when the result is assigned to an `int` variable; the QUA compiler can produce either an `int` or a `fixed` result for `int`/`int` division depending on the assignment target.
+- Fixed the type hints of `Math.div` so that calling it with two `int` arguments no longer forces a mypy error when the result is assigned to an `int` variable; the QUA compiler can produce either an `int` or a `fixed` result for `int`/`int` division depending on the assignment target.
 - Fixed a bug where `Math.inv_sqrt(x)` computed `sqrt(x)` instead of `1/sqrt(x)`; it now correctly returns the inverse square root.
 - Fixed a bug where `generate_qua_script` produced invalid Python for stream-processing arithmetic with a scalar on the left-hand side (e.g. `1 - stream`).
-- Fixed a bug where the waveform report plot did not zoom its x-axes together on the initial render, despite "Shared" mode being selected; previously this required toggling "Distinct" then "Shared".
+- Fixed a bug where the waveform report plot did not zoom its x-axes together on the initial render, despite `Shared` mode being selected; previously this required toggling `Distinct` then `Shared`.
 
 ### Deprecated
-- The `amp` DSL function is deprecated; use the `amplitude_scale` keyword argument in the `play` and `measure` commands instead.
+- The `amp()` function (multiplying an operation in a play/measure command) is deprecated; use the `amplitude_scale` keyword argument in the `play` and `measure` commands instead.
 - The `overrides` argument of `add_to_queue` (and the deprecated `queue.add_compiled()`) now emits a `DeprecationWarning`, as its API is expected to change in 2.0.0.
 
 

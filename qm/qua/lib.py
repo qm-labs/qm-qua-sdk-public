@@ -83,6 +83,12 @@ def _create_vectors_output_expression(
 def call_library_function(
     function: SomeCallable, output_type: Type[NumberT], *args: ScalarOfAnyType
 ) -> QuaLibFunctionOutput[NumberT]:
+    """Call a QUA library function.
+
+    Deprecated since 1.2.2; will be removed in 2.0.0. Call the function directly from the
+    available classes instead (e.g. ``Random(x).rand_int(y)`` instead of
+    ``call_library_function(Random.rand_int, int, x, y)``).
+    """
     warnings.warn(
         deprecation_message(
             method="call_library_function",
@@ -99,6 +105,12 @@ For instance, instead of using call_library_function(Random.rand_int, int, x, y)
 def call_vectors_library_function(
     function: SomeCallable, output_type: Type[S], *args: Vector[NumberT]
 ) -> QuaLibFunctionOutput[S]:
+    """Call a QUA vectors library function.
+
+    Deprecated since 1.2.2; will be removed in 2.0.0. Call the function directly from the
+    available classes instead (e.g. ``Math.sum(x)`` instead of
+    ``call_vectors_library_function(Math.sum, x.dtype, x)``).
+    """
     warnings.warn(
         deprecation_message(
             method="call_vectors_library_function",

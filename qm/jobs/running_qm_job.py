@@ -20,14 +20,15 @@ class AcquiringStatus(Enum):
 class RunningQmJob(QmBaseJob):
     @property
     def manager(self) -> None:
-        """
-        The QM object where this job lives
+        """The QM object where this job lives.
+
+        Deprecated since 1.1.0; will be removed in 2.0.0. The job no longer has a ``manager`` property.
         """
         warnings.warn(
             deprecation_message(
                 method="RunningQmJob.manager",
                 deprecated_in="1.1.0",
-                removed_in="1.2.0",
+                removed_in="2.0.0",
                 details="QMJob no longer has 'manager' property",
             ),
             DeprecationWarning,

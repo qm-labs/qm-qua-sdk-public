@@ -80,6 +80,11 @@ class QmApiWithDeprecations(QmApi):
 
     @property
     def queue(self) -> QmQueueWithDeprecations:
+        """The job queue for this quantum machine.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Use the queue methods directly on
+        ``QuantumMachine`` instead (e.g. ``qm.add_to_queue(prog)`` instead of ``qm.queue.add(prog)``).
+        """
         warnings.warn(
             deprecation_message(
                 method="qm.queue",
@@ -732,6 +737,10 @@ class QmApiWithDeprecations(QmApi):
 
     @property
     def io1(self) -> IoValue:
+        """Gets the data stored in ``IO1``.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Use ``job.get_io_values()[0]`` instead.
+        """
         warnings.warn(
             deprecation_message(
                 method="qm.io1",
@@ -746,6 +755,10 @@ class QmApiWithDeprecations(QmApi):
 
     @io1.setter
     def io1(self, value: Value) -> None:
+        """Sets the value of ``IO1``.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Use ``job.set_io_values(io1=value)`` instead.
+        """
         warnings.warn(
             deprecation_message(
                 method="qm.io1",
@@ -760,6 +773,10 @@ class QmApiWithDeprecations(QmApi):
 
     @property
     def io2(self) -> IoValue:
+        """Gets the data stored in ``IO2``.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Use ``job.get_io_values()[1]`` instead.
+        """
         warnings.warn(
             deprecation_message(
                 method="qm.io2",
@@ -774,6 +791,10 @@ class QmApiWithDeprecations(QmApi):
 
     @io2.setter
     def io2(self, value: Value) -> None:
+        """Sets the value of ``IO2``.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. Use ``job.set_io_values(io2=value)`` instead.
+        """
         warnings.warn(
             deprecation_message(
                 method="qm.io2",
@@ -892,7 +913,7 @@ class QmApiWithDeprecations(QmApi):
         """
         warnings.warn(
             deprecation_message(
-                method="qm.get_io2_value",
+                method="qm.get_io1_value",
                 deprecated_in="1.2.0",
                 removed_in="2.0.0",
                 details="This method is going to be moved to the job API, please use `job.get_io_values()[0]`",

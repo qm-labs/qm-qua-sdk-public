@@ -119,6 +119,11 @@ class StreamsManager(Mapping[str, Optional[AnySingleStreamFetcher]]):
         return self.get(item)
 
     def __iter__(self) -> Generator[Tuple[str, Optional[AnySingleStreamFetcher]], None, None]:  # type: ignore[override]
+        """Iterates over the results.
+
+        Deprecated since 1.2.0; will be removed in 2.0.0. The iteration API will change to be
+        dictionary-like; use ``iterate_results()`` for the current behavior.
+        """
         warnings.warn(
             deprecation_message(
                 method="streaming_result_fetcher.__iter__",

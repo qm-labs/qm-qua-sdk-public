@@ -36,6 +36,8 @@ def declare_external_stream(
     The stream can be either an incoming or an outgoing stream, which will receive or send data from the external
     compute resource respectively.
 
+    Deprecated since 1.2.4; will be removed in 2.0.0. Use ``declare_input_stream()`` / ``declare_output_stream()`` instead.
+
     Args:
         struct_type: A QuaStruct type that defines a single packet of the stream.
         stream_id: The ID of the stream, an integer between 0 and 1000.
@@ -101,6 +103,8 @@ def send_to_external_stream(stream: QuaExternalOutgoingStream[StructT], struct: 
     """
     Send data to an external compute resource.
 
+    Deprecated since 1.2.4; will be removed in 2.0.0. Use ``send_to_stream()`` instead.
+
     Args:
         stream: The outgoing stream to send data to.
         struct: The struct containing the data to send.
@@ -135,6 +139,8 @@ def _send_to_opnic_stream(stream: QuaExternalOutgoingStream[StructT], struct: St
 def receive_from_external_stream(stream: QuaExternalIncomingStream[StructT], struct: StructT) -> None:
     """
     Receive data from an external compute resource.
+
+    Deprecated since 1.2.4; will be removed in 2.0.0. Use ``receive_from_stream()`` instead.
 
     Args:
         stream: The incoming stream to receive data from.

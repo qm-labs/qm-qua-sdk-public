@@ -13,12 +13,16 @@ def convert_msg_to_config(
     config: inc_qua_config_pb2.QuaConfig,
     capabilities: Optional[ServerCapabilities] = None,
 ) -> FullQuaConfig:
+    """Convert a protobuf config message back into a config dictionary.
+
+    Deprecated since 1.2.4; will be removed in 2.0.0. If you need an alternative, please contact QM.
+    """
     capabilities = capabilities if capabilities is not None else offline_capabilities
     warnings.warn(
         deprecation_message(
             method="convert_msg_to_config",
             deprecated_in="1.2.4",
-            removed_in="1.3",
+            removed_in="2.0.0",
             details="This function is removed, if you need an alternative, please contact QM.",
         ),
         DeprecationWarning,
