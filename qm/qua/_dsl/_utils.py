@@ -1,9 +1,28 @@
 from typing import Optional
+from collections.abc import Sequence
 
+from qm.config import Element
 from qm.api.models.capabilities import QopCaps
+from qm.qua._dsl._type_hints import ElementRef
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.stream_processing.stream_processing import StreamType, ResultStreamSource
 from qm.qua._dsl.streams.output_streams.declare_output_stream import declare_output_stream
+
+
+def _add_element_to_program(element: ElementRef) -> str:
+    if isinstance(element, Element):
+        scopes_manager.add_element(element)
+        return element.name
+    scopes_manager.set_the_need_for_external_config()
+    return element
+
+
+def _add_elements_to_program(*elements: ElementRef) -> Sequence[str]:
+    names = []
+    for element in elements:
+        element_name = _add_element_to_program(element)
+        names.append(element_name)
+    return names
 
 
 def _standardize_timestamp_label(timestamp_stream: Optional[StreamType]) -> Optional[str]:

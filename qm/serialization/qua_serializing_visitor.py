@@ -600,7 +600,9 @@ def _receive_from_external_stream(
     node: QuaProgram.ReceiveFromExternalStreamStatement, visitor: QuaSerializingVisitor
 ) -> str:
     name = f"si{node.stream.stream_id}"  # receive is only to incoming streams
-    return f"receive_from_stream({name}, target_variable={_safe_identifier(node.struct.name)})"
+    args = [name, f"target_variable={_safe_identifier(node.struct.name)}"]
+
+    return f"receive_from_stream({', '.join(args)})"
 
 
 def _reset_frame_statement(node: QuaProgram.ResetFrameStatement, visitor: QuaSerializingVisitor) -> str:

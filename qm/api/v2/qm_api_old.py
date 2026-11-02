@@ -1,6 +1,7 @@
 import json
 import logging
 import warnings
+from typing_extensions import deprecated
 from typing import List, Tuple, Union, Literal, Optional, Sequence, MutableMapping, cast, overload
 
 from qm.api.v2.job_api import JobApi
@@ -16,6 +17,7 @@ from qm.api.v2.qm_api import QmApi, IoValue, NoRunningQmJob
 from qm.api.v2.job_api.job_api import JobApiWithDeprecations
 from qm.exceptions import QmQuaException, FunctionInputError
 from qm.type_hinting import Value, Number, NumpySupportedValue
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.type_hinting.general import PathLike, NumpySupportedFloat
 from qm.jobs.job_queue_with_deprecations import QmQueueWithDeprecations
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApiWithDeprecations
@@ -33,6 +35,10 @@ DEFAULT_EXECUTION_TIMEOUT = 5 * 60
 
 
 class QmApiWithDeprecations(QmApi):
+    """`QmApi` with additional deprecated methods that mirror the OPX+/QOP 2.x `QuantumMachine` API,
+    kept for backward compatibility. New code should use the methods on `QmApi` directly.
+    """
+
     SIMULATED_JOB_CLASS = SimulatedJobApiWithDeprecations
 
     def __init__(
@@ -50,6 +56,11 @@ class QmApiWithDeprecations(QmApi):
     def _get_job(self, job_id: str) -> JobApiWithDeprecations:
         return JobApiWithDeprecations(self.connection_details, job_id, capabilities=self._caps)
 
+    @deprecated(
+        'qm.get_job_by_id is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed, please use `qmm.get_job()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_job_by_id(self, job_id: str) -> JobApiWithDeprecations:
         """
         Deprecated - This method is going to be removed, please use `qmm.get_job()`.
@@ -62,16 +73,6 @@ class QmApiWithDeprecations(QmApi):
         Returns:
              The job object
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_job_by_id",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be removed, please use `qmm.get_job()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         # The cast is needed to tell mypy (and pycharm) that the return type is JobApiWithDeprecations. Mypy thinks
         # the return type is JobApi because "get_job()" returns JobApi, even though the method "_get_job()" is
         # overridden in this class to return JobApiWithDeprecations.
@@ -79,23 +80,17 @@ class QmApiWithDeprecations(QmApi):
         return job
 
     @property
+    @deprecated(
+        'qm.queue is deprecated since "1.2.0" and will be removed in "2.0.0". This property is going to be removed, all functionality will exist directly under `QuantumMachine`. For example, instead of `qm.queue.add(prog)` use `qm.add_to_queue(prog)`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def queue(self) -> QmQueueWithDeprecations:
         """The job queue for this quantum machine.
 
         Deprecated since 1.2.0; will be removed in 2.0.0. Use the queue methods directly on
         ``QuantumMachine`` instead (e.g. ``qm.add_to_queue(prog)`` instead of ``qm.queue.add(prog)``).
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.queue",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This property is going to be removed, all functionality will exist directly under "
-                "`QuantumMachine`. For example, instead of `qm.queue.add(prog)` use `qm.add_to_queue(prog)`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         return self._queue
 
     def close(self) -> bool:  # type: ignore[override]
@@ -202,6 +197,11 @@ class QmApiWithDeprecations(QmApi):
         # See that in the father function there is no `wait_until`
         return new_job_api
 
+    @deprecated(
+        'qm.list_controllers is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed, please get data from `qm.get_config()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def list_controllers(self) -> Tuple[str, ...]:
         """
         Deprecated - This method is going to be removed, please use `qm.get_config()`.
@@ -211,16 +211,6 @@ class QmApiWithDeprecations(QmApi):
         Returns:
             The names of the controllers configured in this qm
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.list_controllers",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be removed, please get data from `qm.get_config()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         controller_config = get_controller_pb_config(self._get_pb_config())
         # This if statement is not necessary, but helps mypy understand that we are trying to access the controllers
         # attribute only if the controller_config is of type QuaConfigQuaConfigV1 (which still has the deprecated
@@ -251,6 +241,11 @@ class QmApiWithDeprecations(QmApi):
         config_for_update: ControllerQuaConfig = {"mixers": {mixer: correction_entries}}
         self.update_config(config_for_update)
 
+    @deprecated(
+        'qm.set_mixer_correction is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed, please use `job.set_element_correction()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_mixer_correction(
         self,
         mixer: str,
@@ -288,16 +283,6 @@ class QmApiWithDeprecations(QmApi):
             To change the calibration values for a running job,
             use job.set_element_correction
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.set_mixer_correction",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be removed, please use `job.set_element_correction()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
 
         self._upsert_mixer_correction_entry(mixer, intermediate_frequency, lo_frequency, values)
 
@@ -312,6 +297,11 @@ class QmApiWithDeprecations(QmApi):
                 if mixer_cond and if_cond and lo_cond:
                     job.set_element_correction(name, values)
 
+    @deprecated(
+        'qm.set_intermediate_frequency is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.set_intermediate_frequency()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_intermediate_frequency(self, element: str, freq: float) -> None:
         """
         Deprecated - This method is going to be moved to the job API, please use `job.set_intermediate_frequency()`.
@@ -324,20 +314,14 @@ class QmApiWithDeprecations(QmApi):
             freq (float): the intermediate frequency to set to the given
                 element
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.set_intermediate_frequency",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use "
-                "`job.set_intermediate_frequency()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         job = self._strict_get_running_job()
         job.set_intermediate_frequency(element, freq)
 
+    @deprecated(
+        'qm.get_intermediate_frequency is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.get_intermediate_frequency()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_intermediate_frequency(self, element: str) -> float:
         """
         Deprecated - This method is going to be moved to the job API, please use `job.get_intermediate_frequency()`.
@@ -351,20 +335,14 @@ class QmApiWithDeprecations(QmApi):
         Returns:
             The intermediate frequency
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_intermediate_frequency",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use "
-                "`job.get_intermediate_frequency()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         job = self._strict_get_running_job()
         return job.get_intermediate_frequency(element)
 
+    @deprecated(
+        'qm.get_output_dc_offset_by_element is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed, please get idle value from `qm.get_config()` or current value from job `job.get_output_dc_offset_by_element()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_output_dc_offset_by_element(
         self, element: str, iq_input: Optional[Literal["I", "Q", "single"]] = None
     ) -> float:
@@ -387,17 +365,6 @@ class QmApiWithDeprecations(QmApi):
         Returns:
             the offset, in volts
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_output_dc_offset_by_element",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be removed, please get idle value from `qm.get_config()`"
-                " or current value from job `job.get_output_dc_offset_by_element()`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         job = self._strict_get_running_job()
         return job.get_output_dc_offset_by_element(element, iq_input)
 
@@ -414,6 +381,11 @@ class QmApiWithDeprecations(QmApi):
     ) -> None:
         pass
 
+    @deprecated(
+        'qm.set_output_dc_offset_by_element is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed, please set idle value with `qm.update_config()` or current value from job `job.set_output_dc_offset_by_element()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_output_dc_offset_by_element(
         self,
         element: str,
@@ -451,17 +423,6 @@ class QmApiWithDeprecations(QmApi):
             If the sum of the DC offset and the largest waveform data-point exceed the range,
             DAC output overflow will occur and the output will be corrupted.
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.set_output_dc_offset_by_element",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be removed, please set idle value with `qm.update_config()`"
-                " or current value from job `job.set_output_dc_offset_by_element()`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         if isinstance(input, str):
             if not isinstance(offset, (int, float)):
                 raise FunctionInputError(f"Input should be int or float, got {type(offset)}")
@@ -502,6 +463,11 @@ class QmApiWithDeprecations(QmApi):
     ) -> None:
         raise NotImplementedError
 
+    @deprecated(
+        'qm.set_input_dc_offset_by_element is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.set_input_dc_offset_by_element()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_input_dc_offset_by_element(self, element: str, output: str, offset: float) -> None:
         """Deprecated - This method is going to be moved to the job API, please use job.set_input_dc_offset_by_element()`
 
@@ -519,17 +485,6 @@ class QmApiWithDeprecations(QmApi):
             If the sum of the DC offset and the largest waveform data-point exceed the range,
             DAC output overflow will occur and the output will be corrupted.
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.set_input_dc_offset_by_element",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use "
-                "`job.set_input_dc_offset_by_element()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         port = self._get_output_port_from_element(element, output)
         config = self._create_config_for_input_dc_offset_setting(port, offset)
         self.update_config(config)
@@ -538,6 +493,11 @@ class QmApiWithDeprecations(QmApi):
         if job is not None:
             job.set_input_dc_offset_by_element(element, output, offset)
 
+    @deprecated(
+        'qm.get_input_dc_offset_by_element is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed, please get the value from `qm.get_config()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_input_dc_offset_by_element(self, element: str, output: str) -> float:
         """Deprecated - This method is going to be removed, please get the value from `qm.get_config()`.
 
@@ -551,16 +511,6 @@ class QmApiWithDeprecations(QmApi):
         Returns:
             The offset, in volts
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_input_dc_offset_by_element",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be removed, please get the value from `qm.get_config()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         config = self._get_pb_config()
         port = self._get_output_port_from_element(element, output)
         fem_config = get_fem_config(config, port)
@@ -571,6 +521,11 @@ class QmApiWithDeprecations(QmApi):
         assert offset is not None  # Mypy thinks it can be None, but it can't really (offset has a default value)
         return offset
 
+    @deprecated(
+        'qm.get_digital_delay is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.get_output_digital_delay()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_digital_delay(self, element: str, digital_input: str) -> int:
         """Deprecated - This method is going to be moved to the job API, please use `job.get_output_digital_delay()`.
 
@@ -584,20 +539,14 @@ class QmApiWithDeprecations(QmApi):
         Returns:
             The delay
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_digital_delay",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use "
-                "`job.get_output_digital_delay()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         job = self._strict_get_running_job()
         return job.get_output_digital_delay(element, digital_input)
 
+    @deprecated(
+        'qm.set_digital_delay is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.set_output_digital_delay()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_digital_delay(self, element: str, digital_input: str, delay: int) -> None:
         """Deprecated - This method is going to be moved to the job API, please use `job.set_output_digital_delay()`.
 
@@ -609,20 +558,14 @@ class QmApiWithDeprecations(QmApi):
                 the element's config
             delay (int): The delay value to set to, in ns.
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.set_digital_delay",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use "
-                "`job.set_output_digital_delay()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         job = self._strict_get_running_job()
         job.set_output_digital_delay(element, digital_input, delay)
 
+    @deprecated(
+        'qm.get_digital_buffer is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.get_output_digital_buffer()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_digital_buffer(self, element: str, digital_input: str) -> int:
         """Deprecated - This method is going to be moved to the job API, please use `job.get_output_digital_buffer()`.
 
@@ -636,20 +579,14 @@ class QmApiWithDeprecations(QmApi):
         Returns:
             The buffer
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_digital_buffer",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use "
-                "`job.get_output_digital_buffer()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         job = self._strict_get_running_job()
         return job.get_output_digital_buffer(element, digital_input)
 
+    @deprecated(
+        'qm.set_digital_buffer is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.set_output_digital_buffer()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_digital_buffer(self, element: str, digital_input: str, buffer: int) -> None:
         """Deprecated - This method is going to be moved to the job API, please use `job.set_output_digital_buffer()`.
 
@@ -661,20 +598,14 @@ class QmApiWithDeprecations(QmApi):
                 the element's config
             buffer (int): The buffer value to set to, in ns.
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.set_digital_buffer",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use "
-                "`job.set_output_digital_buffer()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         job = self._strict_get_running_job()
         job.set_output_digital_buffer(element, digital_input, buffer)
 
+    @deprecated(
+        'qm.get_time_of_flight is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed, please get the value from `qm.get_config()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_time_of_flight(self, element: str) -> int:
         """Deprecated - This method is going to be removed, please get the value from `qm.get_config()`.
 
@@ -690,21 +621,16 @@ class QmApiWithDeprecations(QmApi):
         Returns:
             The time of flight, in ns
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_time_of_flight",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be removed, please get the value from `qm.get_config()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         tof = self._get_elements_pb_config()[element].timeOfFlight
         if tof is None:
             raise ValueError(f"Time of flight for element {element} is not set")
         return tof.value
 
+    @deprecated(
+        'qm.get_smearing is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed, please get the value from `qm.get_config()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_smearing(self, element: str) -> int:
         """Deprecated - This method is going to be removed, please get the value from `qm.get_config()`.
 
@@ -720,93 +646,68 @@ class QmApiWithDeprecations(QmApi):
         Returns:
             The smearing, in ns.
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_smearing",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be removed, please get the value from `qm.get_config()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         smearing = self._get_elements_pb_config()[element].smearing
         if smearing is None:
             raise ValueError(f"Smearing for element {element} is not set")
         return smearing.value
 
     @property
+    @deprecated(
+        'qm.io1 is deprecated since "1.2.0" and will be removed in "2.0.0". This property is going to be removed, please use `job.get_io_values()[0]`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def io1(self) -> IoValue:
         """Gets the data stored in ``IO1``.
 
         Deprecated since 1.2.0; will be removed in 2.0.0. Use ``job.get_io_values()[0]`` instead.
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.io1",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This property is going to be removed, please use `job.get_io_values()[0]`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         return self.get_io1_value()
 
     @io1.setter
+    @deprecated(
+        'qm.io1 is deprecated since "1.2.0" and will be removed in "2.0.0". This property is going to be removed, please use `job.set_io_values(io1=value)`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def io1(self, value: Value) -> None:
         """Sets the value of ``IO1``.
 
         Deprecated since 1.2.0; will be removed in 2.0.0. Use ``job.set_io_values(io1=value)`` instead.
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.io1",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This property is going to be removed, please use `job.set_io_values(io1=value)`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         self.set_io1_value(value)
 
     @property
+    @deprecated(
+        'qm.io2 is deprecated since "1.2.0" and will be removed in "2.0.0". This property is going to be removed, please use `job.get_io_values()[1]`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def io2(self) -> IoValue:
         """Gets the data stored in ``IO2``.
 
         Deprecated since 1.2.0; will be removed in 2.0.0. Use ``job.get_io_values()[1]`` instead.
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.io2",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This property is going to be removed, please use `job.get_io_values()[1]`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
-        return self.get_io1_value()
+        return self.get_io2_value()
 
     @io2.setter
+    @deprecated(
+        'qm.io2 is deprecated since "1.2.0" and will be removed in "2.0.0". This property is going to be removed, please use `job.set_io_values(io2=value)`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def io2(self, value: Value) -> None:
         """Sets the value of ``IO2``.
 
         Deprecated since 1.2.0; will be removed in 2.0.0. Use ``job.set_io_values(io2=value)`` instead.
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.io2",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This property is going to be removed, please use `job.set_io_values(io2=value)`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         self.set_io2_value(value)
 
+    @deprecated(
+        'qm.set_io1_value is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.set_io_values(io1=value)`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_io1_value(self, value_1: Value) -> None:
         """Deprecated - This method is going to be moved to the job API, please use `job.set_io_values(io1=value)`
 
@@ -823,18 +724,13 @@ class QmApiWithDeprecations(QmApi):
         Args:
             value_1: The value to be placed in ``IO1``
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.set_io1_value",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use `job.set_io_values(io1=value)`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         self.set_io_values(value_1=value_1)
 
+    @deprecated(
+        'qm.set_io2_value is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.set_io_values(io2=value)`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_io2_value(self, value_2: Value) -> None:
         """Deprecated - This method is going to be moved to the job API, please use `job.set_io_values(io2=value)`
 
@@ -851,18 +747,13 @@ class QmApiWithDeprecations(QmApi):
         Args:
             value_2: The value to be placed in ``IO2``
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.set_io2_value",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use `job.set_io_values(io2=value)`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         self.set_io_values(value_2=value_2)
 
+    @deprecated(
+        'qm.set_io_values is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.set_io_values()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_io_values(
         self,
         value_1: Optional[NumpySupportedValue] = None,
@@ -884,22 +775,17 @@ class QmApiWithDeprecations(QmApi):
             value_1: The value to be placed in ``IO1``
             value_2: The value to be placed in ``IO2``
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.set_io_values",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use `job.set_io_values()`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         if value_1 is None and value_2 is None:
             return
 
         job = self._strict_get_running_job()
         job.set_io_values(value_1, value_2)
 
+    @deprecated(
+        'qm.get_io1_value is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.get_io_values()[0]`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_io1_value(self) -> IoValue:
         """Deprecated - This method is going to be moved to the job API, please use `job.get_io_values()[0]`
 
@@ -911,18 +797,13 @@ class QmApiWithDeprecations(QmApi):
             A dictionary with data stored in ``IO1``. (Data is in all
             three format: ``int``, ``float`` and ``bool``)
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_io1_value",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use `job.get_io_values()[0]`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         return self.get_io_values()[0]
 
+    @deprecated(
+        'qm.get_io2_value is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.get_io_values()[1]`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_io2_value(self) -> IoValue:
         """Deprecated - This method is going to be moved to the job API, please use `job.get_io_values()[1]`
 
@@ -934,18 +815,13 @@ class QmApiWithDeprecations(QmApi):
             A dictionary with data stored in ``IO2``. (Data is in all
             three format: ``int``, ``float`` and ``bool``)
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_io2_value",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use `job.get_io_values()[1]`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         return self.get_io_values()[1]
 
+    @deprecated(
+        'qm.get_io_values is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be moved to the job API, please use `job.get_io_values()`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_io_values(self) -> List[IoValue]:
         """Deprecated - This method is going to be moved to the job API, please use `job.get_io_values()`
 
@@ -957,16 +833,6 @@ class QmApiWithDeprecations(QmApi):
             A dictionary with data stored in ``IO1`` & ``IO2`` (Data is in all
             three format: ``int``, ``float`` and ``bool``)
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_io_values",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be moved to the job API, please use `job.get_io_values()`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         running_job = self._strict_get_running_job()
         resp1, resp2 = running_job.get_io_values()
         return [
@@ -984,6 +850,11 @@ class QmApiWithDeprecations(QmApi):
             },
         ]
 
+    @deprecated(
+        'qm.save_config_to_file is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def save_config_to_file(self, filename: PathLike) -> None:
         """Deprecated - This method is going to be removed.
 
@@ -992,34 +863,22 @@ class QmApiWithDeprecations(QmApi):
         Args:
             filename: The name of the file where the config will be saved
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.save_config_to_file",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be removed.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         with open(filename, "w") as writer:
             json.dump(self.get_config(), writer)
 
+    @deprecated(
+        'qm.get_running_job is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed, please use `qm.get_jobs(status=[\'Running\'])`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_running_job(self) -> Optional[JobApiWithDeprecations]:
         """Deprecated - This method is going to be removed, please use `qm.get_jobs(status=['Running'])`
 
         Gets the currently running job. Returns None if there isn't one.
+
+        Returns:
+            The currently running job, or ``None`` if no job is running.
         """
-        warnings.warn(
-            deprecation_message(
-                method="qm.get_running_job",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method is going to be removed, please use `qm.get_jobs(status=['Running'])`",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         return self._get_running_job()
 
     def _get_running_job(self) -> Optional[JobApiWithDeprecations]:

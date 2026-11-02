@@ -92,11 +92,8 @@ class CalibrationDB(AbstractCalibrationDB):
         self._db = TinyDB(self._file_path, indent=4, separators=(",", ": "), storage=JSONStorage)
 
     def _query_mode(self, octave_channel: Tuple[str, int]) -> Optional[Document]:
-        return cast(
-            Optional[Document],
-            self._db.table("modes").get(
-                (Query().octave_name == octave_channel[0]) & (Query().octave_channel == octave_channel[1])
-            ),
+        return self._db.table("modes").get(
+            (Query().octave_name == octave_channel[0]) & (Query().octave_channel == octave_channel[1])
         )
 
     def _get_timestamp(self, doc: Document) -> float:
@@ -105,11 +102,8 @@ class CalibrationDB(AbstractCalibrationDB):
 
     def _query_lo_mode(self, mode_id: int, lo_freq: Union[int, float], gain: Optional[float]) -> Optional[Document]:
         if gain is not None:
-            return cast(
-                Optional[Document],
-                self._db.table("lo_modes").get(
-                    (Query().mode_id == mode_id) & (Query().lo_freq == lo_freq) & (Query().gain == gain)
-                ),
+            return self._db.table("lo_modes").get(
+                (Query().mode_id == mode_id) & (Query().lo_freq == lo_freq) & (Query().gain == gain)
             )
 
         lo_modes = self._db.table("lo_modes").search((Query().mode_id == mode_id) & (Query().lo_freq == lo_freq))
@@ -119,10 +113,7 @@ class CalibrationDB(AbstractCalibrationDB):
         return max(lo_modes, key=self._get_timestamp)
 
     def _query_if_mode(self, lo_mode_id: int, if_freq: float) -> Optional[Document]:
-        return cast(
-            Optional[Document],
-            self._db.table("if_modes").get((Query().lo_mode_id == lo_mode_id) & (Query().if_freq == if_freq)),
-        )
+        return self._db.table("if_modes").get((Query().lo_mode_id == lo_mode_id) & (Query().if_freq == if_freq))
 
     def _mode_id(self, octave_channel: Tuple[str, int], create: bool = False) -> int:
         query_result = self._query_mode(octave_channel)
@@ -222,7 +213,7 @@ class CalibrationDB(AbstractCalibrationDB):
         if lo_mode is None or lo_mode["latest"] == 0:
             return None
 
-        lo_cal = cast(Optional[Document], self._db.table("lo_cal").get(doc_id=lo_mode["latest"]))
+        lo_cal = self._db.table("lo_cal").get(doc_id=lo_mode["latest"])
         if lo_cal is None:
             return None
         lo_cal.pop("lo_mode_id", None)

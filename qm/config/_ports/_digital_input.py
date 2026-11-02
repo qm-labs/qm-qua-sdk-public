@@ -3,9 +3,19 @@ from typing import Literal
 
 from qm.type_hinting import Number
 from qm.config._primitives import NOT_SET, ConfigValue, ConfigOptional, create_value
-from qm.config._ports._port_base import Port, LfFem, MwFem, FemBase, OpxPlus, Direction, SignalType, OpxPlusMockFem
+from qm.config._ports._port_base import (
+    Port,
+    LfFem,
+    MwFem,
+    FemBase,
+    OpxPlus,
+    Direction,
+    LFLN08Fem,
+    SignalType,
+    OpxPlusMockFem,
+)
 
-Polarity = Literal["RISING", "FALLING"]
+DigitalInputPolarity = Literal["RISING", "FALLING"]
 
 
 class DigitalInputPort(Port, ABC):
@@ -17,7 +27,7 @@ class DigitalInputPort(Port, ABC):
         index: int,
         shareable: ConfigOptional[bool],
         deadtime: ConfigOptional[int],
-        polarity: ConfigOptional[Polarity],
+        polarity: ConfigOptional[DigitalInputPolarity],
         threshold: ConfigOptional[Number],
     ):
         """
@@ -32,7 +42,7 @@ class DigitalInputPort(Port, ABC):
         """
         super().__init__(fem, index, shareable)
         self.deadtime = create_value(deadtime, 0)
-        self.polarity: ConfigValue[Polarity] = create_value(polarity, "RISING")
+        self.polarity: ConfigValue[DigitalInputPolarity] = create_value(polarity, "RISING")
         self.threshold = create_value(threshold, 0)
 
     @property
@@ -53,7 +63,7 @@ class DigitalInputPortOpx(DigitalInputPort):
         controller: OpxPlus,
         shareable: ConfigOptional[bool] = NOT_SET,
         deadtime: ConfigOptional[int] = NOT_SET,
-        polarity: ConfigOptional[Polarity] = NOT_SET,
+        polarity: ConfigOptional[DigitalInputPolarity] = NOT_SET,
         threshold: ConfigOptional[Number] = NOT_SET,
     ):
         """
@@ -80,7 +90,7 @@ class DigitalInputPortOpx1000(DigitalInputPort, ABC):
     """Base class for digital input ports on OPX1000 hardware (LF-FEM and MW-FEM)."""
 
 
-class DigitalInputPortOctoDac(DigitalInputPortOpx1000):
+class DigitalInputPortLf(DigitalInputPortOpx1000):
     """Digital input port of an LF-FEM (OPX1000)."""
 
     def __init__(
@@ -89,7 +99,7 @@ class DigitalInputPortOctoDac(DigitalInputPortOpx1000):
         index: int,
         shareable: ConfigOptional[bool] = NOT_SET,
         deadtime: ConfigOptional[int] = NOT_SET,
-        polarity: ConfigOptional[Polarity] = NOT_SET,
+        polarity: ConfigOptional[DigitalInputPolarity] = NOT_SET,
         threshold: ConfigOptional[Number] = NOT_SET,
     ):
         """
@@ -106,7 +116,33 @@ class DigitalInputPortOctoDac(DigitalInputPortOpx1000):
         )
 
 
-class DigitalInputPortMicrowave(DigitalInputPortOpx1000):
+class DigitalInputPortLFLN08(DigitalInputPortOpx1000):
+    """Digital input port of an LF-LN08 FEM (OPX1000)."""
+
+    def __init__(
+        self,
+        fem: LFLN08Fem,
+        index: int,
+        shareable: ConfigOptional[bool] = NOT_SET,
+        deadtime: ConfigOptional[int] = NOT_SET,
+        polarity: ConfigOptional[DigitalInputPolarity] = NOT_SET,
+        threshold: ConfigOptional[Number] = NOT_SET,
+    ):
+        """
+        Args:
+            fem: The LF-LN08 the port belongs to.
+            index: The 1-based port index on the FEM.
+            shareable: Whether the port is shareable with other QM instances.
+            deadtime: The minimal time between pulses, in ns.
+            polarity: ``"RISING"`` (default) or ``"FALLING"``.
+            threshold: The minimum voltage to trigger when a pulse arrives.
+        """
+        super().__init__(
+            fem=fem, index=index, shareable=shareable, deadtime=deadtime, polarity=polarity, threshold=threshold
+        )
+
+
+class DigitalInputPortMw(DigitalInputPortOpx1000):
     """Digital input port of an MW-FEM (OPX1000 microwave front-end module)."""
 
     def __init__(
@@ -115,7 +151,7 @@ class DigitalInputPortMicrowave(DigitalInputPortOpx1000):
         index: int,
         shareable: ConfigOptional[bool] = NOT_SET,
         deadtime: ConfigOptional[int] = NOT_SET,
-        polarity: ConfigOptional[Polarity] = NOT_SET,
+        polarity: ConfigOptional[DigitalInputPolarity] = NOT_SET,
         threshold: ConfigOptional[Number] = NOT_SET,
     ):
         """

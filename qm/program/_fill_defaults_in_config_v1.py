@@ -19,6 +19,9 @@ def fill_defaults_in_config_v1(config: inc_qua_config_pb2.QuaConfig) -> None:
     optional labels.
     Consequently, validation tests such as test_config_supports_shareable_ports and test_config_without_shareable would
     fail.
+
+    Args:
+        config: The protobuf config to fill the default values into, in place.
     """
     controller_config = get_controller_pb_config(config)
     if isinstance(controller_config, inc_qua_config_pb2.QuaConfig.QuaConfigV1):

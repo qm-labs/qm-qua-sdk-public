@@ -108,6 +108,10 @@ def qua_struct(_cls: Union[Type[_T], None] = None) -> Union[Callable[[Type[_T]],
 
     Args:
         _cls (type[_T] | None): The class to decorate. If omitted, returns a decorator.
+
+    Returns:
+        The decorated QUA struct class, or a decorator that produces one when
+        ``_cls`` is omitted.
     """
 
     def validate_field_type(annotation: Any) -> None:

@@ -1,14 +1,27 @@
 from typing import TypeVar
 from collections.abc import Collection
 
-from qm.type_hinting.config_types import StandardPort
-from qm.config._ports._port_base import Port, PortReference
-from qm.config._ports._digital_input import DigitalInputPort
-from qm.config._ports._digital_output import DigitalOutputPort
-from qm.config._ports._analog_input import AnalogInputPortLf, AnalogInputPortMicrowave
-from qm.config._ports._analog_output import AnalogOutputPortLf, AnalogOutputPortMicrowave
+from qm.config._ports._port_base import PortReference
+from qm.type_hinting.config_types import StandardPort, PortReferenceType
+from qm.config._ports import AnalogInputPortLfBase, AnalogOutputPortLfBase
+from qm.config import (
+    Port,
+    DigitalInputPort,
+    AnalogInputPortMw,
+    DigitalOutputPort,
+    AnalogOutputPortMw,
+)
 
 T = TypeVar("T")
+
+
+def resolve_port_ref(ref: PortReferenceType) -> StandardPort:
+    default_fem = 1  # only for opx+
+    if len(ref) == 3:
+        return str(ref[0]), int(ref[1]), int(ref[2])
+    if len(ref) == 2:
+        return str(ref[0]), default_fem, int(ref[1])
+    raise ValueError(f"Invalid port reference: {ref}")
 
 
 class PortDict(dict[StandardPort, T]):
@@ -19,10 +32,10 @@ class PortDict(dict[StandardPort, T]):
 class PortLookup:
     def __init__(self, ports: Collection[Port], raise_if_missing: bool = True) -> None:
         if raise_if_missing:
-            self.analog_outputs_lf: dict[StandardPort, AnalogOutputPortLf] = {}
-            self.analog_outputs_mw: dict[StandardPort, AnalogOutputPortMicrowave] = {}
-            self.analog_inputs_lf: dict[StandardPort, AnalogInputPortLf] = {}
-            self.analog_inputs_mw: dict[StandardPort, AnalogInputPortMicrowave] = {}
+            self.analog_outputs_lf: dict[StandardPort, AnalogOutputPortLfBase] = {}
+            self.analog_outputs_mw: dict[StandardPort, AnalogOutputPortMw] = {}
+            self.analog_inputs_lf: dict[StandardPort, AnalogInputPortLfBase] = {}
+            self.analog_inputs_mw: dict[StandardPort, AnalogInputPortMw] = {}
             self.digital_outputs: dict[StandardPort, DigitalOutputPort] = {}
             self.digital_inputs: dict[StandardPort, DigitalInputPort] = {}
         else:
@@ -35,13 +48,13 @@ class PortLookup:
 
         for port in ports:
             key = (port.controller_name, port.fem_1_based, port.index_1_based)
-            if isinstance(port, AnalogOutputPortLf):
+            if isinstance(port, AnalogOutputPortLfBase):
                 self.analog_outputs_lf[key] = port
-            elif isinstance(port, AnalogOutputPortMicrowave):
+            elif isinstance(port, AnalogOutputPortMw):
                 self.analog_outputs_mw[key] = port
-            elif isinstance(port, AnalogInputPortLf):
+            elif isinstance(port, AnalogInputPortLfBase):
                 self.analog_inputs_lf[key] = port
-            elif isinstance(port, AnalogInputPortMicrowave):
+            elif isinstance(port, AnalogInputPortMw):
                 self.analog_inputs_mw[key] = port
             elif isinstance(port, DigitalOutputPort):
                 self.digital_outputs[key] = port

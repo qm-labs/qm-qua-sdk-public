@@ -1,10 +1,9 @@
 from dataclasses import dataclass
 from collections.abc import Mapping, Collection
 
-from qm.config._ports._port_base import Port
 from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
 from qm._config_converters._model_to_pb_converter.base_converter import BaseModelToPbConverter
-from qm.config._octave._octave import Loopback, OctaveRfPort, OctaveRfInput, OctaveRfOutput, OctaveConnectivity
+from qm.config import Port, Loopback, OctaveRfPort, OctaveRfInput, OctaveRfOutput, OctaveConnectivity
 
 
 @dataclass

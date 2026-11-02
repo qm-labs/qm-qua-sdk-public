@@ -5,9 +5,9 @@ from qm.config._primitives import ConfigObject
 from qm.exceptions import InvalidOctaveParameter, ConfigValidationException
 from qm.config._ports import (
     ElementPortType,
-    AnalogInputPortLf,
     PortReferenceType,
-    AnalogOutputPortLf,
+    AnalogInputPortLfBase,
+    AnalogOutputPortLfBase,
     standardize_lf_port,
     standardize_lf_input_port,
 )
@@ -64,7 +64,7 @@ class OctaveConnectivity(ConfigObject):
         self,
         device_name: str,
         inputs: Mapping[RfOutputIndex, tuple[ElementPortType, ElementPortType]],
-        outputs: Mapping[IfOutputIndex, PortReferenceType | AnalogInputPortLf],
+        outputs: Mapping[IfOutputIndex, PortReferenceType | AnalogInputPortLfBase],
         loopbacks: Collection[Loopback] = (),
     ) -> None:
         """
@@ -146,15 +146,15 @@ class OctaveRfOutput(OctaveRfPort):
         return self.input_attenuators == "ON"
 
     @property
-    def input_ports(self) -> tuple[AnalogOutputPortLf, AnalogOutputPortLf]:
+    def input_ports(self) -> tuple[AnalogOutputPortLfBase, AnalogOutputPortLfBase]:
         return self.device.inputs[self.index]
 
     @property
-    def i_connection(self) -> AnalogOutputPortLf:
+    def i_connection(self) -> AnalogOutputPortLfBase:
         return self.input_ports[0]
 
     @property
-    def q_connection(self) -> AnalogOutputPortLf:
+    def q_connection(self) -> AnalogOutputPortLfBase:
         return self.input_ports[1]
 
 
@@ -205,5 +205,5 @@ class OctaveRfInput(OctaveRfPort):
         self.if_mode_q = if_mode_q
 
     @property
-    def outputs(self) -> Mapping[int, AnalogInputPortLf]:
+    def outputs(self) -> Mapping[int, AnalogInputPortLfBase]:
         return self.device.outputs

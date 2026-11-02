@@ -5,6 +5,7 @@ from typing import Union, Optional, MutableMapping
 from qm.utils import deprecation_message
 from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.utils.protobuf_utils import which_one_of
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.api.models.capabilities import OPX_FEM_IDX, QopCaps, ServerCapabilities
 from qm.program._dict_to_pb_converter.base_converter import BaseDictToPbConverter
 from qm.program._dict_to_pb_converter.converters.pulse_converter import PulseConverter
@@ -131,7 +132,7 @@ class DictToQuaConfigConverter(
         if "version" in input_data:
             warnings.warn(
                 deprecation_message("version", "1.2.2", "2.0.0", "Please remove it from the QUA config."),
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
             )
 
         for key in input_data:

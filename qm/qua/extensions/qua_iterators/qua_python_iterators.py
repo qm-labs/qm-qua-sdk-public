@@ -1,3 +1,4 @@
+from typing_extensions import deprecated
 from typing import Any, Optional, overload
 
 import numpy as np
@@ -6,7 +7,7 @@ from qm._loc import _get_loc
 from qm.exceptions import QmQuaException
 from qm.type_hinting.general import Number
 from qm.qua._scope_management._core_scopes import _PythonScope
-from qm.utils.deprecation_utils import throw_warning, deprecation_message
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.qua.extensions.qua_iterators.qua_iterators_base import IterableBase
 from qm.qua.extensions.qua_iterators.qua_iterators_types import V, MetaDataType, PythonArrayType, PythonIteratorType
 
@@ -143,25 +144,20 @@ class PythonIterable(PythonIterableBase[Any]):
         return self._array
 
 
+@deprecated(
+    'NativeIterableRange is deprecated since "1.3.0" and will be removed in "2.0.0". '
+    "Use PythonIterableRange instead",
+    category=QmQuaDeprecationWarning,
+    stacklevel=1,
+)
 class NativeIterableRange(PythonIterableRange):
     """Deprecated alias for :class:`PythonIterableRange`."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        throw_warning(
-            deprecation_message("NativeIterableRange", "1.3.0", "2.0.0", "Use PythonIterableRange instead."),
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
 
-
+@deprecated(
+    'NativeIterable is deprecated since "1.3.0" and will be removed in "2.0.0". Use PythonIterable instead',
+    category=QmQuaDeprecationWarning,
+    stacklevel=1,
+)
 class NativeIterable(PythonIterable):
     """Deprecated alias for :class:`PythonIterable`."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        throw_warning(
-            deprecation_message("NativeIterable", "1.3.0", "2.0.0", "Use PythonIterable instead."),
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)

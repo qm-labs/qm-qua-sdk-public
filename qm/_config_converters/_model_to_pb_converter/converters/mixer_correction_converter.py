@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Collection
 
+from qm.config import Mixer
 from qm.exceptions import ConfigValidationException
-from qm.config._elements._analog_inputs import Mixer
 from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
 from qm._config_converters._model_to_pb_converter.base_converter import BaseModelToPbConverter
 

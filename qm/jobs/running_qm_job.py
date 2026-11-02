@@ -1,12 +1,12 @@
-import warnings
 from enum import Enum
 from typing import Tuple
+from typing_extensions import deprecated
 
 from qm.jobs.base_job import QmBaseJob
-from qm.utils import deprecation_message
 from qm.grpc.qm.pb import general_messages_pb2
 from qm.api.job_result_api import JobResultServiceApi
 from qm._report import ExecutionError, ExecutionReport
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 
 from .._stream_results import StreamsManager
 
@@ -18,22 +18,23 @@ class AcquiringStatus(Enum):
 
 
 class RunningQmJob(QmBaseJob):
+    """Handle for a job executing on the OPX+ with QOP2.x, returned by
+    [QuantumMachine.execute][qm.quantum_machine.QuantumMachine.execute]. Provides result handles, job
+    control, and per-element correction/calibration updates for the running job.
+    """
+
     @property
+    @deprecated(
+        'RunningQmJob.manager is deprecated since "1.1.0" and will be removed in "2.0.0". '
+        "QMJob no longer has 'manager' property",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def manager(self) -> None:
         """The QM object where this job lives.
 
         Deprecated since 1.1.0; will be removed in 2.0.0. The job no longer has a ``manager`` property.
         """
-        warnings.warn(
-            deprecation_message(
-                method="RunningQmJob.manager",
-                deprecated_in="1.1.0",
-                removed_in="2.0.0",
-                details="QMJob no longer has 'manager' property",
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return None
 
     @property
@@ -65,7 +66,11 @@ class RunningQmJob(QmBaseJob):
         return self._job_manager.halt(self._id)
 
     def resume(self) -> bool:
-        """Resumes a program that was halted using the [pause][qm.qua.pause] statement"""
+        """Resumes a program that was halted using the [pause][qm.qua.pause] statement
+
+        Returns:
+            `True` if the job was resumed successfully; `False` if the job is in an error state.
+        """
         if self.status == "ERROR":
             return False
         return self._job_manager.resume(self._id)

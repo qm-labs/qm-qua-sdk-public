@@ -3,13 +3,16 @@ from typing import Optional
 from google.protobuf.wrappers_pb2 import UInt32Value
 
 from qm._loc import _get_loc
+from qm.config import Pulse, Element
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.api.models.capabilities import QopCaps
+from qm.qua._dsl._type_hints import ElementRef
+from qm.qua._dsl._utils import _add_element_to_program
 from qm.qua._expressions import Scalar, to_scalar_pb_expression
 from qm.qua._scope_management.scopes_manager import scopes_manager
 
 
-def ramp_to_zero(element: str, duration: Optional[int] = None) -> None:
+def ramp_to_zero(element: ElementRef, duration: Optional[int] = None) -> None:
     r"""Starting from the last DC value, gradually lowers the DC to zero for `duration` *4nsec
 
     If `duration` is None, the duration is taken from the element's config
@@ -24,21 +27,22 @@ def ramp_to_zero(element: str, duration: Optional[int] = None) -> None:
             Range: [4, $2^{24}$] in steps of 1, or `None` to take
             value from config
     """
+    name = _add_element_to_program(element)
     duration = duration if duration is None else int(duration)
     loc = _get_loc()
     duration_val = UInt32Value(value=duration) if duration else None
     statement = inc_qua_pb2.QuaProgram.RampToZeroStatement(
         loc=loc,
-        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=name, loc=loc),
         duration=duration_val,
     )
     scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(rampToZero=statement))
 
 
 def load_waveform(
-    pulse: str,
+    pulse: str | Pulse,
     waveform_index: Scalar[int],
-    element: str,
+    element: ElementRef,
 ) -> None:
     """
     Load a waveform from the waveform array to be used in a pulse.
@@ -51,12 +55,17 @@ def load_waveform(
         element (str): The name of the element, as defined in the quantum machine configuration.
     """
     loc = _get_loc()
+    name = _add_element_to_program(element)
+    if isinstance(pulse, Pulse):
+        if isinstance(element, Element):
+            scopes_manager.program_scope.get_element(name).add_pulse(pulse)
+        pulse = pulse.name
     scopes_manager.program_scope.add_used_capability(QopCaps.waveform_array)
     statement = inc_qua_pb2.QuaProgram.AnyStatement(
         loadWaveform=inc_qua_pb2.QuaProgram.LoadWaveformStatement(
             loc=loc,
             pulse=inc_qua_pb2.QuaProgram.PulseReference(name=pulse, loc=loc),
-            qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+            qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=name, loc=loc),
             waveform_index=to_scalar_pb_expression(waveform_index),
         )
     )

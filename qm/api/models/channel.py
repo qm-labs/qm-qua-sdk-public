@@ -64,8 +64,10 @@ def create_channel(
     Args:
         host: Server host
         port: Server port
-        max_message_size: Max message size in bytes (used for flow control + message limits)
         ssl_context: Optional ssl.SSLContext. If provided, a secure channel is created.
+        max_message_size: Max message size in bytes (used for flow control + message limits)
+        headers: Headers to attach to every request sent over the channel.
+        debug_data: Optional object that collects debug information about the requests sent over the channel.
         tls_paths: Optional PEM file paths for a custom root CA and/or mTLS. When a field is
             omitted, gRPC's default trust roots are used and/or no client certificate is sent.
 

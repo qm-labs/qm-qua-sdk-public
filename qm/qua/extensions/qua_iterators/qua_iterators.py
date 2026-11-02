@@ -42,6 +42,9 @@ class QuaIterableBase(IterableBase[T], ABC):
     def declare_var(self) -> QuaVariable[T]:
         """
         Declare the QUA variable used by this iterable.
+
+        Returns:
+            The QUA variable declared for this iterable, of its ``dtype``.
         """
         return declare(self._dtype)
 
@@ -272,6 +275,12 @@ class QuaIterable(QuaIterableBase[T]):
     def is_stream_averaged(self, stream_name: str) -> bool:
         """
         Check if stream is averaged on this iterable
+
+        Args:
+            stream_name: the name of the stream to check.
+
+        Returns:
+            ``True`` if the named stream is averaged on this iterable, ``False`` otherwise.
         """
         if self._qua_range_itr is not None:
             return self._qua_range_itr.is_stream_averaged(stream_name)

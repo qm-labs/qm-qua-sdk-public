@@ -67,6 +67,12 @@ class IterableBase(ABC, Generic[V]):
     def is_stream_averaged(self, stream_name: str) -> bool:
         """
         Check if stream is averaged on this iterable
+
+        Args:
+            stream_name: the name of the stream to check.
+
+        Returns:
+            ``True`` if the named stream is averaged on this iterable, ``False`` otherwise.
         """
         return stream_name in self._averaged_streams
 

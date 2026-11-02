@@ -4,6 +4,7 @@ from typing import Union, cast
 from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.api.models.capabilities import QopCaps
 from qm.utils.protobuf_utils import proto_repeated_to_list
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.program._dict_to_pb_converter.base_converter import BaseDictToPbConverter
 from qm.type_hinting.config_types import (
     AnalogOutputFilterConfigType,
@@ -33,7 +34,7 @@ class AnalogOutputFiltersConverter(
             warnings.warn(
                 f"Setting the `high_pass` to {value} is equivalent to setting the `exponential_dc_gain` field "
                 f"to 0 and adding an exponential filter of (1, {value}). The `high_pass` field will be deprecated in QUA 2.0",
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
             )
 
     def _set_exponential_param(

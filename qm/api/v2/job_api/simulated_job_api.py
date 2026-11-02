@@ -92,7 +92,13 @@ class SimulatedJobApi(JobApi):
                 if response.mode == job_api_pb2.PullSamplesResponse.PullSamplesResponseSuccess.Mode.ANALOG:
                     if isinstance(fem_config, inc_qua_config_pb2.QuaConfig.ControllerDec):
                         analog_sampling_rate[key] = 1e9
-                    elif isinstance(fem_config, inc_qua_config_pb2.QuaConfig.OctoDacFemDec):
+                    elif isinstance(
+                        fem_config,
+                        (
+                            inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
+                            inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
+                        ),
+                    ):
                         analog_sampling_rate[key] = 2e9
                     elif isinstance(fem_config, inc_qua_config_pb2.QuaConfig.MicrowaveFemDec):
                         sampling_rate = fem_config.analogOutputs[response.port_id].samplingRate

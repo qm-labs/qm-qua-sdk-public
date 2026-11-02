@@ -23,6 +23,7 @@ from marshmallow import Schema, ValidationError, fields, validate, post_load, va
 
 from qm.utils import deprecation_message
 from qm.grpc.qm.pb import inc_qua_config_pb2
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.utils.protobuf_utils import assign_map, which_one_of, serialized_on_wire
 from qm.program._dict_to_pb_converter.main_config_converter import DictToQuaConfigConverter
 from qm.api.models.capabilities import OPX_FEM_IDX, QopCaps, ServerCapabilities, offline_capabilities
@@ -70,6 +71,7 @@ from qm.type_hinting.config_types import (
     PortReferenceType,
     MixInputConfigType,
     ControllerQuaConfig,
+    LFLN08FemConfigType,
     HoldOffsetConfigType,
     OscillatorConfigType,
     SingleInputConfigType,
@@ -91,6 +93,7 @@ from qm.type_hinting.config_types import (
     OctaveSingleIfOutputConfigType,
     MwFemAnalogOutputPortConfigType,
     TimeTaggingParametersConfigType,
+    AnalogOutputPortConfigTypeLFLN08,
     AnalogOutputPortConfigTypeOctoDac,
 )
 
@@ -136,7 +139,9 @@ def validate_no_crosstalk(
     controller_name: str,
     fem_idx: int,
 ) -> None:
-    if isinstance(controller, inc_qua_config_pb2.QuaConfig.MicrowaveFemDec):
+    if isinstance(
+        controller, (inc_qua_config_pb2.QuaConfig.MicrowaveFemDec, inc_qua_config_pb2.QuaConfig.LFLN08FemDec)
+    ):
         return
     for port_id, port in controller.analogOutputs.items():
         if len(port.crosstalk) > 0:
@@ -155,7 +160,12 @@ def validate_config_capabilities(
             for fem_name, fem in con.fems.items():
                 fem_config = get_fem_config_instance(fem)
                 if isinstance(
-                    fem_config, (inc_qua_config_pb2.QuaConfig.ControllerDec, inc_qua_config_pb2.QuaConfig.OctoDacFemDec)
+                    fem_config,
+                    (
+                        inc_qua_config_pb2.QuaConfig.ControllerDec,
+                        inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
+                        inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
+                    ),
                 ):
                     _validate_no_inverted_port(fem_config, controller_name=con_name, fem_idx=fem_name)
 
@@ -543,6 +553,31 @@ class AnalogOutputPortDefSchemaOPX1000(AnalogOutputPortDefSchema):
         return converter.control_device_converter.opx_1000_analog_output_port_to_pb(data)
 
 
+class AnalogOutputPortDefSchemaLFLN08(AnalogOutputPortDefSchema):
+    grpc_class = inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec  # type: ignore[assignment]
+
+    sampling_rate = fields.Float(
+        metadata={"description": "Sampling rate of the port."},
+    )
+    upsampling_mode = fields.String(
+        metadata={"description": "Mode of sampling rate, can be mw (default) or pulse"},
+        validate=validate_string_is_one_of({"mw", "pulse"}),
+    )
+    min_voltage_limit = fields.Float(
+        allow_none=True, metadata={"description": "Minimum voltage limit for the output port."}
+    )
+    max_voltage_limit = fields.Float(
+        allow_none=True, metadata={"description": "Maximum voltage limit for the output port."}
+    )
+
+    @post_load(pass_many=False)
+    def build(
+        self, data: AnalogOutputPortConfigTypeLFLN08, **kwargs: Any
+    ) -> inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec:
+        converter: DictToQuaConfigConverter = self.context["converter"]
+        return converter.control_device_converter.lf_ln08_analog_output_port_to_pb(data)
+
+
 class AnalogInputPortDefSchema(Schema):
     offset = fields.Float(
         metadata={"description": "DC offset to the input."},
@@ -801,6 +836,14 @@ class _SemiBuiltOctoDacConfig(TypedDict, total=False):
     digital_inputs: Dict[int, inc_qua_config_pb2.QuaConfig.DigitalInputPortDec]
 
 
+class _SemiBuiltLFLN08Config(TypedDict, total=False):
+    type: str
+    analog_outputs: Dict[int, inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec]
+    analog_inputs: Dict[int, inc_qua_config_pb2.QuaConfig.AnalogInputPortDec]
+    digital_outputs: Dict[int, inc_qua_config_pb2.QuaConfig.DigitalOutputPortDec]
+    digital_inputs: Dict[int, inc_qua_config_pb2.QuaConfig.DigitalInputPortDec]
+
+
 class _SemiBuiltMwFemConfig(TypedDict, total=False):
     analog_outputs: Dict[int, inc_qua_config_pb2.QuaConfig.MicrowaveAnalogOutputPortDec]
     analog_inputs: Dict[int, inc_qua_config_pb2.QuaConfig.MicrowaveAnalogInputPortDec]
@@ -813,9 +856,14 @@ ControllerType = TypeVar(
     inc_qua_config_pb2.QuaConfig.ControllerDec,
     inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
     inc_qua_config_pb2.QuaConfig.MicrowaveFemDec,
+    inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
 )
 _SemiBuiltControllerType = TypeVar(
-    "_SemiBuiltControllerType", _SemiBuiltControllerConfig, _SemiBuiltOctoDacConfig, _SemiBuiltMwFemConfig
+    "_SemiBuiltControllerType",
+    _SemiBuiltControllerConfig,
+    _SemiBuiltOctoDacConfig,
+    _SemiBuiltMwFemConfig,
+    _SemiBuiltLFLN08Config,
 )
 
 
@@ -840,6 +888,13 @@ def _append_data_to_controller(
     pass
 
 
+@overload
+def _append_data_to_controller(
+    data: _SemiBuiltLFLN08Config, controller: inc_qua_config_pb2.QuaConfig.LFLN08FemDec
+) -> inc_qua_config_pb2.QuaConfig.LFLN08FemDec:
+    pass
+
+
 def _append_data_to_controller(data: _SemiBuiltControllerType, controller: ControllerType) -> ControllerType:
     if "analog_outputs" in data:
         for analog_output_name, analog_output in data["analog_outputs"].items():
@@ -856,6 +911,10 @@ def _append_data_to_controller(data: _SemiBuiltControllerType, controller: Contr
                     isinstance(controller, inc_qua_config_pb2.QuaConfig.MicrowaveFemDec)
                     and isinstance(analog_output, inc_qua_config_pb2.QuaConfig.MicrowaveAnalogOutputPortDec)
                 )
+                or (
+                    isinstance(controller, inc_qua_config_pb2.QuaConfig.LFLN08FemDec)
+                    and isinstance(analog_output, inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec)
+                )
             ):
                 controller.analogOutputs[analog_output_name].CopyFrom(analog_output)
             else:
@@ -865,7 +924,12 @@ def _append_data_to_controller(data: _SemiBuiltControllerType, controller: Contr
         for analog_input_name, analog_input in data["analog_inputs"].items():
             if (
                 isinstance(
-                    controller, (inc_qua_config_pb2.QuaConfig.ControllerDec, inc_qua_config_pb2.QuaConfig.OctoDacFemDec)
+                    controller,
+                    (
+                        inc_qua_config_pb2.QuaConfig.ControllerDec,
+                        inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
+                        inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
+                    ),
                 )
                 and isinstance(analog_input, inc_qua_config_pb2.QuaConfig.AnalogInputPortDec)
             ) or (
@@ -926,6 +990,41 @@ class OctoDacControllerSchema(FemSchema):
         return _append_data_to_controller(data, controller)
 
 
+class LFLN08ControllerSchema(FemSchema):
+    type = fields.String(description="controller type", validate=validate_string_is_one_of({"LF-LN08"}), required=True)
+    analog_outputs = fields.Dict(
+        fields.Int(),
+        fields.Nested(AnalogOutputPortDefSchemaLFLN08),
+        description="The analog output ports and their properties.",
+    )
+    analog_inputs = fields.Dict(
+        fields.Int(),
+        fields.Nested(AnalogInputPortDefSchema),
+        description="The analog input ports and their properties.",
+    )
+    digital_outputs = fields.Dict(
+        fields.Int(),
+        fields.Nested(DigitalOutputPortDefSchema),
+        description="The digital output ports and their properties.",
+    )
+    digital_inputs = fields.Dict(
+        fields.Int(),
+        fields.Nested(DigitalInputPortDefSchema),
+        description="The digital inputs ports and their properties.",
+    )
+
+    class Meta:
+        title = "LF-LN08"
+        description = "The specification of a single LF-LN08 and its properties."
+
+    @post_load(pass_many=False)
+    def build(self, data: _SemiBuiltLFLN08Config, **kwargs: Any) -> inc_qua_config_pb2.QuaConfig.LFLN08FemDec:
+        capabilities: ServerCapabilities = self.context[CAPABILITIES_KEY]
+        capabilities.validate([QopCaps.lf_ln08_fem])
+        controller = inc_qua_config_pb2.QuaConfig.LFLN08FemDec()
+        return _append_data_to_controller(data, controller)
+
+
 class MwFemSchema(FemSchema):
     type = fields.String(
         strict=True,
@@ -972,6 +1071,7 @@ class SemiBuiltControllerConfig(TypedDict, total=False):
             inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
             inc_qua_config_pb2.QuaConfig.ControllerDec,
             inc_qua_config_pb2.QuaConfig.MicrowaveFemDec,
+            inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
         ],
     ]
     analog_outputs: Dict[int, inc_qua_config_pb2.QuaConfig.AnalogOutputPortDec]
@@ -981,16 +1081,17 @@ class SemiBuiltControllerConfig(TypedDict, total=False):
 
 
 def _fem_schema_deserialization_disambiguation(
-    object_dict: Union[LfFemConfigType, MwFemConfigType], data: Any
+    object_dict: Union[LfFemConfigType, MwFemConfigType, LFLN08FemConfigType], data: Any
 ) -> FemSchema:
     type_to_schema = {
         "LF": OctoDacControllerSchema,
         "MW": MwFemSchema,
+        "LF-LN08": LFLN08ControllerSchema,
     }
     try:
         return type_to_schema[object_dict["type"].upper()]()
     except KeyError:
-        raise ValidationError("Could not detect FEM type, please specify the type you are using (LF or MW).")
+        raise ValidationError("Could not detect FEM type, please specify the type you are using (LF, MW or LF-LN08).")
 
 
 _fem_poly_field = PolyField(
@@ -1047,6 +1148,8 @@ class ControllerSchema(Schema):
                         item.fems[k].CopyFrom(inc_qua_config_pb2.QuaConfig.FEMTypes(microwave=v))
                     elif isinstance(v, inc_qua_config_pb2.QuaConfig.OctoDacFemDec):
                         item.fems[k].CopyFrom(inc_qua_config_pb2.QuaConfig.FEMTypes(octo_dac=v))
+                    elif isinstance(v, inc_qua_config_pb2.QuaConfig.LFLN08FemDec):
+                        item.fems[k].CopyFrom(inc_qua_config_pb2.QuaConfig.FEMTypes(lf_ln08_fem=v))
                     else:
                         for analog_input in v.analogInputs.values():
                             if analog_input.samplingRate != 1e9:
@@ -1670,6 +1773,13 @@ class ElementSchema(Schema):
 
     sticky = fields.Nested(StickySchema)
 
+    persistent = fields.Boolean(
+        metadata={
+            "description": "Whether the element is persistent (lives across jobs until the QM is closed"
+            "phase does not reset between jobs)."
+        }
+    )
+
     thread = fields.String(metadata={"description": "Element thread (deprecated, use 'core' instead)"})
     core = fields.String(metadata={"description": "Element core"})
     RF_inputs = fields.Dict(keys=fields.String(), values=_create_tuple_field([fields.String(), fields.Int()]))
@@ -1744,7 +1854,7 @@ class ElementSchema(Schema):
         if "outputPulseParameters" in data:
             warnings.warn(
                 deprecation_message("outputPulseParameters", "1.2.2", "2.0.0", "Use timeTaggingParameters instead."),
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
             )
             el.outputPulseParameters.CopyFrom(data["outputPulseParameters"])
         if "timeTaggingParameters" in data:
@@ -1773,8 +1883,15 @@ class ElementSchema(Schema):
             else:
                 el.holdOffset.CopyFrom(data["hold_offset"])
 
+        if data.get("persistent"):
+            if not capabilities.supports_persistent_elements:
+                raise ConfigValidationException(QopCaps.persistent_elements.unsupported_exception_message)
+            el.persistent = True
+
         if "thread" in data:
-            warnings.warn(deprecation_message("thread", "1.2.2", "2.0.0", "Use 'core' instead."), DeprecationWarning)
+            warnings.warn(
+                deprecation_message("thread", "1.2.2", "2.0.0", "Use 'core' instead."), QmQuaDeprecationWarning
+            )
             el.thread.CopyFrom(element_thread_to_pb(data["thread"]))
         if "core" in data:
             el.thread.CopyFrom(element_thread_to_pb(data["core"]))
@@ -1906,7 +2023,7 @@ class QuaConfigSchema(Schema):
         if "version" in data:
             warnings.warn(
                 deprecation_message("'version'", "1.2.2", "2.0.0", "Please remove it from the Qua config."),
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
             )
 
         # logical config content

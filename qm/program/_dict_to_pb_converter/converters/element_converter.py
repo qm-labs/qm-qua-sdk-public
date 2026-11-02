@@ -6,6 +6,7 @@ from google.protobuf.empty_pb2 import Empty
 from qm.utils import deprecation_message
 from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.exceptions import ConfigValidationException
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.utils.protobuf_utils import which_one_of, serialized_on_wire
 from qm.program._dict_to_pb_converter.base_converter import BaseDictToPbConverter
 from qm.program._dict_to_pb_converter.converters.octave_converter import (
@@ -75,7 +76,7 @@ class ElementConverter(BaseDictToPbConverter[ElementConfigType, inc_qua_config_p
         if "thread" in data:
             warnings.warn(
                 deprecation_message("thread", "1.2.0", "2.0.0", "Use 'core' instead"),
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
             )
             element.thread.CopyFrom(element_thread_to_pb(data["thread"]))
         if "core" in data:
@@ -191,10 +192,15 @@ class ElementConverter(BaseDictToPbConverter[ElementConfigType, inc_qua_config_p
                     inc_qua_config_pb2.QuaConfig.HoldOffset(duration=data["hold_offset"]["duration"])
                 )
 
+        if data.get("persistent"):
+            if not self._capabilities.supports_persistent_elements:
+                raise ConfigValidationException("persistent elements is supported from QOP 3.9 and above.")
+            element.persistent = True
+
         if "outputPulseParameters" in data:
             warnings.warn(
                 deprecation_message("outputPulseParameters", "1.2.0", "2.0.0", "Use timeTaggingParameters instead"),
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
             )
             element.outputPulseParameters.CopyFrom(self.create_time_tagging_parameters(data["outputPulseParameters"]))
         if "timeTaggingParameters" in data:
@@ -230,13 +236,13 @@ class ElementConverter(BaseDictToPbConverter[ElementConfigType, inc_qua_config_p
         if polarity in {"ABOVE", "ASCENDING"}:
             if polarity == "ASCENDING":
                 warnings.warn(
-                    deprecation_message("ASCENDING", "1.2.2", "2.0.0", "Use 'ABOVE' instead"), DeprecationWarning
+                    deprecation_message("ASCENDING", "1.2.2", "2.0.0", "Use 'ABOVE' instead"), QmQuaDeprecationWarning
                 )
             return inc_qua_config_pb2.QuaConfig.OutputPulseParameters.Polarity.ASCENDING
         elif polarity in {"BELOW", "DESCENDING"}:
             if polarity == "DESCENDING":
                 warnings.warn(
-                    deprecation_message("DESCENDING", "1.2.2", "2.0.0", "Use 'BELOW' instead"), DeprecationWarning
+                    deprecation_message("DESCENDING", "1.2.2", "2.0.0", "Use 'BELOW' instead"), QmQuaDeprecationWarning
                 )
             return inc_qua_config_pb2.QuaConfig.OutputPulseParameters.Polarity.DESCENDING
         else:
@@ -261,6 +267,7 @@ class ElementConverter(BaseDictToPbConverter[ElementConfigType, inc_qua_config_p
             "operations": output_data.operations,
             "hold_offset": _deconvert_hold_offset(output_data.holdOffset),
             "sticky": _deconvert_sticky(output_data.sticky),
+            "persistent": output_data.persistent,
         }
         if serialized_on_wire(output_data.thread):
             element_config_data["core"] = _deconvert_element_thread(output_data.thread)

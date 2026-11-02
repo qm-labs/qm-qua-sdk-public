@@ -10,7 +10,7 @@ from qm.config._waveforms._analog import SingleWaveformOptions, standardize_wave
 class Pulse(NamedObject, ABC):
     """The specification and properties of a single pulse and the measurement associated with it.
 
-    Concrete subclasses are ``DigitalPulse``, ``SinglePulse``, and ``DualPulse``. The
+    Concrete subclasses are ``DigitalPulse``, ``SinglePulse``, and ``ComplexPulse``. The
     legacy schema field ``operation`` (``"control"``/``"measurement"``) is implicit:
     pulses with ``integration_weights`` are measurements.
     """
@@ -96,7 +96,7 @@ class SinglePulse(Pulse):
         self.waveform = standardize_waveform(waveform)
 
 
-class DualPulse(Pulse):
+class ComplexPulse(Pulse):
     """A pulse for an element with two analog inputs (I/Q or MW)."""
 
     def __init__(

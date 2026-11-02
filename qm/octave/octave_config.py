@@ -2,6 +2,7 @@ import re
 import logging
 import warnings
 import dataclasses
+from typing_extensions import deprecated
 from typing import Any, Dict, List, Tuple, Union, Generic, TypeVar, Optional
 
 from qm.utils import SERVICE_HEADER_NAME
@@ -12,6 +13,7 @@ from qm.octave.calibration_db import CalibrationDB
 from qm.type_hinting.config_types import StandardPort
 from qm.octave_sdk import OctaveOutput, OctaveLOSource
 from qm.api.models.server_details import ConnectionDetails
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.octave.abstract_calibration_db import AbstractCalibrationDB
 
 logger = logging.getLogger(__name__)
@@ -105,18 +107,17 @@ class QmOctaveConfig:
     def devices(self) -> Dict[str, ConnectionDetails]:
         return self._devices
 
+    @deprecated(
+        "QmOctaveConfig is going to be deprecated, " "please set the calibration db through the QuantumMachinesManager",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_calibration_db(self, path: PathLike) -> None:
         """Sets the path to the calibration database
 
         Args:
             path (str): path to the calibration database
         """
-        warnings.warn(
-            "QmOctaveConfig is going to be deprecated, "
-            "please set the calibration db through the QuantumMachinesManager",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         self._set_calibration_db(path)
 
     def _set_calibration_db(self, path: Union[PathLike, AbstractCalibrationDB]) -> None:
@@ -132,6 +133,12 @@ class QmOctaveConfig:
     def _check_connection_format(connection: Tuple[str, Union[int, str]]) -> bool:
         return isinstance(connection, tuple) and len(connection) == 2 and isinstance(connection[0], str)
 
+    @deprecated(
+        'OctaveConfig.set_opx_octave_mapping is deprecated since "1.1.6" and will be removed in "2.0.0". '
+        "The port mapping was moved to the QUA-config. Please set the mapping there",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def set_opx_octave_mapping(self, mappings: List[Tuple[str, str]]) -> None:
         """Sets the default port mapping for each `opx, octave` names
 
@@ -140,12 +147,6 @@ class QmOctaveConfig:
         Args:
             mappings: list of tuples of [OPX_name, octave_name] to connect
         """
-        warnings.warn(
-            "OctaveConfig.set_opx_octave_mapping is deprecated as of 1.1.6 and will be removed in 2.0.0. "
-            "The port mapping was moved to the QUA-config. Please set the mapping there",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         if self._opx_octave_port_mapping is None:
             self._opx_octave_port_mapping = {}
 
@@ -155,6 +156,12 @@ class QmOctaveConfig:
         for opx_name, octave_name in mappings:
             self._opx_octave_port_mapping.update(self.get_default_opx_octave_port_mapping(opx_name, octave_name))
 
+    @deprecated(
+        'OctaveConfig.add_opx_octave_port_mapping is deprecated since "1.1.6" and will be removed in "2.0.0". '
+        "The port mapping was moved to the QUA-config. Please set the mapping there",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def add_opx_octave_port_mapping(
         self, connections: Dict[Union[StandardPort, Tuple[str, int]], Tuple[str, str]]
     ) -> None:
@@ -181,13 +188,6 @@ class QmOctaveConfig:
         # ("con1", 1): ("octave1", "I1")
         # validate structure:
 
-        warnings.warn(
-            "OctaveConfig.add_opx_octave_port_mapping is deprecated as of 1.1.6 and will be removed in 2.0.0. "
-            "The port mapping was moved to the QUA-config. Please set the mapping there",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
         if self._opx_octave_port_mapping is None:
             self._opx_octave_port_mapping = {}
 
@@ -210,6 +210,12 @@ class QmOctaveConfig:
             standardized_connections[standard_key] = octave_connection
         self._opx_octave_port_mapping.update(standardized_connections)
 
+    @deprecated(
+        'OctaveConfig.add_opx_octave_port_mapping is deprecated since "1.1.6" and will be removed in "2.0.0". '
+        "The port mapping was moved to the QUA-config. Please set the mapping there",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def add_octave_to_opx_port_mapping(
         self, connections: Dict[Tuple[str, str], Union[StandardPort, Tuple[str, int]]]
     ) -> None:
@@ -225,14 +231,6 @@ class QmOctaveConfig:
         Args:
             connections (ConnectionMapping): mapping of octaves to OPXs connections
         """
-
-        warnings.warn(
-            "OctaveConfig.add_opx_octave_port_mapping is deprecated as of 1.1.6 and will be removed in 2.0.0. "
-            "The port mapping was moved to the QUA-config. Please set the mapping there",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
         if self._octave_to_opx_port_mapping is None:
             self._octave_to_opx_port_mapping = {}
 
@@ -259,7 +257,7 @@ class QmOctaveConfig:
             "Setting the mapping was move to the QUA-config. "
             "It is deprecated since 1.1.6 and will be removed in 2.0.0. "
             "Please set the mapping there",
-            DeprecationWarning,
+            QmQuaDeprecationWarning,
             stacklevel=2,
         )
         return self._opx_octave_port_mapping
@@ -276,7 +274,7 @@ class QmOctaveConfig:
             "Setting the mapping was move to the QUA-config. "
             "It is deprecated since 1.2.2 and will be removed in 2.0.0. "
             "Please set the mapping there",
-            DeprecationWarning,
+            QmQuaDeprecationWarning,
             stacklevel=2,
         )
         return self._octave_to_opx_port_mapping
@@ -302,6 +300,12 @@ class QmOctaveConfig:
     def calibration_db(self) -> Optional[AbstractCalibrationDB]:
         return self._calibration_db
 
+    @deprecated(
+        'OctaveConfig.add_lo_loopback is deprecated since "1.1.6" and will be removed in "2.0.0". '
+        "Please set the loopbacks there",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def add_lo_loopback(
         self,
         octave_output_name: str,
@@ -319,12 +323,6 @@ class QmOctaveConfig:
             octave_input_port (OctaveLOSource): the LO input port
                 according to OctaveLOSource
         """
-        warnings.warn(
-            "OctaveConfig.add_lo_loopback is deprecated as of 1.1.6 and will be removed in 2.0.0. "
-            "Please set the loopbacks there",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         if self._loopbacks is None:
             self._loopbacks = {}
 
@@ -350,7 +348,7 @@ class QmOctaveConfig:
         warnings.warn(
             "Loopbacks were moved to the QUA-config, this function will be removed in 2.0.0,"
             "please set the loopbacks there, and get them from there",
-            DeprecationWarning,
+            QmQuaDeprecationWarning,
             stacklevel=2,
         )
         result = {}

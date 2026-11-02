@@ -4,6 +4,7 @@ from typing import Union, Optional, Sequence
 
 from qm.type_hinting import Number
 from qm.qua._dsl._type_hints import OneOrMore
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.qua._dsl.stream_processing.map_functions.map_function_classes import (
     FFT,
     Demod,
@@ -98,7 +99,7 @@ class MapFunctions:
         if mode is None:
             warnings.warn(
                 "mode=None is deprecated, use empty-string or (recommended) don't write the mode at-all",
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
             )
             mode = ""
         return Convolution(constant_vector, mode)
@@ -117,7 +118,7 @@ class MapFunctions:
         if mode is None:
             warnings.warn(
                 "mode=None is deprecated, use empty-string or (recommended) don't write the mode at-all",
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
             )
             mode = ""
         return TupleConvolution(mode)

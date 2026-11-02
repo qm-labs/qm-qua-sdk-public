@@ -3,8 +3,10 @@ import json
 import logging
 import warnings
 from pathlib import Path
+from collections import UserDict
 from dataclasses import field, dataclass
-from typing import Any, Dict, List, Tuple, Union, Mapping, Iterable, Optional, TypedDict, Collection
+from typing_extensions import deprecated
+from typing import Any, Dict, List, Tuple, Union, Mapping, Iterable, Optional, TypedDict, Collection, overload
 
 import marshmallow
 import packaging.version
@@ -12,10 +14,12 @@ import packaging.version
 import qm
 from qm.api.v2.qm_api import QmApi
 from qm.user_config import UserConfig
+from qm.config import ControllerConfig
 from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
 from qm.program import Program, load_config
 from qm.type_hinting.general import PathLike
+from qm._stream_results import StreamsManager
 from qm.api.v2.job_api.job_api import JobData
 from qm.quantum_machine import QuantumMachine
 from qm.api.models.channel import TlsFilePaths
@@ -45,8 +49,12 @@ from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler
 from qm.api.models.capabilities import QopCaps, Capability, ServerCapabilities, offline_capabilities
 from qm.simulate.credentials import CredentialOverrides, create_credentials, validate_client_cert_pair
 from qm.exceptions import QmmException, ConfigSchemaError, InvalidCredentialsError, ConfigValidationException
+from qm._config_converters._model_to_pb_converter.converters.element_converter import (
+    convert_elements,
+    convert_controller_config,
+)
 
-from ._stream_results import StreamsManager
+from .utils.deprecation_utils import QmQuaDeprecationWarning
 from .program._dict_to_pb_converter import DictToQuaConfigConverter
 
 logger = logging.getLogger(__name__)
@@ -99,6 +107,7 @@ SERVER_TO_QOP_VERSION_MAP = {
     "3.6.0-11345.aa8a9fd": "3.6.0",
     "3.6.0-12658.702d99c": "3.6.1",
     "3.6.0-13160.a7d6ed8": "3.6.2",
+    "3.6.0-16662.9f76db9": "3.6.3",
 }
 
 
@@ -192,6 +201,11 @@ class QuantumMachinesManager:
             cluster_name (string): The name of the cluster. Requires redirection between devices.
             timeout (float): The timeout, in seconds, for detecting the qmm and most other gateway API calls. Default is 60.
             log_level (Union[int, string]): The logging level for the connection instance. Defaults to `INFO`. Please check `logging` for available options.
+            connection_headers (Dict[str, str]): Additional HTTP headers to attach to every request sent to the gateway.
+            add_debug_data (bool): If True, collects debug information about the requests sent to the gateway. Defaults to False.
+            credentials (ssl.SSLContext): An optional SSL context used to establish a secure (TLS) connection to the gateway.
+            store (BaseStore): An object used to persist job data. Deprecated since 1.2.3; will be removed in 2.0.0.
+            file_store_root (str): The root directory used by the default file-based store. Deprecated since 1.2.3; will be removed in 2.0.0.
             octave (QmOctaveConfig): The configuration for the Octave devices. Deprecated from QOP 2.4.0.
             octave_calibration_db_path (PathLike): The path for storing the Octave's calibration database. It can also be a calibration database which is an instance of `AbstractCalibrationDB`.
             follow_gateway_redirections (bool): If True (default), the client will follow redirections to find a QuantumMachinesManager and Octaves. Otherwise, it will only connect to the given host and port.
@@ -216,7 +230,7 @@ class QuantumMachinesManager:
                     "2.0.0",
                     "This parameter is going to be removed, remove it from you initialization",
                 ),
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
                 stacklevel=2,
             )
         else:
@@ -230,7 +244,7 @@ class QuantumMachinesManager:
                     "2.0.0",
                     "This parameter is going to be removed, remove it from you initialization",
                 ),
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
                 stacklevel=2,
             )
 
@@ -257,7 +271,7 @@ class QuantumMachinesManager:
                     "QMM was opened with OctaveConfig. Please note that from QOP2.4.0 the octave devices "
                     "are managed by the cluster setting in the QM-app. It is recommended to remove the "
                     "OctaveConfig from the QMM instantiation",
-                    category=DeprecationWarning,
+                    category=QmQuaDeprecationWarning,
                 )
             else:
                 for name, info in self._server_details.octaves.items():
@@ -328,16 +342,16 @@ class QuantumMachinesManager:
         return server_details
 
     @property
+    @deprecated(
+        'qmm.store is deprecated since "1.2.3" and will be removed in "2.0.0"',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def store(self) -> BaseStore:
         """The persistence store.
 
         Deprecated since 1.2.3; will be removed in 2.0.0.
         """
-        warnings.warn(
-            deprecation_message("qmm.store", "1.2.3", "2.0.0"),
-            DeprecationWarning,
-            stacklevel=2,
-        )
         if isinstance(self._store, str):
             return SimpleFileStore(self._store)
         return self._store
@@ -412,6 +426,12 @@ class QuantumMachinesManager:
                     "version. Please consider updating to the latest qm-qua version"
                 )
 
+    @deprecated(
+        'qmm.version_dict() is deprecated since "1.3.0" and will be removed in "2.0.0". '
+        "Please use qmm.version() instead",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def version_dict(self) -> Version:
         """Returns a dictionary with the qm-qua and QOP versions.
 
@@ -420,17 +440,6 @@ class QuantumMachinesManager:
         Returns:
             A dictionary with the qm-qua and QOP versions
         """
-        warnings.warn(
-            deprecation_message(
-                "qmm.version_dict()",
-                "1.3.0",
-                "2.0.0",
-                "Please use qmm.version() instead.",
-            ),
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
-
         output_dict: Version = {}
         server_version = self._server_details.server_version
         output_dict["qm-qua"] = qm_qua_version
@@ -483,7 +492,7 @@ class QuantumMachinesManager:
 
     def open_qm(
         self,
-        config: Union[FullQuaConfig, ControllerQuaConfig],
+        config: Union[FullQuaConfig, ControllerQuaConfig, ControllerConfig],
         close_other_machines: Optional[bool] = None,
         validate_with_protobuf: bool = False,
         add_calibration_elements_to_config: bool = True,
@@ -520,8 +529,12 @@ class QuantumMachinesManager:
         """
         if kwargs:
             logger.warning(f"Unused kwargs: {list(kwargs)}, please remove them")
-
-        loaded_config = self._load_config(config, disable_marshmallow_validation=validate_with_protobuf)
+        if isinstance(config, (dict, UserDict)):  # UserDict is for validation
+            loaded_config = self._load_config(config, disable_marshmallow_validation=validate_with_protobuf)
+        elif isinstance(config, ControllerConfig):
+            loaded_config = convert_controller_config(config, capabilities=self._caps)
+        else:
+            raise QmmException(f"Invalid config type - {type(config)}")
 
         if use_calibration_data and self._octave_config is not None and self._octave_config.devices:
             if self._octave_config.calibration_db is not None:
@@ -588,6 +601,11 @@ class QuantumMachinesManager:
         """
         self._load_config(qua_config)
 
+    @deprecated(
+        'qmm.open_qm_from_file is deprecated since "1.2.0" and will be removed in "2.0.0". This method is going to be removed',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def open_qm_from_file(self, filename: str, close_other_machines: bool = True) -> Union[QuantumMachine, QmApi]:
         """Opens a new quantum machine with config taken from a file on the local file system
 
@@ -601,16 +619,6 @@ class QuantumMachinesManager:
         Returns:
             A quantum machine obj that can be used to execute programs
         """
-        warnings.warn(
-            deprecation_message(
-                "qmm.open_qm_from_file",
-                "1.2.0",
-                "2.0.0",
-                "This method is going to be removed.",
-            ),
-            DeprecationWarning,
-            stacklevel=1,
-        )
         with open(filename) as json_file:
             json1_str = json_file.read()
 
@@ -638,6 +646,7 @@ class QuantumMachinesManager:
 
         return create_simulation_request(pb_config, program, simulate, standardized_options, self._caps)
 
+    @overload
     def simulate(
         self,
         config: FullQuaConfig,
@@ -647,11 +656,40 @@ class QuantumMachinesManager:
         *,
         strict: Optional[bool] = None,
         flags: Optional[List[str]] = None,
+    ) -> Union[SimulatedJob, SimulatedJobApi]: ...
+
+    @overload
+    def simulate(
+        self,
+        program: Program,
+        simulate: SimulationConfig,
+        compiler_options: Optional[CompilerOptionArguments] = None,
+        *,
+        strict: Optional[bool] = None,
+        flags: Optional[List[str]] = None,
+    ) -> Union[SimulatedJob, SimulatedJobApi]: ...
+
+    def simulate(  # type: ignore[misc]  # the two overloads can't share a name for the first positional (config vs program)
+        self,
+        config: Any = None,
+        program: Any = None,
+        simulate: Any = None,
+        compiler_options: Any = None,
+        *,
+        strict: Optional[bool] = None,
+        flags: Optional[List[str]] = None,
     ) -> Union[SimulatedJob, SimulatedJobApi]:
         """Simulate the outputs of a deterministic QUA program.
 
-        The following example shows a simple execution of the simulator, where the
-        associated config object is omitted for brevity.
+        This method can be called in two ways:
+
+        - With an explicit configuration: ``simulate(config, program, simulate, ...)``.
+        - Without a configuration: ``simulate(program, simulate, compiler_options=None)``.
+          In this case the configuration is derived from the program itself (the typed
+          config model attached to it), so no separate config dictionary is needed.
+
+        The form is selected by the first argument: a ``Program`` means the config-less
+        form, otherwise an explicit ``config`` is expected.
 
         Example:
             ```python
@@ -663,7 +701,10 @@ class QuantumMachinesManager:
             with program() as prog:
                 play('pulse1', 'qe1')
 
+            # With an explicit config:
             job = qmm.simulate(config, prog, SimulationConfig(duration=100))
+            # Or, deriving the config from the program:
+            job = qmm.simulate(prog, SimulationConfig(duration=100))
             ```
 
         Args:
@@ -677,29 +718,53 @@ class QuantumMachinesManager:
         Returns:
             a ``QmJob`` object (see Job API).
         """
-        self._caps.validate(program.used_capabilities)
+        _config: FullQuaConfig | None
+        _program: Program
+        _simulate: SimulationConfig
+        _compiler_options: Optional[CompilerOptionArguments]
+        if isinstance(config, Program):
+            # Config-less form: shift the positional arguments (config holds the program).
+            if compiler_options is not None and simulate is not None:
+                raise ValueError(
+                    "Please pass 'compiler_options' either positionally (as the third argument) "
+                    "or as a keyword, not both."
+                )
+            _config, _program, _simulate = None, config, program
+            _compiler_options = simulate if simulate is not None else compiler_options
+        else:
+            _config, _program, _simulate, _compiler_options = config, program, simulate, compiler_options
+
+        if _compiler_options is not None and not isinstance(_compiler_options, CompilerOptionArguments):
+            raise TypeError(
+                f"'compiler_options' must be a CompilerOptionArguments instance or None, got {type(_compiler_options)}"
+            )
+
+        self._caps.validate(_program.used_capabilities)
+        options = standardize_compiler_params(_compiler_options, strict, flags)
+        if _config is None:
+            if _program.needs_external_config:
+                raise QmmException(
+                    "Some of the entities in the program do not appear in the config, cannot simulate the program"
+                )
+            pb_config = convert_elements(_program.elements, capabilities=self._caps)
+        else:
+            pb_config = load_config(_config)
 
         if self._api:
-            request = self._create_simulation_request(
-                config, program, simulate, compiler_options, strict=strict, flags=flags
-            )
-
-            simulated_job = self._api.simulate(
+            request = create_simulation_request(pb_config, _program, _simulate, options, self._caps)
+            return self._api.simulate(
                 request.config, request.highLevelProgram, request.simulate, request.controllerConnections
             )
-            return simulated_job
-        else:
-            standardized_options = standardize_compiler_params(compiler_options, strict, flags)
-            pb_config = load_config(config)
-            job_id, simulated_response_part = self._simulation_api.simulate(
-                pb_config, program, simulate, standardized_options, self._caps
-            )
-            return SimulatedJob(
-                job_id=job_id,
-                frontend_api=self._frontend,
-                capabilities=self._server_details.capabilities,
-                simulated_response=simulated_response_part,
-            )
+
+        job_id, simulated_response_part = self._simulation_api.simulate(
+            pb_config, _program, _simulate, options, self._caps
+        )
+        return SimulatedJob(
+            job_id=job_id,
+            frontend_api=self._frontend,
+            capabilities=self._server_details.capabilities,
+            simulated_response=simulated_response_part,
+        )
 
     def list_open_qms(self) -> List[str]:
         """Return a list of open quantum machines. (Returns only the ids, use ``get_qm(...)`` to get the machine object)
@@ -712,19 +777,20 @@ class QuantumMachinesManager:
         else:
             return self._frontend.list_open_quantum_machines()
 
+    @deprecated(
+        'qmm.list_open_quantum_machines is deprecated since "1.2.0" and will be removed in "2.0.0". '
+        "This method was renamed to `qmm.list_open_qms()`",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def list_open_quantum_machines(self) -> List[str]:
         """Returns a list of open quantum machines.
 
         Deprecated since 1.2.0; will be removed in 2.0.0. Renamed to ``qmm.list_open_qms()``.
+
+        Returns:
+            A list of the ids of the currently open quantum machines.
         """
-        warnings.warn(
-            deprecation_message(
-                "qmm.list_open_quantum_machines",
-                "1.2.0",
-                "2.0.0",
-                "This method was renamed to `qmm.list_open_qms()`",
-            )
-        )
         return self.list_open_qms()
 
     def get_qm(self, machine_id: str) -> Union[QuantumMachine, QmApi]:
@@ -791,27 +857,26 @@ class QuantumMachinesManager:
         """
         self._server_details.connection_details.close()
 
+    @deprecated(
+        'qmm.close_all_quantum_machines is deprecated since "1.2.0" and will be removed in "2.0.0". '
+        "This function is going to change its name to `qmm.close_all_qms()`",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def close_all_quantum_machines(self) -> None:
         """Closes all open quantum machines.
 
         Deprecated since 1.2.0; will be removed in 2.0.0. Renamed to ``qmm.close_all_qms()``.
         """
-        warnings.warn(
-            deprecation_message(
-                "qmm.close_all_quantum_machines",
-                "1.2.0",
-                "2.0.0",
-                "This function is going to change its name to `qmm.close_all_qms()`",
-            ),
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
         self.close_all_qms()
 
     def get_controllers(self) -> List[ControllerBase]:
         """Returns a list of all the controllers that are available.
 
         Deprecated since 1.2.0; will be removed in 2.0.0. The return type will change.
+
+        Returns:
+            A list of the controllers available in the cluster.
         """
         if self._api:
             warnings.warn(
@@ -821,7 +886,7 @@ class QuantumMachinesManager:
                     "2.0.0",
                     "This will have a different return type",
                 ),
-                category=DeprecationWarning,
+                category=QmQuaDeprecationWarning,
                 stacklevel=2,
             )
             new_response = self._api.get_controllers()
@@ -870,7 +935,7 @@ class QuantumMachinesManager:
                     "2.0.0",
                     "This method is going to be removed.",
                 ),
-                category=DeprecationWarning,
+                category=QmQuaDeprecationWarning,
                 stacklevel=1,
             )
             self._api.clear_all_job_results()

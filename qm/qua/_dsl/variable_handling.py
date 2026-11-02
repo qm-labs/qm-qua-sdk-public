@@ -369,5 +369,9 @@ def advance_input_stream(
     See [Input streams](../../Guides/features.md#input-streams) for more information.
 
     -- Available from QOP 2.0 --
+
+    Args:
+        input_stream: the input stream variable or vector to advance to its
+            next available value.
     """
     scopes_manager.append_statement(input_stream.advance())

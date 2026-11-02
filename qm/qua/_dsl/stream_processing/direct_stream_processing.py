@@ -25,7 +25,20 @@ class DirectStreamSource(DirectStreamSourceInterface[NumberT]):
         auto_buffer: bool = False,
         average_axes: Optional[list[str]] = None,
     ) -> "DirectStreamSource[NumberT]":
-        """Get existing streams associated with this DirectStreamSource."""
+        """Get existing streams associated with this direct stream source.
+
+        Args:
+            stream_name: The base name of the result stream to look up.
+            var_type: The type of the declared QUA variable backing the stream.
+            init_value: An optional initial value for the declared variable.
+            auto_buffer: If ``True``, derive buffering from the enclosing named
+                QUA loops. Defaults to ``False``.
+            average_axes: Names of QUA loop axes to average. Defaults to ``None``.
+
+        Returns:
+            The existing direct stream source matching the name, or a newly
+            created one registered for auto stream processing.
+        """
         matching_stream = [
             stream
             for stream in scopes_manager.program_scope.auto_processing_streams
@@ -102,6 +115,9 @@ class DirectStreamSource(DirectStreamSourceInterface[NumberT]):
     def get_stream(self) -> ResultStreamSource:
         """
         Get or create the stream associated with DirectStreamSource for current scope.
+
+        Returns:
+            The result stream source associated with the current scope.
         """
         stream_full_name = self.stream_full_name
         if stream_full_name not in self._streams:
@@ -150,7 +166,11 @@ class DirectStreamSource(DirectStreamSourceInterface[NumberT]):
         save(self, self.get_stream())
 
     def get_save_statement(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
-        """Get the save statement for saving the variable to its associated stream."""
+        """Get the save statement for saving the variable to its associated stream.
+
+        Returns:
+            The QUA save statement that saves the variable to its associated stream.
+        """
         self._save_calls[self.stream_full_name] += 1
         return _get_save_statement(self, self.get_stream())
 

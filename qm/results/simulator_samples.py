@@ -1,6 +1,7 @@
 import warnings
 
 from qm.utils import deprecation_message
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.simulate._simulator_samples import SimulatorSamples, SimulatorControllerSamples
 
 __all__ = ["SimulatorSamples", "SimulatorControllerSamples"]
@@ -13,6 +14,6 @@ warnings.warn(
         removed_in="2.0.0",
         details="please import `SimulatorSamples` and `SimulatorControllerSamples` directly from qm.",
     ),
-    DeprecationWarning,
+    QmQuaDeprecationWarning,
     stacklevel=2,
 )

@@ -1,12 +1,13 @@
 import random
-import warnings
+from typing_extensions import deprecated
 from typing import Any, List, Type, Tuple, Union, TypeVar, Callable, Optional, Sequence, overload
 
 from qm._loc import _get_loc
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.type_hinting.general import NumberT
+from qm.utils import get_iterable_elements_datatype
 from qm.qua._dsl.variable_handling import assign, declare
-from qm.utils import deprecation_message, get_iterable_elements_datatype
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.qua._expressions import (
     Scalar,
     Vector,
@@ -80,6 +81,14 @@ def _create_vectors_output_expression(
     return __create_output_expression(function, output_type, *args)
 
 
+# Internal API: not part of the public interface (no leading underscore, but kept for internal reuse).
+@deprecated(
+    'call_library_function is deprecated since "1.2.2" and will be removed in "2.0.0". \n'
+    "Please call the required function directly from the available classes.\n"
+    "For instance, instead of using call_library_function(Random.rand_int, int, x, y), simply use Random(x).rand_int(y)",
+    category=QmQuaDeprecationWarning,
+    stacklevel=1,
+)
 def call_library_function(
     function: SomeCallable, output_type: Type[NumberT], *args: ScalarOfAnyType
 ) -> QuaLibFunctionOutput[NumberT]:
@@ -88,20 +97,26 @@ def call_library_function(
     Deprecated since 1.2.2; will be removed in 2.0.0. Call the function directly from the
     available classes instead (e.g. ``Random(x).rand_int(y)`` instead of
     ``call_library_function(Random.rand_int, int, x, y)``).
+
+    Args:
+        function: the QUA library function to call.
+        output_type: the QUA type of the function's output.
+        *args: the scalar arguments to pass to the library function.
+
+    Returns:
+        A QUA library-function output expression of the given output type.
     """
-    warnings.warn(
-        deprecation_message(
-            method="call_library_function",
-            deprecated_in="1.2.2",
-            removed_in="2.0.0",
-            details="""
-Please call the required function directly from the available classes.
-For instance, instead of using call_library_function(Random.rand_int, int, x, y), simply use Random(x).rand_int(y).""",
-        )
-    )
     return _create_output_expression(function, output_type, *args)
 
 
+# Internal API: not part of the public interface (no leading underscore, but kept for internal reuse).
+@deprecated(
+    'call_vectors_library_function is deprecated since "1.2.2" and will be removed in "2.0.0". \n'
+    "Please call the required function directly from the available classes.\n"
+    "For instance, instead of using call_vectors_library_function(Math.sum, x.dtype, x), simply use Math.sum(x)",
+    category=QmQuaDeprecationWarning,
+    stacklevel=1,
+)
 def call_vectors_library_function(
     function: SomeCallable, output_type: Type[S], *args: Vector[NumberT]
 ) -> QuaLibFunctionOutput[S]:
@@ -110,17 +125,15 @@ def call_vectors_library_function(
     Deprecated since 1.2.2; will be removed in 2.0.0. Call the function directly from the
     available classes instead (e.g. ``Math.sum(x)`` instead of
     ``call_vectors_library_function(Math.sum, x.dtype, x)``).
+
+    Args:
+        function: the QUA vectors library function to call.
+        output_type: the QUA type of the function's output.
+        *args: the vector arguments to pass to the library function.
+
+    Returns:
+        A QUA library-function output expression of the given output type.
     """
-    warnings.warn(
-        deprecation_message(
-            method="call_vectors_library_function",
-            deprecated_in="1.2.2",
-            removed_in="2.0.0",
-            details="""
-Please call the required function directly from the available classes.
-For instance, instead of using call_vectors_library_function(Math.sum, x.dtype, x), simply use Math.sum(x).""",
-        )
-    )
     return _create_vectors_output_expression(function, output_type, *args)
 
 
@@ -733,6 +746,15 @@ class Util:
         i.e. `a ? b : c`, meaning `b` if `a` is true, or `c` if `a` is false.
         There is less computation overhead (less latency) when running this operation relative to the if conditional.
 
+        Args:
+            condition: a QUA boolean expression to evaluate.
+            true_result: the value returned when ``condition`` is true.
+            false_result: the value returned when ``condition`` is false.
+
+        Returns:
+            A QUA expression equal to ``true_result`` if ``condition`` is true,
+            otherwise ``false_result``.
+
         Example:
             ```python
             assign(var, cond(a, b, c)) #where a is a boolean expression
@@ -777,6 +799,9 @@ class Random:
         Args:
             max_int: maximum value
 
+        Returns:
+            A QUA int expression with a pseudorandom value in range [0, max_int).
+
         :Example:
             >>> a = Random()
             >>> assign(b, a.rand_int(max_int))
@@ -785,6 +810,9 @@ class Random:
 
     def rand_fixed(self) -> QuaLibFunctionOutput[float]:
         r"""Returns a pseudorandom fixed in range [0.0, 1.0)
+
+        Returns:
+            A QUA fixed expression with a pseudorandom value in range [0.0, 1.0).
 
         :Example:
             >>> a = Random()

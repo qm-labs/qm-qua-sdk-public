@@ -1,4 +1,4 @@
-import hashlib
+from collections import Counter
 from abc import ABC, abstractmethod
 from typing import Generic, Literal, TypeVar, TypeAlias, overload
 
@@ -171,13 +171,20 @@ class NoDefaultValue(ConfigValue[T]):
 
 
 class NamedObject(ConfigObject, ABC):
+    """A config object that other parts of the config refer to by name.
+
+    An object created without a name is named after its class and numbered by the order in which its class's unnamed
+    objects were created: ``constant_waveform_1``, ``constant_waveform_2``, etc.
+    """
+
     def __init__(self, name: str = ""):
-        if name:
-            self.name = name
-        else:
-            suffix = hashlib.md5(f"{self.__class__.__name__}-{self}".encode()).hexdigest()[:4]
-            class_name = _change_case(self.__class__.__name__)
-            self.name = f"{class_name}_{suffix}"
+        if not name:
+            _unnamed_object_counts[type(self)] += 1
+            name = f"{_change_case(type(self).__name__)}_{_unnamed_object_counts[type(self)]}"
+        self.name = name
+
+
+_unnamed_object_counts: Counter[type[NamedObject]] = Counter()
 
 
 class _NotSet:

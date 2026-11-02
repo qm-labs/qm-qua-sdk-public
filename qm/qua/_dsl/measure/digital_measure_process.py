@@ -1,14 +1,16 @@
 import abc
-from typing import Union, Optional, Sequence
+from typing import Optional
+from collections.abc import Sequence
 
 from qm.type_hinting import Number
+from qm.config import ElementOutput
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.qua._expressions import QuaVariable, QuaArrayVariable
 from qm.qua._dsl.measure.analog_measure_process import MeasureProcessAbstract, _add_target_len
 from qm.qua._dsl.stream_processing.direct_stream_processing_interface import DirectStreamSourceInterface
 
 
-class DigitalMeasureProcess(MeasureProcessAbstract, metaclass=abc.ABCMeta):
+class DigitalMeasureProcess(MeasureProcessAbstract, abc.ABC):
     def __init__(self, max_time: Number):
         super().__init__()
         self._max_time = max_time
@@ -56,12 +58,31 @@ class RawTimeTagging(DigitalMeasureProcess):
     def save_stream_if_needed(self) -> None:
         pass
 
+    @property
+    def uses_string_api(self) -> bool:
+        # The element output is always a plain str (resolved from the element's config),
+        # so it no longer signals whether the "string API" was used.
+        return False
+
 
 class Counting(DigitalMeasureProcess):
-    def __init__(self, element_outputs: Union[str, Sequence[str]], target: QuaVariable[int], max_time: Number):
+    def __init__(
+        self,
+        element_outputs: str | Sequence[str],
+        target: QuaVariable[int],
+        max_time: Number,
+    ):
         super().__init__(max_time)
         self.target_int = target
-        self.element_outputs = element_outputs
+        self._element_outputs = (
+            [element_outputs] if isinstance(element_outputs, (str, ElementOutput)) else element_outputs
+        )
+
+    @property
+    def uses_string_api(self) -> bool:
+        # The element outputs are always plain strs (resolved from the element's config),
+        # so they no longer signal whether the "string API" was used.
+        return False
 
     @property
     def _digital_unwrapped(self) -> inc_qua_pb2.QuaProgram.DigitalMeasureProcess:
@@ -71,11 +92,9 @@ class Counting(DigitalMeasureProcess):
             maxTime=self.max_time,
             target=unwrapped_target.variable,
         )
-        outputs = self.element_outputs
-        if isinstance(outputs, str):
-            counting.elementOutputs.append(outputs)
-        else:
-            counting.elementOutputs.extend(outputs)
+
+        for output in self._element_outputs:
+            counting.elementOutputs.append(output)
 
         return inc_qua_pb2.QuaProgram.DigitalMeasureProcess(loc=self.loc, counting=counting)
 

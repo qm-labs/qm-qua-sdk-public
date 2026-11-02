@@ -2,13 +2,22 @@ from collections.abc import Mapping, Collection
 
 from qm.utils.protobuf_utils import which_one_of
 from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
-from qm.api.models.capabilities import ServerCapabilities
-from qm.config._ports._port_base import Port, LfFem, MwFem, Opx1000, OpxPlus, PortReference
+from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm._config_converters._model_to_pb_converter.base_converter import BaseModelToPbConverter
+from qm.config._ports._port_base import Port, LfFem, MwFem, Opx1000, OpxPlus, LFLN08Fem, PortReference
 from qm._config_converters._model_to_pb_converter.converters.fem_converters.opx_converter import OpxToPbConverter
-from qm._config_converters.split_ports_by_fems import FemDataOpx, FemDataOctoDac, FemDataMicrowave, split_to_fems
 from qm._config_converters._model_to_pb_converter.converters.fem_converters.mw_converter import MwFemToPbConverter
 from qm._config_converters._model_to_pb_converter.converters.fem_converters.lf_fem_converter import LfFemToPbConverter
+from qm._config_converters._model_to_pb_converter.converters.fem_converters.lf_ln08_fem_converter import (
+    LFLN08FemToPbConverter,
+)
+from qm._config_converters.split_ports_by_fems import (
+    FemDataOpx,
+    FemDataLFLN08,
+    FemDataOctoDac,
+    FemDataMicrowave,
+    split_to_fems,
+)
 
 
 class ControlDeviceConverter(BaseModelToPbConverter[Collection[Port], Mapping[str, QuaConfig.DeviceDec]]):
@@ -17,9 +26,9 @@ class ControlDeviceConverter(BaseModelToPbConverter[Collection[Port], Mapping[st
         self._opx_converter = OpxToPbConverter(capabilities, init_mode)
         self._lf_fem_converter = LfFemToPbConverter(capabilities, init_mode)
         self._mw_fem_converter = MwFemToPbConverter(capabilities, init_mode)
+        self._lf_ln08_fem_converter = LFLN08FemToPbConverter(capabilities, init_mode)
 
     def convert(self, input_data: Collection[Port]) -> Mapping[str, QuaConfig.DeviceDec]:
-        # todo - validate compatibility of ports
         real_ports = [p for p in input_data if not isinstance(p, PortReference)]
         data_split_by_fems = split_to_fems(real_ports)
         to_return: dict[str, QuaConfig.DeviceDec] = {}
@@ -35,6 +44,10 @@ class ControlDeviceConverter(BaseModelToPbConverter[Collection[Port], Mapping[st
                 elif isinstance(fem_data, FemDataMicrowave):
                     mw_fem_pb = self._mw_fem_converter.convert(fem_data)
                     fems[fem_idx] = QuaConfig.FEMTypes(microwave=mw_fem_pb)
+                elif isinstance(fem_data, FemDataLFLN08):
+                    self._capabilities.validate([QopCaps.lf_ln08_fem])
+                    lf_ln08_fem_pb = self._lf_ln08_fem_converter.convert(fem_data)
+                    fems[fem_idx] = QuaConfig.FEMTypes(lf_ln08_fem=lf_ln08_fem_pb)
                 else:
                     raise TypeError(f"Unsupported fem data type: {fem_data}")
             to_return[controller_name] = QuaConfig.DeviceDec(fems=fems)
@@ -77,5 +90,14 @@ class ControlDeviceConverter(BaseModelToPbConverter[Collection[Port], Mapping[st
             mw_fem = MwFem(controller=controller, index=fem_idx)
             mw_data = self._mw_fem_converter.deconvert(fem_config, mw_fem)
             return mw_data.analog_outputs + mw_data.analog_inputs + mw_data.digital_outputs + mw_data.digital_inputs
+        elif isinstance(fem_config, QuaConfig.LFLN08FemDec):
+            lf_ln08_fem = LFLN08Fem(controller=controller, index=fem_idx)
+            lf_ln08_data = self._lf_ln08_fem_converter.deconvert(fem_config, lf_ln08_fem)
+            return (
+                lf_ln08_data.analog_outputs
+                + lf_ln08_data.analog_inputs
+                + lf_ln08_data.digital_outputs
+                + lf_ln08_data.digital_inputs
+            )
         else:
             raise ValueError(f"Unknown FEM type - {fem_config}")

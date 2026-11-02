@@ -28,6 +28,13 @@ ReturnedT = TypeVar("ReturnedT", NumpyArray, Optional[NumpyArrayOrSingleValue])
 
 
 class BaseSingleStreamFetcher(Generic[ReturnedT], metaclass=abc.ABCMeta):
+    """Base class for a handle to a single named result stream from a QUA job, populated by a
+    `save`/`save_all` statement. Provides methods to fetch already-processed values and to wait
+    for values to arrive. See [SingleStreamSingleResultFetcher][qm.SingleStreamSingleResultFetcher]
+    and [SingleStreamMultipleResultFetcher][qm.SingleStreamMultipleResultFetcher] for the concrete
+    fetcher types.
+    """
+
     def __init__(
         self,
         schema: JobResultItemSchema,

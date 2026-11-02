@@ -1,7 +1,7 @@
 import logging
-import warnings
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
+from typing_extensions import deprecated
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Generic, TypeVar, Optional, ContextManager
 
 from qm.elements.element import Element
@@ -10,6 +10,7 @@ from qm.grpc.qm.pb import inc_qua_config_pb2
 from qm.elements.element_outputs import DownconvertedOutput
 from qm.elements.up_converted_input import UpconvertedInput
 from qm.octave.octave_manager import ClockMode, OctaveManager
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.octave.abstract_calibration_db import AbstractIFCalibration, AbstractLOCalibration
 from qm.octave_sdk import IFMode, ClockType, RFOutputMode, ClockFrequency, OctaveLOSource, RFInputLOSource
 from qm.type_hinting.config_types import MixerConfigType, ControllerQuaConfig, OPX1000ControllerConfigType
@@ -59,6 +60,12 @@ def _map_octave_lo_source_to_rf_input_lo_source(lo_source: OctaveLOSource) -> RF
 
 
 class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
+    """Octave configuration and calibration API for a quantum machine, accessed via
+    `QuantumMachine.octave` (or `QmApi.octave` for the OPX1000). Provides methods to configure the
+    Octave clock and LO sources, route RF input/output ports to elements, and run or apply mixer
+    calibration.
+    """
+
     def __init__(self, qm: QmInstT, octave_manager: OctaveManager):
         self._qm: QmInstT = qm
         self._octave_manager = octave_manager
@@ -97,6 +104,12 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
         rf_input_client = client.rf_inputs[rf_input_index]
         inst.output = DownconvertedOutput(rf_input_client)
 
+    @deprecated(
+        "lo_frequency is now set directly from config when a QuantumMachine is created, no need to do it directly. "
+        "If you want, you can run over the elements and do set_frequency",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def load_lo_frequency_from_config(self, elements: Union[List[str], str]) -> None:
         """Loads into the octave synthesizers the LO frequencies specified for elements
         in the element list
@@ -104,12 +117,6 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
         Args:
             elements: A list of elements to load LO frequencies for from the configuration
         """
-        warnings.warn(
-            "lo_frequency is now set directly from config when a QuantumMachine is created, no need to do it directly. "
-            "If you want, you can run over the elements and do set_frequency",
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
 
     def set_lo_frequency(self, element: str, lo_frequency: float, set_source: bool = True) -> None:
         """Sets the LO frequency of the synthesizer associated with the given element. Will not change the synthesizer if set_source = False
@@ -224,6 +231,10 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
         input_inst = self._get_upconverted_input(element)
         input_inst.set_use_input_attenuators(use_input_attenuators)
 
+    @deprecated(
+        "Calibrate element was moved to the QuantumMachine instance, please use it from there",
+        category=QmQuaDeprecationWarning,
+    )
     def calibrate_element(
         self,
         element: str,
@@ -245,11 +256,12 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
                 consists of all the (LO,IF) pairs for calibration
             save_to_db (boolean): If true (default), The calibration
                 parameters will be saved to the calibration database
-        """
-        warnings.warn(
-            "Calibrate element was moved to the QuantumMachine instance, please use it from there", DeprecationWarning
-        )
+            offset_frequency (float): The IF offset frequency, in Hz, used
+                during the calibration sweep. Defaults to 7e6.
 
+        Returns:
+            A mapping from each (LO, IF) pair to its calibration result.
+        """
         if lo_if_frequencies_tuple_list is not None:
             lo_if_dict_tmp: Dict[float, Tuple[float, ...]] = defaultdict(tuple)
             for _lo, _if in lo_if_frequencies_tuple_list:
@@ -290,7 +302,9 @@ class QmOctaveBase(Generic[QmInstT, JobInstT], metaclass=ABCMeta):
 
         Args:
             octave_name (str): The octave name to get clock for
-        :returns ClockInfo: Info about the clock as an object
+
+        Returns:
+            Clock info for the given Octave.
         """
         return self._octave_manager.get_clock(octave_name)
 

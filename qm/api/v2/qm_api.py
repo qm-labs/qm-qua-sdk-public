@@ -22,6 +22,7 @@ from typing import (
 
 from qm.type_hinting import Number
 from qm.octave import QmOctaveConfig
+from qm.config import ControllerConfig
 from qm.api.v2.base_api_v2 import BaseApiV2
 from qm.program import Program, load_config
 from qm.elements_db import init_octave_elements
@@ -34,6 +35,7 @@ from qm.utils.config_utils import get_controller_pb_config
 from qm.utils.protobuf_utils import proto_repeated_to_list
 from qm.api.simulation_api import create_simulation_request
 from qm.grpc.qm.grpc.v2.qm_api_pb2_grpc import QmServiceStub
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.elements.up_converted_input import UpconvertedInputNewApi
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
@@ -42,10 +44,15 @@ from qm.type_hinting.execution_overrides import ExecutionOverridesType
 from qm.program._execution_overrides_schema import ExecutionOverridesSchema
 from qm.program._fill_defaults_in_config_v1 import fill_defaults_in_config_v1
 from qm.octave.qm_octave import QmOctaveForNewApi, create_dc_offset_octave_update
+from qm.type_hinting.config_types import ControllerQuaConfig as ControllerQuaConfigDict
 from qm.grpc.qm.pb import compiler_pb2, frontend_pb2, qm_manager_pb2, inc_qua_config_pb2
+from qm.type_hinting.config_types import FullQuaConfig, MixerConfigType, LogicalQuaConfig
 from qm.api.v2.job_api.job_api import JobApi, JobData, JobStatus, transfer_statuses_to_enum
-from qm.type_hinting.config_types import FullQuaConfig, MixerConfigType, LogicalQuaConfig, ControllerQuaConfig
 from qm.api.models.compiler import CompilerOptionArguments, standardize_compiler_params, get_request_compiler_options
+from qm._config_converters._model_to_pb_converter.converters.element_converter import (
+    ElementConverter,
+    convert_controller_config,
+)
 from qm.octave.octave_mixer_calibration import (
     AutoCalibrationParams,
     MixerCalibrationResults,
@@ -102,6 +109,12 @@ def handle_qop_error(custom_error: E) -> Generator[None, None, None]:
     """
     A context manager that catches QopResponseError exceptions and enriches the `custom_error` with additional details
     about the cause.
+
+    Args:
+        custom_error: The exception to raise (enriched with the QOP error details) if a QopResponseError occurs.
+
+    Returns:
+        A context manager that yields control to the wrapped block and re-raises ``custom_error`` on failure.
     """
     try:
         yield
@@ -126,6 +139,11 @@ def handle_simulation_error() -> Generator[None, None, None]:
 
 
 class QmApi(BaseApiV2[QmServiceStub]):
+    """Handle to an opened quantum machine on a QOP 3.x controller, obtained from
+    `QuantumMachinesManager.open_qm`. Used to compile and run QUA programs, manage the Octave
+    configuration, and update the controller config on an already-open machine.
+    """
+
     SIMULATED_JOB_CLASS = SimulatedJobApi
 
     def __init__(
@@ -183,7 +201,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
             )
 
     def _load_config_with_exception_handling(
-        self, config: Union[FullQuaConfig, ControllerQuaConfig, LogicalQuaConfig], function_name: str
+        self, config: Union[FullQuaConfig, ControllerQuaConfigDict, LogicalQuaConfig], function_name: str
     ) -> inc_qua_config_pb2.QuaConfig:
         try:
             return load_config(config, init_mode=False, octave_already_configured=self._octave_already_configured)
@@ -193,7 +211,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
                 f"supported for qm.{function_name}. Please use the qm.octave functions instead."
             ) from e
 
-    def update_config(self, config: ControllerQuaConfig) -> None:
+    def update_config(self, config: ControllerQuaConfigDict | ControllerConfig) -> None:
         """Updates the controller config in the `QuantumMachine`.
         The controller config includes the "controllers", "octaves" & "mixers" sections.
         Updating the config will only update future jobs that were not executed or compiled yet.
@@ -202,7 +220,10 @@ class QmApi(BaseApiV2[QmServiceStub]):
         Args:
             config: The physical config
         """
-        config_pb = self._load_config_with_exception_handling(config, self.update_config.__name__)
+        if isinstance(config, ControllerConfig):
+            config_pb = convert_controller_config(config, capabilities=self._caps, init_mode=False)
+        else:
+            config_pb = self._load_config_with_exception_handling(config, self.update_config.__name__)
         request = qm_api_pb2.UpdateConfigRequest(quantum_machine_id=self._id, config=config_pb)
         self._run(self._stub.UpdateConfig, request, timeout=self._timeout)
 
@@ -280,9 +301,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
             job.wait_until("running")
             ```
         """
-        self._caps.validate(program.used_capabilities)
-
-        pb_config = self._convert_config_param_to_pb(config, self.compile.__name__)
+        pb_config = self._compose_pb_config_from_program_and_given_config(program, config, self.compile.__name__)
 
         if compiler_options is None:
             compiler_options = CompilerOptionArguments()
@@ -373,15 +392,16 @@ class QmApi(BaseApiV2[QmServiceStub]):
                         removed_in="2.0.0",
                         details="The API for passing overrides is expected to change.",
                     ),
-                    DeprecationWarning,
+                    QmQuaDeprecationWarning,
                     stacklevel=2,
                 )
             job = self._add_compiled(program, overrides=overrides)
         else:
             if overrides is not None:
                 raise QmQuaException("Cannot add overrides to a program, only to a compiled program.")
-            self._caps.validate(program.used_capabilities)
-            pb_config = self._convert_config_param_to_pb(config, self.add_to_queue.__name__)
+            pb_config = self._compose_pb_config_from_program_and_given_config(
+                program, config, self.add_to_queue.__name__
+            )
 
             if compiler_options is None:
                 compiler_options = CompilerOptionArguments()
@@ -390,6 +410,22 @@ class QmApi(BaseApiV2[QmServiceStub]):
 
         logger.info(f"Program added to queue. Job id: {job.id}")
         return job
+
+    def _compose_pb_config_from_program_and_given_config(
+        self,
+        program: Program,
+        config: Optional[Union[FullQuaConfig, LogicalQuaConfig, ControllerConfig]],
+        calling_function: str,
+    ) -> Optional[inc_qua_config_pb2.QuaConfig]:
+        self._caps.validate(program.used_capabilities)
+        if (not program.needs_external_config) and program.elements:
+            if config is not None and not isinstance(config, ControllerConfig):
+                raise QmQuaException("Cannot specify both elements and config")
+            return ElementConverter(self._caps, init_mode=True).convert_logical_config(
+                program.qua_config.logical_config, config
+            )
+        assert not isinstance(config, ControllerConfig)
+        return self._convert_config_param_to_pb(config, calling_function)
 
     def get_job(self, job_id: str) -> JobApi:
         """
@@ -581,6 +617,9 @@ class QmApi(BaseApiV2[QmServiceStub]):
     ) -> MixerCalibrationResults:
         """Calibrate the up converters associated with a given element for the given LO & IF frequencies.
 
+        This is only relevant for elements connected to an Octave. Calling this on an
+        element that is not connected to an Octave will raise a `CantCalibrateElementError`.
+
         - Frequencies can be given as a dictionary with LO frequency as the key and a list of IF frequencies for every LO
         - If no frequencies are given calibration will occur according to LO & IF declared in the element
         - The function need to be run for each element separately
@@ -593,6 +632,9 @@ class QmApi(BaseApiV2[QmServiceStub]):
             save_to_db (bool): If true (default), The calibration
                 parameters will be saved to the calibration database
             params: Optional calibration parameters
+
+        Returns:
+            The mixer calibration results, keyed by (LO frequency, gain).
         """
 
         inst = self._elements[qe]
@@ -622,7 +664,7 @@ class QmApi(BaseApiV2[QmServiceStub]):
         key = (inst_input.lo_frequency, cast(float, inst_input.gain))
         if key in res:
             qe_cal = res[key]
-            update: ControllerQuaConfig = {}
+            update: ControllerQuaConfigDict = {}
             if inst.intermediate_frequency in qe_cal.image:
                 update = create_dc_offset_octave_update(inst_input, i_offset=qe_cal.i0, q_offset=qe_cal.q0)
 

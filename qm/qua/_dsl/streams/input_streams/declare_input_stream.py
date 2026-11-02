@@ -5,6 +5,7 @@ from typing import Any, Union, Literal, Optional, cast, get_args, overload
 from qm.type_hinting import NumberT
 from qm.exceptions import QmQuaException
 from qm.qua._dsl._type_hints import OneOrMore
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.variable_handling import _standardize_value_and_size
 from qm.qua._dsl.streams.common import StreamEndpoints, _validate_number_type
@@ -267,7 +268,7 @@ def declare_input_stream(
             "The signature `declare_input_stream(t, name , ...)`, which implicitly treats the "
             "stream as a Client stream, is deprecated and will be removed in a future release. "
             'Please use `declare_input_stream("client", stream_id=name, dtype=t, ...) instead',
-            DeprecationWarning,
+            QmQuaDeprecationWarning,
             stacklevel=2,
         )
         return _declare_client_input_stream(*args, **kwargs)

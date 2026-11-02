@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 
+## [1.5.0] - 2026-11-01
+
+- Requires Python >=3.10, <3.15
+- Tested against QOP 3.9.x, 3.8.x, 3.7.x, 3.6.x, 2.6.x
+
+### Added
+- QOP 3.9 — Added the `persistent` key to the element configuration. A persistent element is kept across jobs until the quantum machine is closed, instead of being reset at the start of each job. Combined with `sticky`, it keeps an idle tone playing between programs.
+- Added a typed configuration model (importable from `qm.config`) as an object-oriented alternative to the dict-based configuration:
+    - Elements, pulses, ports, waveforms, oscillators, and other configuration entries are built as typed objects instead of nested `dict`s with string keys, with editor autocompletion, static type checking, and validation at construction time.
+    - Model objects can be converted to the dict-based configuration.
+    - Model objects can be passed directly to QUA commands such as `play` and `measure`.
+    - `qmm.simulate(program, simulation_config)` can derive the configuration from the program.
+- Added the `creation_length` property to `QuaArrayVariable`, which returns the declared array length as a Python `int` (unlike `length()`, which returns a QUA expression).
+- Added `QmQuaDeprecationWarning` (importable from `qm.utils.deprecation_utils`), a `DeprecationWarning` subclass used for all qm-qua deprecation warnings, so they can be filtered separately from those raised by other libraries.
+- Added static-analysis deprecation markers to many deprecated functions, methods, and classes, so IDEs display them as deprecated (e.g. strikethrough) and mypy/pyright report their use.
+
+### Changed
+- Changed `qm.config` to refer to the new configuration-model package. The user settings previously available as `qm.config` (loaded from `~/.qm/config.json`) can be read with `UserConfig.create_from_file()` (importable from `qm`), and the session ID with `UserConfig.SESSION_ID`.
+
+### Fixed
+- Fixed `qm.io2`, which returned the value of `IO1` instead of `IO2`.
+- Fixed `Octave.get_clock()`, which always raised `ValueError: can not validate clock frequency`.
+- Fixed `RFOutput.get_output()`, which always reported the RF output as enabled regardless of its actual state.
+- Fixed a bug where the default Octave RF output gain was not applied when the output's power amplifier was disabled.
+- Fixed `job.update_oscillator_frequency()`, which is deprecated but did not emit a deprecation warning.
+- Fixed `qmm.list_open_quantum_machines()`, `call_library_function()`, and `call_vectors_library_function()`, which emitted a generic `UserWarning` instead of a deprecation warning.
+- Fixed the QOP version reported for QOP 3.6.3 servers, which was not recognized.
 
 ## [1.4.1] - 2026-08-18
 
@@ -26,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Added
+- Added support for the `metrics` property for the `ControllerOPX1000` (returned by `qmm.get_devices()`) exposing per-controller OS metrics. Requires a supporting QOP version.
 - Added `assert_programs_are_equal` to the top-level `qm` namespace exports; the public serialization functions (`generate_qua_script`, `assert_programs_are_equal`) now have docstrings.
 - Added `client_cert_path` and `client_key_path` to `CredentialOverrides`, and `QuantumMachinesManager` now accepts a `CredentialOverrides` for its `credentials` argument, enabling connections that use a custom root CA and mutual TLS (mTLS) by passing PEM file paths.
 - Added the `overrides` argument to `add_to_queue`, allowing analog waveforms of a precompiled program to be overridden when it is queued (e.g. `qm.add_to_queue(program_id, overrides={"waveforms": {"my_wf": [0.1, 0.2]}})`).
@@ -256,8 +284,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The simulator's samples plot will no longer plot waveforms that are all zeros (not changed in the simulation)
 - Refined connection error handling: Errors are now caught specifically for connection issues, rather than broadly across larger scopes as was previously the case.
 - Improved the implementation of `wait_for_all_values` in OPX1000 to reduce latency.
-- Improved labels for the simulators' samples plot and waveform report plot
-- The simulator's samples plot will no longer plot waveforms that are all zeros (not changed in the simulation)
 
 ### Deprecated
 - The `measure` command signature has changed, `stream` has been renamed `adc_stream` and moved to the end of the arguments list. The old signature is deprecated and will be removed in the future.

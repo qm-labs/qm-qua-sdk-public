@@ -48,6 +48,11 @@ logger = logging.getLogger(__name__)
 
 
 class QuantumMachine:
+    """Handle to an opened quantum machine on a QOP 2.x controller, obtained from
+    `QuantumMachinesManager.open_qm`. Used to compile and queue QUA programs, inspect the
+    currently running job, and calibrate Octave elements.
+    """
+
     def __init__(
         self,
         machine_id: str,
@@ -294,6 +299,9 @@ class QuantumMachine:
     ) -> MixerCalibrationResults:
         """Calibrate the up converters associated with a given element for the given LO & IF frequencies.
 
+        This is only relevant for elements connected to an Octave. Calling this on an
+        element that is not connected to an Octave will raise a `CantCalibrateElementError`.
+
         - Frequencies can be given as a dictionary with LO frequency as the key and a list of IF frequencies for every LO
         - If no frequencies are given calibration will occur according to LO & IF declared in the element
         - The function need to be run for each element separately
@@ -306,6 +314,9 @@ class QuantumMachine:
             save_to_db (bool): If true (default), The calibration
                 parameters will be saved to the calibration database
             params: Optional calibration parameters
+
+        Returns:
+            The mixer calibration results, keyed by (LO frequency, gain).
         """
         inst = self._elements[qe]
         if not isinstance(inst.input, UpconvertedInput):
@@ -663,7 +674,7 @@ class QuantumMachine:
     @property
     def io2(self) -> Dict[str, Value]:
         """Gets the data stored in ``IO2``. Equivalent to ``get_io2_value()``."""
-        return self.get_io1_value()
+        return self.get_io2_value()
 
     @io2.setter
     def io2(self, value: Value) -> None:
@@ -821,7 +832,11 @@ class QuantumMachine:
             writer.write(json_str)
 
     def get_running_job(self) -> Optional[Union[QmJob, JobApiWithDeprecations]]:
-        """Gets the currently running job. Returns None if there isn't one."""
+        """Gets the currently running job. Returns None if there isn't one.
+
+        Returns:
+            The currently running job, or ``None`` if no job is running.
+        """
 
         job_id = self._job_manager.get_running_job(self._id)
         if job_id is None:

@@ -1,6 +1,7 @@
 import abc
 from typing import Any, Dict, Type, Union, Optional, Sequence, overload
 
+from qm.config import IntegrationWeights
 from qm.exceptions import QmQuaException
 from qm.qua._expressions import QuaVariable, QuaArrayCell, QuaArrayVariable
 from qm.qua._dsl.measure.analog_measure_process import RawTimeTagging as AnalogRawTimeTagging
@@ -20,8 +21,7 @@ from qm.qua._dsl.measure.analog_measure_process import (
     MovingWindowAnalogTimeDivision,
 )
 
-DEFAULT_OUT1 = "out1"
-DEFAULT_OUT2 = "out2"
+_UNSET_ELEMENT_OUTPUT = ""
 
 
 class _AccumulationMethod(abc.ABC):  # noqa: B024
@@ -49,7 +49,7 @@ class _AccumulationMethod(abc.ABC):  # noqa: B024
         return VectorProcessTarget(cls.loc, target, analog_time_division)
 
 
-class _RealAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
+class _RealAccumulationMethod(_AccumulationMethod, abc.ABC):
     @classmethod
     @abc.abstractmethod
     def _get_return_func(cls) -> Type[BasicIntegration]:
@@ -57,14 +57,17 @@ class _RealAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
 
     @classmethod
     def full(
-        cls, iw: str, target: Union[QuaVariable[float], QuaArrayCell[float]], element_output: str = ""
+        cls,
+        iw: Union[str, IntegrationWeights],
+        target: Union[QuaVariable[float], QuaArrayCell[float]],
+        element_output: str = "",
     ) -> BasicIntegration:
         return cls._get_return_func()(element_output, iw, cls._full_target(target))
 
     @classmethod
     def sliced(
         cls,
-        iw: str,
+        iw: Union[str, IntegrationWeights],
         target: QuaArrayVariable[float],
         samples_per_chunk: int,
         element_output: str = "",
@@ -74,7 +77,7 @@ class _RealAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
     @classmethod
     def accumulated(
         cls,
-        iw: str,
+        iw: Union[str, IntegrationWeights],
         target: QuaArrayVariable[float],
         samples_per_chunk: int,
         element_output: str = "",
@@ -84,7 +87,7 @@ class _RealAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
     @classmethod
     def moving_window(
         cls,
-        iw: str,
+        iw: Union[str, IntegrationWeights],
         target: QuaArrayVariable[float],
         samples_per_chunk: int,
         chunks_per_window: int,
@@ -97,7 +100,7 @@ class _RealAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
         )
 
 
-class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
+class _DualAccumulationMethod(_AccumulationMethod, abc.ABC):
     @classmethod
     @abc.abstractmethod
     def _get_return_func(cls) -> Type[DualMeasureProcess]:
@@ -111,8 +114,8 @@ class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
     @classmethod
     def full(
         cls,
-        iw1: str,
-        iw2: str,
+        iw1: Union[str, IntegrationWeights],
+        iw2: Union[str, IntegrationWeights],
         target: Union[QuaVariable[float], QuaArrayCell[float]],
     ) -> DualMeasureProcess: ...
 
@@ -131,8 +134,8 @@ class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
     def full(cls, *args: Any, **kwargs: Any) -> DualMeasureProcess:
         if len(args) + len(kwargs) == 3:
             kwargs.update(_DualAccumulationMethod._make_dict_from_args(args, ["iw1", "iw2", "target"]))
-            kwargs["element_output1"] = DEFAULT_OUT1
-            kwargs["element_output2"] = DEFAULT_OUT2
+            kwargs["element_output1"] = _UNSET_ELEMENT_OUTPUT
+            kwargs["element_output2"] = _UNSET_ELEMENT_OUTPUT
             return cls.full(**kwargs)
         elif len(args) + len(kwargs) == 5:
             kwargs.update(
@@ -155,8 +158,8 @@ class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
     @classmethod
     def sliced(
         cls,
-        iw1: str,
-        iw2: str,
+        iw1: Union[str, IntegrationWeights],
+        iw2: Union[str, IntegrationWeights],
         samples_per_chunk: int,
         target: QuaArrayVariable[float],
     ) -> DualMeasureProcess:
@@ -182,8 +185,8 @@ class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
             kwargs.update(
                 _DualAccumulationMethod._make_dict_from_args(args, ["iw1", "iw2", "samples_per_chunk", "target"])
             )
-            kwargs["element_output1"] = DEFAULT_OUT1
-            kwargs["element_output2"] = DEFAULT_OUT2
+            kwargs["element_output1"] = _UNSET_ELEMENT_OUTPUT
+            kwargs["element_output2"] = _UNSET_ELEMENT_OUTPUT
             return cls.sliced(**kwargs)
         elif len(args) + len(kwargs) == 6:
             kwargs.update(
@@ -207,8 +210,8 @@ class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
     @classmethod
     def accumulated(
         cls,
-        iw1: str,
-        iw2: str,
+        iw1: Union[str, IntegrationWeights],
+        iw2: Union[str, IntegrationWeights],
         samples_per_chunk: int,
         target: QuaArrayVariable[float],
     ) -> DualMeasureProcess:
@@ -234,8 +237,8 @@ class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
             kwargs.update(
                 _DualAccumulationMethod._make_dict_from_args(args, ["iw1", "iw2", "samples_per_chunk", "target"])
             )
-            kwargs["element_output1"] = DEFAULT_OUT1
-            kwargs["element_output2"] = DEFAULT_OUT2
+            kwargs["element_output1"] = _UNSET_ELEMENT_OUTPUT
+            kwargs["element_output2"] = _UNSET_ELEMENT_OUTPUT
             return cls.accumulated(**kwargs)
         elif len(args) + len(kwargs) == 6:
             kwargs.update(
@@ -259,8 +262,8 @@ class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
     @classmethod
     def moving_window(
         cls,
-        iw1: str,
-        iw2: str,
+        iw1: Union[str, IntegrationWeights],
+        iw2: Union[str, IntegrationWeights],
         samples_per_chunk: int,
         chunks_per_window: int,
         target: QuaArrayVariable[float],
@@ -290,8 +293,8 @@ class _DualAccumulationMethod(_AccumulationMethod, metaclass=abc.ABCMeta):
                     args, ["iw1", "iw2", "samples_per_chunk", "chunks_per_window", "target"]
                 )
             )
-            kwargs["element_output1"] = DEFAULT_OUT1
-            kwargs["element_output2"] = DEFAULT_OUT2
+            kwargs["element_output1"] = _UNSET_ELEMENT_OUTPUT
+            kwargs["element_output2"] = _UNSET_ELEMENT_OUTPUT
             return cls.moving_window(**kwargs)
         elif len(args) + len(kwargs) == 7:
             kwargs.update(
@@ -345,6 +348,9 @@ class time_tagging:
                 pulses detected
             element_output (str): The output of an element from which to get the pulses.
                 Required when there are multiple outputs in the element. Optional otherwise.
+
+        Returns:
+            A time-tagging measure process to be used inside a ``measure`` statement.
         """
         return AnalogRawTimeTagging(element_output, target, targetLen, max_time)
 
@@ -369,6 +375,9 @@ class time_tagging:
                 pulses detected
             element_output (str): The output of an element from which to get the pulses.
                 Required when there are multiple outputs in the element. Optional otherwise.
+
+        Returns:
+            A digital time-tagging measure process to be used inside a ``measure`` statement.
         """
         return DigitalRawTimeTagging(element_output, target, targetLen, max_time)
 
@@ -392,6 +401,9 @@ class time_tagging:
                 pulses detected
             element_output (str): The output of an element from which to get the pulses.
                 Required when there are multiple outputs in the element. Optional otherwise.
+
+        Returns:
+            A high-resolution time-tagging measure process to be used inside a ``measure`` statement.
         """
         return HighResTimeTagging(element_output, target, targetLen, max_time)
 
@@ -422,8 +434,11 @@ class counting:
                 (Must be larger than the pulse duration)
             element_outputs (str): the outputs of an element from which
                 to get ADC results
+
+        Returns:
+            A counting measure process to be used inside a ``measure`` statement.
         """
-        return DigitalMeasureProcessCounting(element_outputs, target, max_time)
+        return DigitalMeasureProcessCounting([element_outputs], target, max_time)
 
 
 class demod(_RealAccumulationMethod):
@@ -437,7 +452,10 @@ class demod(_RealAccumulationMethod):
 
     @classmethod
     def full(
-        cls, iw: str, target: Union[QuaVariable[float], QuaArrayCell[float]], element_output: str = ""
+        cls,
+        iw: Union[str, IntegrationWeights],
+        target: Union[QuaVariable[float], QuaArrayCell[float]],
+        element_output: str = "",
     ) -> BasicIntegration:
         """
         Perform an ordinary demodulation.
@@ -450,13 +468,16 @@ class demod(_RealAccumulationMethod):
             element_output (str): The output of an element from which to get the ADC data.
                 Required for elements with `MWOutput` or with multiple `outputs`.
                 Optional otherwise.
+
+        Returns:
+            A demodulation measure process to be used inside a ``measure`` statement.
         """
         return super().full(iw, target, element_output)
 
     @classmethod
     def sliced(
         cls,
-        iw: str,
+        iw: Union[str, IntegrationWeights],
         target: QuaArrayVariable[float],
         samples_per_chunk: int,
         element_output: str = "",
@@ -474,13 +495,16 @@ class demod(_RealAccumulationMethod):
             element_output (str): The output of an element from which to get the ADC data.
                 Required for elements with `MWOutput` or with multiple `outputs`.
                 Optional otherwise.
+
+        Returns:
+            A sliced demodulation measure process to be used inside a ``measure`` statement.
         """
         return super().sliced(iw, target, samples_per_chunk, element_output)
 
     @classmethod
     def accumulated(
         cls,
-        iw: str,
+        iw: Union[str, IntegrationWeights],
         target: QuaArrayVariable[float],
         samples_per_chunk: int,
         element_output: str = "",
@@ -498,13 +522,16 @@ class demod(_RealAccumulationMethod):
             element_output (str): The output of an element from which to get the ADC data.
                 Required for elements with `MWOutput` or with multiple `outputs`.
                 Optional otherwise.
+
+        Returns:
+            An accumulated demodulation measure process to be used inside a ``measure`` statement.
         """
         return super().accumulated(iw, target, samples_per_chunk, element_output)
 
     @classmethod
     def moving_window(
         cls,
-        iw: str,
+        iw: Union[str, IntegrationWeights],
         target: QuaArrayVariable[float],
         samples_per_chunk: int,
         chunks_per_window: int,
@@ -525,6 +552,9 @@ class demod(_RealAccumulationMethod):
             element_output (str): The output of an element from which to get the ADC data.
                 Required for elements with `MWOutput` or with multiple `outputs`.
                 Optional otherwise.
+
+        Returns:
+            A moving-window demodulation measure process to be used inside a ``measure`` statement.
         """
         return super().moving_window(iw, target, samples_per_chunk, chunks_per_window, element_output)
 
@@ -543,8 +573,8 @@ class dual_demod(_DualAccumulationMethod):
     @classmethod
     def full(
         cls,
-        iw1: str,
-        iw2: str,
+        iw1: Union[str, IntegrationWeights],
+        iw2: Union[str, IntegrationWeights],
         target: Union[QuaVariable[float], QuaArrayCell[float]],
     ) -> DualMeasureProcess:
         """
@@ -599,6 +629,9 @@ class dual_demod(_DualAccumulationMethod):
                 * target (QUA variable): variable to which the demod result is saved
 
             kwargs (Any): Accepts keyword arguments corresponding to the parameters.
+
+        Returns:
+            A dual-measure process to be used inside a `measure` statement.
         """
         return super().full(*args, **kwargs)
 
@@ -614,7 +647,10 @@ class integration(_RealAccumulationMethod):
 
     @classmethod
     def full(
-        cls, iw: str, target: Union[QuaVariable[float], QuaArrayCell[float]], element_output: str = ""
+        cls,
+        iw: Union[str, IntegrationWeights],
+        target: Union[QuaVariable[float], QuaArrayCell[float]],
+        element_output: str = "",
     ) -> BasicIntegration:
         """
         Perform an ordinary integration.
@@ -627,13 +663,16 @@ class integration(_RealAccumulationMethod):
             element_output (str): The output of an element from which to get the ADC data.
                 Required for elements with `MWOutput` or with multiple `outputs`.
                 Optional otherwise.
+
+        Returns:
+            An integration measure process to be used inside a ``measure`` statement.
         """
         return super().full(iw, target, element_output)
 
     @classmethod
     def sliced(
         cls,
-        iw: str,
+        iw: Union[str, IntegrationWeights],
         target: QuaArrayVariable[float],
         samples_per_chunk: int,
         element_output: str = "",
@@ -651,13 +690,16 @@ class integration(_RealAccumulationMethod):
             element_output (str): The output of an element from which to get the ADC data.
                 Required for elements with `MWOutput` or with multiple `outputs`.
                 Optional otherwise.
+
+        Returns:
+            A sliced integration measure process to be used inside a ``measure`` statement.
         """
         return super().sliced(iw, target, samples_per_chunk, element_output)
 
     @classmethod
     def accumulated(
         cls,
-        iw: str,
+        iw: Union[str, IntegrationWeights],
         target: QuaArrayVariable[float],
         samples_per_chunk: int,
         element_output: str = "",
@@ -675,13 +717,16 @@ class integration(_RealAccumulationMethod):
             element_output (str): The output of an element from which to get the ADC data.
                 Required for elements with `MWOutput` or with multiple `outputs`.
                 Optional otherwise.
+
+        Returns:
+            An accumulated integration measure process to be used inside a ``measure`` statement.
         """
         return super().accumulated(iw, target, samples_per_chunk, element_output)
 
     @classmethod
     def moving_window(
         cls,
-        iw: str,
+        iw: Union[str, IntegrationWeights],
         target: QuaArrayVariable[float],
         samples_per_chunk: int,
         chunks_per_window: int,
@@ -702,5 +747,8 @@ class integration(_RealAccumulationMethod):
             element_output (str): The output of an element from which to get the ADC data.
                 Required for elements with `MWOutput` or with multiple `outputs`.
                 Optional otherwise.
+
+        Returns:
+            A moving-window integration measure process to be used inside a ``measure`` statement.
         """
         return super().moving_window(iw, target, samples_per_chunk, chunks_per_window, element_output)

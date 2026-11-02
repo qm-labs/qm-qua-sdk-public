@@ -1,16 +1,18 @@
 import abc
+from collections.abc import Collection
 from typing import Union, TypeVar, Optional
 
 from qm._loc import _get_loc
 from qm.type_hinting import Number
 from qm.grpc.qm.pb import inc_qua_pb2
+from qm.config import IntegrationWeights
 from qm.exceptions import QmQuaException
 from qm.utils.protobuf_utils import which_one_of
 from qm.qua._expressions import QuaVariable, QuaArrayCell, QuaArrayVariable
 from qm.qua._dsl.stream_processing.direct_stream_processing_interface import DirectStreamSourceInterface
 
 
-class AnalogTimeDivision(metaclass=abc.ABCMeta):
+class AnalogTimeDivision(abc.ABC):
     def __init__(self, loc: str, samples_per_chunk: int):
         self.loc = loc
         self.samples_per_chunk = samples_per_chunk
@@ -52,7 +54,7 @@ class MovingWindowAnalogTimeDivision(AnalogTimeDivision):
         )
 
 
-class AnalogProcessTarget(metaclass=abc.ABCMeta):
+class AnalogProcessTarget(abc.ABC):
     def __init__(self, loc: str):
         self.loc = loc
 
@@ -111,7 +113,7 @@ class VectorProcessTarget(AnalogProcessTarget):
             self.target.save()
 
 
-class MeasureProcessAbstract(metaclass=abc.ABCMeta):
+class MeasureProcessAbstract(abc.ABC):
     def __init__(self) -> None:
         self.loc = _get_loc()
 
@@ -124,11 +126,21 @@ class MeasureProcessAbstract(metaclass=abc.ABCMeta):
     def save_stream_if_needed(self) -> None:
         pass
 
+    @property
+    @abc.abstractmethod
+    def uses_string_api(self) -> bool:
+        pass
 
-class AnalogMeasureProcess(MeasureProcessAbstract, metaclass=abc.ABCMeta):
+
+class AnalogMeasureProcess(MeasureProcessAbstract, abc.ABC):
     def __init__(self, target: AnalogProcessTarget):
         super().__init__()
         self.target = target
+
+    @property
+    @abc.abstractmethod
+    def integration_weights(self) -> Collection[IntegrationWeights]:
+        pass
 
     @property
     def unwrapped(self) -> inc_qua_pb2.QuaProgram.MeasureProcess:
@@ -144,10 +156,24 @@ class AnalogMeasureProcess(MeasureProcessAbstract, metaclass=abc.ABCMeta):
 
 
 class BasicIntegration(AnalogMeasureProcess):
-    def __init__(self, element_output: str, iw: str, target: AnalogProcessTarget):
+    def __init__(
+        self,
+        element_output: str,
+        iw: str | IntegrationWeights,
+        target: AnalogProcessTarget,
+    ):
         super().__init__(target)
         self.element_output = element_output
         self.iw = iw
+        self._iw_name = iw if isinstance(iw, str) else iw.name
+
+    @property
+    def uses_string_api(self) -> bool:
+        return isinstance(self.iw, str)
+
+    @property
+    def integration_weights(self) -> Collection[IntegrationWeights]:
+        return [self.iw] if isinstance(self.iw, IntegrationWeights) else []
 
     @property
     @abc.abstractmethod
@@ -161,7 +187,7 @@ class BareIntegration(BasicIntegration):
         return inc_qua_pb2.QuaProgram.AnalogMeasureProcess(
             loc=self.loc,
             bareIntegration=inc_qua_pb2.QuaProgram.AnalogMeasureProcess.BareIntegration(
-                integration=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self.iw),
+                integration=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self._iw_name),
                 elementOutput=self.element_output,
                 target=self.target.unwrapped,
             ),
@@ -174,20 +200,20 @@ class DemodIntegration(BasicIntegration):
         return inc_qua_pb2.QuaProgram.AnalogMeasureProcess(
             loc=self.loc,
             demodIntegration=inc_qua_pb2.QuaProgram.AnalogMeasureProcess.DemodIntegration(
-                integration=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self.iw),
+                integration=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self._iw_name),
                 elementOutput=self.element_output,
                 target=self.target.unwrapped,
             ),
         )
 
 
-class DualMeasureProcess(AnalogMeasureProcess, metaclass=abc.ABCMeta):
+class DualMeasureProcess(AnalogMeasureProcess, abc.ABC):
     def __init__(
         self,
         element_output1: str,
         element_output2: str,
-        iw1: str,
-        iw2: str,
+        iw1: str | IntegrationWeights,
+        iw2: str | IntegrationWeights,
         target: AnalogProcessTarget,
     ):
         super().__init__(target)
@@ -195,6 +221,18 @@ class DualMeasureProcess(AnalogMeasureProcess, metaclass=abc.ABCMeta):
         self.element_output2 = element_output2
         self.iw1 = iw1
         self.iw2 = iw2
+        self._iw_name1 = iw1 if isinstance(iw1, str) else iw1.name
+        self._iw_name2 = iw2 if isinstance(iw2, str) else iw2.name
+
+    @property
+    def uses_string_api(self) -> bool:
+        # The element outputs are always plain strs (resolved from the element's config),
+        # so they no longer signal whether the "string API" was used.
+        return any(isinstance(x, str) for x in [self.iw1, self.iw2])
+
+    @property
+    def integration_weights(self) -> Collection[IntegrationWeights]:
+        return [x for x in [self.iw1, self.iw2] if isinstance(x, IntegrationWeights)]
 
 
 class DualDemodIntegration(DualMeasureProcess):
@@ -203,8 +241,8 @@ class DualDemodIntegration(DualMeasureProcess):
         return inc_qua_pb2.QuaProgram.AnalogMeasureProcess(
             loc=self.loc,
             dualDemodIntegration=inc_qua_pb2.QuaProgram.AnalogMeasureProcess.DualDemodIntegration(
-                integration1=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self.iw1),
-                integration2=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self.iw2),
+                integration1=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self._iw_name1),
+                integration2=inc_qua_pb2.QuaProgram.IntegrationWeightReference(name=self._iw_name2),
                 elementOutput1=self.element_output1,
                 elementOutput2=self.element_output2,
                 target=self.target.unwrapped,
@@ -214,11 +252,9 @@ class DualDemodIntegration(DualMeasureProcess):
 
 T = TypeVar(
     "T",
-    bound=Union[
-        inc_qua_pb2.QuaProgram.AnalogMeasureProcess.RawTimeTagging,
-        inc_qua_pb2.QuaProgram.AnalogMeasureProcess.HighResTimeTagging,
-        inc_qua_pb2.QuaProgram.DigitalMeasureProcess.RawTimeTagging,
-    ],
+    inc_qua_pb2.QuaProgram.AnalogMeasureProcess.RawTimeTagging,
+    inc_qua_pb2.QuaProgram.AnalogMeasureProcess.HighResTimeTagging,
+    inc_qua_pb2.QuaProgram.DigitalMeasureProcess.RawTimeTagging,
 )
 
 
@@ -228,7 +264,7 @@ def _add_target_len(time_tagging: T, target_len: Optional[QuaVariable[int]]) -> 
     return time_tagging
 
 
-class TimeTaggingMeasurementProcess(MeasureProcessAbstract, metaclass=abc.ABCMeta):
+class TimeTaggingMeasurementProcess(MeasureProcessAbstract, abc.ABC):
     def __init__(
         self,
         element_output: str,
@@ -259,6 +295,12 @@ class TimeTaggingMeasurementProcess(MeasureProcessAbstract, metaclass=abc.ABCMet
 
     def save_stream_if_needed(self) -> None:
         pass
+
+    @property
+    def uses_string_api(self) -> bool:
+        # The element output is always a plain str (resolved from the element's config),
+        # so it no longer signals whether the "string API" was used.
+        return False
 
 
 class RawTimeTagging(TimeTaggingMeasurementProcess):

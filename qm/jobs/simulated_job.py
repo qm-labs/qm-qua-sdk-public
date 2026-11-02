@@ -1,13 +1,12 @@
-import warnings
 import json as _json
 from io import BytesIO
+from typing_extensions import deprecated
 from typing import Any, Dict, Union, BinaryIO, Callable, Optional
 
 import numpy
 import numpy.typing
 from google.protobuf.struct_pb2 import Value, Struct
 
-from qm.utils import deprecation_message
 from qm.grpc.qm.grpc.v2 import job_api_pb2
 from qm.api.frontend_api import FrontendApi
 from qm.exceptions import QMSimulationError
@@ -19,6 +18,7 @@ from qm.jobs.running_qm_job import RunningQmJob
 from qm.grpc.qm.pb import frontend_pb2, job_results_pb2
 from qm.api.models.capabilities import ServerCapabilities
 from qm.simulate._simulator_samples import SimulatorSamples
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.utils.protobuf_utils import which_one_of, serialized_on_wire
 from qm.waveform_report._type_hints import AnalogOutputsType, DigitalOutputsType, WaveformInPortsType
 
@@ -54,6 +54,13 @@ VALUE_MAPPING: Dict[str, Callable[[Any], Any]] = {
 
 
 class SimulatedJob(RunningQmJob):
+    """Handle for a job run through the simulator on the OPX+ with QOP2.x, returned by
+    [QuantumMachine.simulate][qm.quantum_machine.QuantumMachine.simulate] or
+    [QuantumMachinesManager.simulate][qm.quantum_machines_manager.QuantumMachinesManager.simulate]. In addition
+    to the [RunningQmJob][qm.jobs.running_qm_job.RunningQmJob] API, exposes the simulated output samples and
+    the [WaveformReport][qm.waveform_report.WaveformReport] for the simulated run.
+    """
+
     def __init__(
         self,
         job_id: str,
@@ -92,6 +99,12 @@ class SimulatedJob(RunningQmJob):
         """
         return self._waveform_report
 
+    @deprecated(
+        'SimulatedJob.simulated_analog_waveforms is deprecated since "1.1.0" and will be removed in "2.0.0". '
+        "use 'get_simulated_waveform_report' instead",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def simulated_analog_waveforms(self) -> Optional[WaveformInPortsType]:
         """
         Return the results of the simulation of elements and analog outputs.
@@ -118,18 +131,14 @@ class SimulatedJob(RunningQmJob):
             A dictionary containing output information for the analog outputs of the controller.
 
         """
-        warnings.warn(
-            deprecation_message(
-                method="SimulatedJob.simulated_analog_waveforms",
-                deprecated_in="1.1.0",
-                removed_in="2.0.0",
-                details="use 'get_simulated_waveform_report' instead.",
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return self._simulated_analog_outputs["waveforms"]
 
+    @deprecated(
+        'SimulatedJob.simulated_digital_waveforms is deprecated since "1.1.0" and will be removed in "2.0.0". '
+        "use 'get_simulated_waveform_report' instead",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def simulated_digital_waveforms(self) -> Optional[WaveformInPortsType]:
         """
         Return the results of the simulation of digital outputs.
@@ -151,16 +160,6 @@ class SimulatedJob(RunningQmJob):
         Returns:
             A dictionary containing output information for the analog outputs of the controller.
         """
-        warnings.warn(
-            deprecation_message(
-                method="SimulatedJob.simulated_digital_waveforms",
-                deprecated_in="1.1.0",
-                removed_in="2.0.0",
-                details="use 'get_simulated_waveform_report' instead.",
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return self._simulated_digital_outputs["waveforms"]
 
     def _pull_simulator_samples(

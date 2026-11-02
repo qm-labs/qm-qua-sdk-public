@@ -556,8 +556,16 @@ class Connectivity:
     def synth_indices(self) -> List[int]:
         return self._synths
 
+    # Internal API: not part of the public interface (no leading underscore, but kept for internal reuse).
     def get_lo_source_of_rf_output(self, index: int) -> Dict[Tuple[OctaveLOSource, int], _LoSourceInfo]:
-        """returns dictionary from rf_output input name to rf source"""
+        """Get the LO source mapping for the LO output of the given RF output.
+
+        Args:
+            index: The RF output index.
+
+        Returns:
+            A mapping from (LO source, synth index) to its LO source info for the given RF output.
+        """
         synth_index, port_type = self._synth_by_rf_out[index]
 
         result = {}
@@ -568,14 +576,30 @@ class Connectivity:
                 result[(port_name, source.module_info.synth_index)] = source
         return result
 
+    # Internal API: not part of the public interface (no leading underscore, but kept for internal reuse).
     def get_lo_source_of_rf_input_first(self, index: int) -> Dict[Tuple[OctaveLOSource, int], _LoSourceInfo]:
-        """returns dictionary from rf_output input name to rf source"""
+        """Get the LO source mapping for the first LO input of the given RF input.
+
+        Args:
+            index: The RF input index.
+
+        Returns:
+            A mapping from (LO source, synth index) to its LO source info for the first LO input.
+        """
         synth_index, output = self._synth_by_rf_in[index, api_pb2.RFDownConvUpdate.LOInput.LO_INPUT_1]
 
         return self.get_lo_source_by_synth_output(synth_index, output)
 
+    # Internal API: not part of the public interface (no leading underscore, but kept for internal reuse).
     def get_lo_source_of_rf_input_second(self, index: int) -> Dict[Tuple[OctaveLOSource, int], _LoSourceInfo]:
-        """returns dictionary from rf_output input name to rf source"""
+        """Get the LO source mapping for the second LO input of the given RF input.
+
+        Args:
+            index: The RF input index.
+
+        Returns:
+            A mapping from (LO source, synth index) to its LO source info for the second LO input.
+        """
         synth_index, output = self._synth_by_rf_in[index, api_pb2.RFDownConvUpdate.LOInput.LO_INPUT_2]
 
         return self.get_lo_source_by_synth_output(synth_index, output)

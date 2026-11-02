@@ -62,6 +62,9 @@ def program() -> _ProgramScope:
         qm = qmm.open_qm(...)
         qm.execute(program_name)
         ```
+
+    Returns:
+        A program-scope context manager defining the QUA program.
     """
     return _ProgramScope()
 
@@ -87,6 +90,9 @@ def switch_(expression: QuaScalar[NumberT], unsafe: bool = False) -> _SwitchScop
             not match a case is given, unexpected behavior will occur.
             Cannot be used with the ``default_()`` statement. Default is
             false, use with care.
+
+    Returns:
+        A switch-scope context manager for the switch-case block.
 
     Example:
         ```python
@@ -121,6 +127,9 @@ def case_(case_exp: Scalar[NumberT]) -> _CaseScope[NumberT]:
     Args:
         case_exp: A value (or expression) to compare to the expression
             in the ``switch_()`` statement
+
+    Returns:
+        A case-scope context manager for this case's QUA code block.
 
     Example:
         ```python
@@ -160,6 +169,9 @@ def default_() -> _CaseDefaultScope:
     statements evaluated to true, the QUA code block following the ``default_()``
     statement (if given) will be executed.
 
+    Returns:
+        A default-scope context manager for the default QUA code block.
+
     Example:
         ```python
         x=declare(int)
@@ -197,6 +209,13 @@ def if_(expression: Scalar[bool], unsafe: bool = False) -> _IfScope:
 
     Args:
         expression: A boolean expression to evaluate
+        unsafe: If set to True, skips the safety checks on the condition,
+            producing more efficient code with fewer gaps. However, if the
+            condition is not a valid boolean expression, unexpected behavior
+            will occur. Default is false, use with care.
+
+    Returns:
+        An if-scope context manager for the conditional QUA code block.
 
     Example:
         ```python
@@ -221,6 +240,9 @@ def elif_(expression: Scalar[bool]) -> _ElifScope:
 
     Args:
         expression: A boolean expression to evaluate
+
+    Returns:
+        An elif-scope context manager for the conditional QUA code block.
 
     Example:
         ```python
@@ -260,6 +282,9 @@ def else_() -> _ElseScope:
     The QUA code block following the statement will be executed only if the expressions
     in the preceding ``if_()`` and ``elif_()`` statements evaluates to false.
 
+    Returns:
+        An else-scope context manager for the conditional QUA code block.
+
     Example:
         ```python
         x=declare(int)
@@ -298,6 +323,9 @@ def while_(cond: QuaScalar[bool]) -> _ForScope:
             boolean variable, determines if to continue to next loop
             iteration
 
+    Returns:
+        A loop-scope context manager for the while-loop body.
+
     Example:
         ```python
         x = declare(int)
@@ -329,6 +357,9 @@ def for_(
             iteration
         update (QUA expression): an expression to assign to ``var`` with
             each loop iteration
+
+    Returns:
+        A loop-scope context manager for the for-loop body.
 
     Example:
         ```python
@@ -372,6 +403,9 @@ def for_each_(
             variable
         values (Union[list of literals, tuple of lists of literals, QUA array, tuple of QUA arrays]):
             A list of values to iterate over or a QUA array.
+
+    Returns:
+        A for-each-scope context manager for the loop body.
 
     Example:
         ```python
@@ -456,6 +490,9 @@ def infinite_loop_() -> _ForScope:
     Optimized for zero latency between iterations,
     provided that no more than a single element appears in the loop.
 
+    Returns:
+        A loop-scope context manager for the infinite-loop body.
+
     Note:
         In case multiple elements need to be used in an infinite loop, it is possible to add several loops
         in parallel (see example).
@@ -483,6 +520,9 @@ def port_condition(condition: Scalar[bool]) -> _PortConditionScope:
         condition (A logical expression to evaluate): Will play the operation only if the condition is true.
             The play command will take the same amount of time regardless of the condition (If false, would wait instead).
 
+    Returns:
+        A port-condition-scope context manager for the conditional play block.
+
     Example:
         ```python
         with port_condition(x > 0):
@@ -503,6 +543,9 @@ def stream_processing() -> _ResultAnalysisScope:
 
     A pipeline can be assigned to python variable, and then reused on other pipelines. It is ensured that the
     common part of the pipeline is processed only once.
+
+    Returns:
+        A result-analysis-scope context manager for the stream processing pipeline.
 
     ??? example "Creating a result analysis object"
         ```python
@@ -528,5 +571,8 @@ def strict_timing_() -> _StrictTimingScope:
     To be used with a context manager.
 
     -- Available from QOP 2.0 --
+
+    Returns:
+        A strict-timing-scope context manager for the gapless QUA code block.
     """
     return _StrictTimingScope(loc=_get_loc())

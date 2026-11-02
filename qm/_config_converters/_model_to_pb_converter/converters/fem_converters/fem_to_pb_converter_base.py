@@ -1,19 +1,36 @@
 from abc import ABC
 from typing import Literal, TypeVar, Sequence
 
-from qm import QopCaps
+from qm.api.models.capabilities import QopCaps
+from qm.config._ports import AnalogInputPortLfBase
 from qm.exceptions import ConfigValidationException
 from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
+from qm.config import DigitalInputPort, DigitalOutputPort
 from qm.config._primitives import NOT_SET, ConfigOptional
-from qm.config._ports import DigitalInputPort, AnalogInputPortLf, DigitalOutputPort
 from qm._config_converters._model_to_pb_converter.base_converter import BaseModelToPbConverter
-from qm._config_converters.split_ports_by_fems import AllFems, FemDataOpx, FemDataOctoDac, FemDataMicrowave
+from qm._config_converters.split_ports_by_fems import (
+    AllFems,
+    FemDataOpx,
+    FemDataLFLN08,
+    FemDataOctoDac,
+    FemDataMicrowave,
+)
 
 ControllerConfigTypeVar = TypeVar(
-    "ControllerConfigTypeVar", QuaConfig.OctoDacFemDec, QuaConfig.ControllerDec, QuaConfig.MicrowaveFemDec
+    "ControllerConfigTypeVar",
+    QuaConfig.OctoDacFemDec,
+    QuaConfig.ControllerDec,
+    QuaConfig.MicrowaveFemDec,
+    QuaConfig.LFLN08FemDec,
 )
-FemDataT = TypeVar("FemDataT", FemDataOpx, FemDataOctoDac, FemDataMicrowave)
-FemPbT = TypeVar("FemPbT", QuaConfig.ControllerDec, QuaConfig, QuaConfig.OctoDacFemDec, QuaConfig.MicrowaveFemDec)
+FemDataT = TypeVar("FemDataT", FemDataOpx, FemDataOctoDac, FemDataMicrowave, FemDataLFLN08)
+FemPbT = TypeVar(
+    "FemPbT",
+    QuaConfig.ControllerDec,
+    QuaConfig.OctoDacFemDec,
+    QuaConfig.MicrowaveFemDec,
+    QuaConfig.LFLN08FemDec,
+)
 
 
 class FemToPbConverter(BaseModelToPbConverter[FemDataT, FemPbT], ABC):
@@ -76,7 +93,7 @@ class FemToPbConverter(BaseModelToPbConverter[FemDataT, FemPbT], ABC):
 
         return digital_input
 
-    def _lf_analog_input_port_to_pb(self, data: AnalogInputPortLf) -> QuaConfig.AnalogInputPortDec:
+    def _lf_analog_input_port_to_pb(self, data: AnalogInputPortLfBase) -> QuaConfig.AnalogInputPortDec:
         if self._should_apply_defaults:
             analog_input = QuaConfig.AnalogInputPortDec(
                 offset=data.offset.get_value(),
@@ -101,9 +118,8 @@ class FemToPbConverter(BaseModelToPbConverter[FemDataT, FemPbT], ABC):
 
     @staticmethod
     def _get_polarity(data: QuaConfig.DigitalInputPortDec) -> ConfigOptional[Literal["RISING", "FALLING"]]:
-        if data.HasField("polarity"):
-            if data.polarity == QuaConfig.DigitalInputPortDec.Polarity.RISING:
-                return "RISING"
-            if data.polarity == QuaConfig.DigitalInputPortDec.Polarity.FALLING:
-                return "FALLING"
+        if data.polarity == QuaConfig.DigitalInputPortDec.Polarity.RISING:
+            return "RISING"
+        if data.polarity == QuaConfig.DigitalInputPortDec.Polarity.FALLING:
+            return "FALLING"
         return NOT_SET

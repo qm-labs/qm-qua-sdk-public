@@ -76,6 +76,27 @@ class LfFemConfigType(TypedDict, total=False):
     digital_inputs: Mapping[Union[int, str], DigitalInputPortConfigType]
 
 
+class AnalogOutputPortConfigTypeLFLN08(TypedDict, total=False):
+    offset: Number
+    filter: Union[AnalogOutputFilterConfigType, AnalogOutputFilterConfigTypeQop33, AnalogOutputFilterConfigTypeQop35]
+    delay: int
+    crosstalk: Mapping[int, Number]
+    shareable: bool
+    connectivity: Tuple[str, str]
+    sampling_rate: float
+    upsampling_mode: Literal["mw", "pulse"]
+    min_voltage_limit: Optional[Number]
+    max_voltage_limit: Optional[Number]
+
+
+class LFLN08FemConfigType(TypedDict, total=False):
+    type: Literal["LF-LN08"]
+    analog_outputs: Mapping[Union[int, str], AnalogOutputPortConfigTypeLFLN08]
+    analog_inputs: Mapping[Union[int, str], AnalogInputPortConfigType]
+    digital_outputs: Mapping[Union[int, str], DigitalOutputPortConfigType]
+    digital_inputs: Mapping[Union[int, str], DigitalInputPortConfigType]
+
+
 Band = Literal[1, 2, 3]
 Upconverter = Literal[1, 2]
 
@@ -152,7 +173,7 @@ FEM_IDX = Literal[1, 2, 3, 4, 5, 6, 7, 8, "1", "2", "3", "4", "5", "6", "7", "8"
 
 class OPX1000ControllerConfigType(TypedDict, total=False):
     type: Literal["opx1000"]
-    fems: Mapping[FEM_IDX, Union[LfFemConfigType, MwFemConfigType]]
+    fems: Mapping[FEM_IDX, Union[LfFemConfigType, MwFemConfigType, LFLN08FemConfigType]]
 
 
 LoopbackType = Tuple[
@@ -295,6 +316,7 @@ class ElementConfigType(TypedDict, total=False):
     timeTaggingParameters: TimeTaggingParametersConfigType
     hold_offset: HoldOffsetConfigType
     sticky: StickyConfigType
+    persistent: bool
     thread: str
     core: str
     RF_inputs: Mapping[str, Tuple[str, int]]

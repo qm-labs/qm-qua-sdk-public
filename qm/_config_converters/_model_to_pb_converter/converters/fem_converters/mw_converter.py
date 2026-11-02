@@ -1,6 +1,6 @@
 from typing import Mapping, cast
 
-from qm import QopCaps
+from qm.api.models.capabilities import QopCaps
 from qm.exceptions import ConfigValidationException
 from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
 from qm.config._primitives import NOT_SET, ConfigOptional
@@ -8,13 +8,13 @@ from qm._config_converters.split_ports_by_fems import FemDataMicrowave
 from qm._config_converters._model_to_pb_converter.converters.fem_converters.fem_to_pb_converter_base import (
     FemToPbConverter,
 )
-from qm.config._ports import (
+from qm.config import (
     Band,
     MwFem,
-    AnalogInputPortMicrowave,
-    AnalogOutputPortMicrowave,
-    DigitalInputPortMicrowave,
-    DigitalOutputPortMicrowave,
+    AnalogInputPortMw,
+    AnalogOutputPortMw,
+    DigitalInputPortMw,
+    DigitalOutputPortMw,
 )
 
 
@@ -34,7 +34,7 @@ class MwFemToPbConverter(FemToPbConverter[FemDataMicrowave, QuaConfig.MicrowaveF
 
     def _analog_output_to_pb(
         self,
-        data: AnalogOutputPortMicrowave,
+        data: AnalogOutputPortMw,
     ) -> QuaConfig.MicrowaveAnalogOutputPortDec:
         if self._should_apply_defaults:
             item = QuaConfig.MicrowaveAnalogOutputPortDec(
@@ -61,7 +61,7 @@ class MwFemToPbConverter(FemToPbConverter[FemDataMicrowave, QuaConfig.MicrowaveF
             self._set_pb_attr_config_v2(item, upconverters, "upconverters", "upconverters_v2")
         return item
 
-    def _get_upconverters(self, data: AnalogOutputPortMicrowave) -> Mapping[int, QuaConfig.UpConverterConfigDec] | None:
+    def _get_upconverters(self, data: AnalogOutputPortMw) -> Mapping[int, QuaConfig.UpConverterConfigDec] | None:
         if data.upconverter1_frequency.is_set or data.upconverter2_frequency.is_set:
             upconverters: dict[int, QuaConfig.UpConverterConfigDec] = {}
             if data.upconverter1_frequency.is_set:
@@ -75,7 +75,7 @@ class MwFemToPbConverter(FemToPbConverter[FemDataMicrowave, QuaConfig.MicrowaveF
             return None
         raise ConfigValidationException("At least one upconverter should be set.")
 
-    def _analog_input_port_to_pb(self, data: AnalogInputPortMicrowave) -> QuaConfig.MicrowaveAnalogInputPortDec:
+    def _analog_input_port_to_pb(self, data: AnalogInputPortMw) -> QuaConfig.MicrowaveAnalogInputPortDec:
         if self._should_apply_defaults:
             analog_input = QuaConfig.MicrowaveAnalogInputPortDec(
                 samplingRate=data.sampling_rate.get_value(),
@@ -113,6 +113,13 @@ class MwFemToPbConverter(FemToPbConverter[FemDataMicrowave, QuaConfig.MicrowaveF
         """
         The deconvert function breaks liskov substitution ot simplify the interface,
         together with enjoying the goodies of the methods of the base converter
+
+        Args:
+            output_data: The protobuf microwave FEM declaration to convert back into a model.
+            fem: The FEM that the deconverted ports belong to.
+
+        Returns:
+            The microwave FEM data model (analog/digital inputs and outputs) reconstructed from the protobuf.
         """
         return FemDataMicrowave(
             analog_inputs=self._deconvert_analog_inputs(output_data.analogInputs, fem=fem),
@@ -125,7 +132,7 @@ class MwFemToPbConverter(FemToPbConverter[FemDataMicrowave, QuaConfig.MicrowaveF
         self,
         outputs: Mapping[int, QuaConfig.MicrowaveAnalogOutputPortDec],
         fem: MwFem,
-    ) -> tuple[AnalogOutputPortMicrowave, ...]:
+    ) -> tuple[AnalogOutputPortMw, ...]:
         return tuple(self._deconvert_analog_output(output, fem=fem, index=idx) for idx, output in outputs.items())
 
     def _deconvert_analog_output(
@@ -133,11 +140,11 @@ class MwFemToPbConverter(FemToPbConverter[FemDataMicrowave, QuaConfig.MicrowaveF
         data: QuaConfig.MicrowaveAnalogOutputPortDec,
         fem: MwFem,
         index: int,
-    ) -> AnalogOutputPortMicrowave:
+    ) -> AnalogOutputPortMw:
         upconverters = (
             data.upconverters_v2.value if self._capabilities.supports(QopCaps.config_v2) else data.upconverters
         )
-        return AnalogOutputPortMicrowave(
+        return AnalogOutputPortMw(
             fem=fem,
             index=index,
             sampling_rate=data.samplingRate,
@@ -153,17 +160,17 @@ class MwFemToPbConverter(FemToPbConverter[FemDataMicrowave, QuaConfig.MicrowaveF
         self,
         inputs: Mapping[int, QuaConfig.MicrowaveAnalogInputPortDec],
         fem: MwFem,
-    ) -> tuple[AnalogInputPortMicrowave, ...]:
+    ) -> tuple[AnalogInputPortMw, ...]:
         return tuple(self._deconvert_analog_input(_input, fem=fem, index=idx) for idx, _input in inputs.items())
 
     @staticmethod
     def _deconvert_analog_input(
         data: QuaConfig.MicrowaveAnalogInputPortDec, fem: MwFem, index: int
-    ) -> AnalogInputPortMicrowave:
+    ) -> AnalogInputPortMw:
         lo_mode: ConfigOptional[str] = NOT_SET
         if data.HasField("lo_mode"):
             lo_mode = QuaConfig.MicrowaveAnalogInputPortDec.LoMode.Name(data.lo_mode).lower()
-        return AnalogInputPortMicrowave(
+        return AnalogInputPortMw(
             fem=fem,
             index=index,
             band=cast(Band, data.band),
@@ -178,14 +185,14 @@ class MwFemToPbConverter(FemToPbConverter[FemDataMicrowave, QuaConfig.MicrowaveF
         self,
         outputs: Mapping[int, QuaConfig.DigitalOutputPortDec],
         fem: MwFem,
-    ) -> tuple[DigitalOutputPortMicrowave, ...]:
+    ) -> tuple[DigitalOutputPortMw, ...]:
         return tuple(self._deconvert_mw_digital_output(data, fem=fem, index=idx) for idx, data in outputs.items())
 
     @staticmethod
     def _deconvert_mw_digital_output(
         data: QuaConfig.DigitalOutputPortDec, fem: MwFem, index: int
-    ) -> DigitalOutputPortMicrowave:
-        return DigitalOutputPortMicrowave(
+    ) -> DigitalOutputPortMw:
+        return DigitalOutputPortMw(
             fem=fem,
             index=index,
             shareable=data.shareable,
@@ -196,13 +203,13 @@ class MwFemToPbConverter(FemToPbConverter[FemDataMicrowave, QuaConfig.MicrowaveF
         self,
         inputs: Mapping[int, QuaConfig.DigitalInputPortDec],
         fem: MwFem,
-    ) -> tuple[DigitalInputPortMicrowave, ...]:
+    ) -> tuple[DigitalInputPortMw, ...]:
         return tuple(self._deconvert_digital_input(data, fem=fem, index=idx) for idx, data in inputs.items())
 
     def _deconvert_digital_input(
         self, data: QuaConfig.DigitalInputPortDec, fem: MwFem, index: int
-    ) -> DigitalInputPortMicrowave:
-        return DigitalInputPortMicrowave(
+    ) -> DigitalInputPortMw:
+        return DigitalInputPortMw(
             fem=fem,
             index=index,
             shareable=data.shareable,

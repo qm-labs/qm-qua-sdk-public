@@ -8,6 +8,7 @@ FemTypes = Union[
     inc_qua_config_pb2.QuaConfig.ControllerDec,
     inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
     inc_qua_config_pb2.QuaConfig.MicrowaveFemDec,
+    inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
 ]
 
 
@@ -97,6 +98,7 @@ def get_fem_config_instance(fem_ref: inc_qua_config_pb2.QuaConfig.FEMTypes) -> F
             inc_qua_config_pb2.QuaConfig.ControllerDec,
             inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
             inc_qua_config_pb2.QuaConfig.MicrowaveFemDec,
+            inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
         ),
     ):
         raise InvalidConfigError(f"FEM type {type(config)} is not supported")

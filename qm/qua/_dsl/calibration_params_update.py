@@ -1,12 +1,17 @@
+from typing import Literal, overload
+
 from qm._loc import _get_loc
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
+from qm.qua._dsl._type_hints import ElementRef
+from qm.qua._dsl._utils import _add_element_to_program
 from qm.qua._expressions import Scalar, to_scalar_pb_expression
 from qm.qua._scope_management.scopes_manager import scopes_manager
+from qm.config import Element, MixedInput, SingleInput, ElementOutput
 
 
 def update_frequency(
-    element: str,
+    element: ElementRef,
     new_frequency: Scalar[int],
     units: str = "Hz",
     keep_phase: bool = False,
@@ -45,10 +50,12 @@ def update_frequency(
     except KeyError:
         raise QmQuaException(f'unknown units "{units}"')
 
+    element_name = _add_element_to_program(element)
+
     loc = _get_loc()
     statement = inc_qua_pb2.QuaProgram.UpdateFrequencyStatement(
         loc=loc,
-        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element_name, loc=loc),
         units=units_enum,
         keepPhase=keep_phase,
         value=to_scalar_pb_expression(new_frequency),
@@ -57,7 +64,7 @@ def update_frequency(
 
 
 def update_correction(
-    element: str,
+    element: str | Element[MixedInput, ElementOutput | None],
     c00: Scalar[float],
     c01: Scalar[float],
     c10: Scalar[float],
@@ -92,10 +99,12 @@ def update_correction(
             update_correction("q1", 1.0, 0.5, 0.5, 1.0)
         ```
     """
+    element_name = _add_element_to_program(element)
+
     loc = _get_loc()
     statement = inc_qua_pb2.QuaProgram.UpdateCorrectionStatement(
         loc=loc,
-        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element_name, loc=loc),
         correction=inc_qua_pb2.QuaProgram.Correction(
             c0=to_scalar_pb_expression(c00),
             c1=to_scalar_pb_expression(c01),
@@ -106,7 +115,30 @@ def update_correction(
     scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(updateCorrection=statement))
 
 
-def set_dc_offset(element: str, element_input: str, offset: Scalar[float]) -> None:
+@overload
+def set_dc_offset(element: str, element_input: Literal["single", "I", "Q"], offset: Scalar[float]) -> None:
+    pass
+
+
+@overload
+def set_dc_offset(
+    element: Element[SingleInput, ElementOutput | None], element_input: Literal["single"], offset: Scalar[float]
+) -> None:
+    pass
+
+
+@overload
+def set_dc_offset(
+    element: Element[MixedInput, ElementOutput | None], element_input: Literal["I", "Q"], offset: Scalar[float]
+) -> None:
+    pass
+
+
+def set_dc_offset(
+    element: Element[SingleInput, ElementOutput | None] | Element[MixedInput, ElementOutput | None] | str,
+    element_input: Literal["single", "I", "Q"],
+    offset: Scalar[float],
+) -> None:
     """Set the DC offset of an element's input to the given value.
     Up to QOP 3.5, this value will remain the DC offset until changed or until the Quantum Machine is closed.
     From QOP 3.5, the DC offset will be reset to the QM's idle value at the end of each program.
@@ -120,10 +152,12 @@ def set_dc_offset(element: str, element_input: str, offset: Scalar[float]) -> No
             element
         offset: The offset to set
     """
+    element_name = _add_element_to_program(element)
+
     loc = _get_loc()
     statement = inc_qua_pb2.QuaProgram.SetDcOffsetStatement(
         loc=loc,
-        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element_name, loc=loc),
         qeInputReference=element_input,
         offset=to_scalar_pb_expression(offset),
     )

@@ -1,18 +1,30 @@
-from typing import Iterable
-from typing import Optional, overload
-from typing import Iterable as IterableClass
-from typing import Tuple, Union, Literal, Mapping
+from collections.abc import Mapping, Iterable
+from typing import Tuple, Union, Literal, Optional, overload
 
 from qm._loc import _get_loc
 from qm.type_hinting import NumberT
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
+from qm.qua._dsl._type_hints import ElementRef
 from qm.qua._dsl.variable_handling import declare
 from qm.qua._dsl._utils import _standardize_timestamp_label
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._dsl.stream_processing.stream_processing import StreamType
 from qm.qua._expressions import Scalar, QuaArrayVariable, to_scalar_pb_expression, create_qua_scalar_expression
 from qm.qua._dsl.amplitude import AmpValuesType, MeasurePulseType, AmplitudeScaleTypes, standardize_pulse_and_amplitude
+from qm.config import (
+    Pulse,
+    Element,
+    Operation,
+    AnyElement,
+    SingleInput,
+    SinglePulse,
+    ComplexInput,
+    ComplexPulse,
+    ElementOutput,
+    MultipleInputs,
+    SingleInputCollection,
+)
 
 PlayPulseType = Union[MeasurePulseType, inc_qua_pb2.QuaProgram.RampPulse]
 
@@ -36,6 +48,72 @@ ChirpType = Union[
 A tuple, with the 1st element being a list of rates and the second should be a string with the unit type.
 See the ChirpUnits type for the complete list of supported units.
 """
+
+
+@overload
+def play(
+    pulse: ComplexPulse,
+    element: Element[ComplexInput, ElementOutput | None],
+    duration: Scalar[int] | None = None,
+    condition: Scalar[bool] | None = None,
+    chirp: ChirpType | None = None,
+    truncate: Scalar[int] | None = None,
+    timestamp_stream: StreamType | None = None,
+    continue_chirp: bool = False,
+    *,
+    amplitude_scale: AmplitudeScaleTypes = None,
+) -> None:
+    pass
+
+
+@overload
+def play(
+    pulse: SinglePulse,
+    element: Element[SingleInput, ElementOutput | None] | Element[MultipleInputs, ElementOutput | None],
+    duration: Scalar[int] | None = None,
+    condition: Scalar[bool] | None = None,
+    chirp: ChirpType | None = None,
+    truncate: Scalar[int] | None = None,
+    timestamp_stream: StreamType | None = None,
+    continue_chirp: bool = False,
+    *,
+    amplitude_scale: Scalar[float] | None = None,
+) -> None:
+    pass
+
+
+@overload
+def play(
+    pulse: SinglePulse,
+    element: Element[SingleInputCollection, ElementOutput | None],
+    duration: Scalar[int] | None = None,
+    condition: Scalar[bool] | None = None,
+    chirp: ChirpType | None = None,
+    truncate: Scalar[int] | None = None,
+    timestamp_stream: StreamType | None = None,
+    continue_chirp: bool = False,
+    target: str = "",
+    *,
+    amplitude_scale: Scalar[float] | None = None,
+) -> None:
+    pass
+
+
+@overload
+def play(
+    pulse: Operation,
+    element: AnyElement,
+    duration: Scalar[int] | None = None,
+    condition: Scalar[bool] | None = None,
+    chirp: ChirpType | None = None,
+    truncate: Scalar[int] | None = None,
+    timestamp_stream: StreamType | None = None,
+    continue_chirp: bool = False,
+    target: str = "",
+    *,
+    amplitude_scale: Scalar[float] | None = None,
+) -> None:
+    pass
 
 
 @overload
@@ -74,7 +152,7 @@ def play(
 
 def play(
     pulse: PlayPulseType,
-    element: str,
+    element: ElementRef,
     duration: Optional[Scalar[int]] = None,
     condition: Optional[Scalar[bool]] = None,
     chirp: Optional[ChirpType] = None,
@@ -137,6 +215,11 @@ def play(
         See [Dynamic pulse duration](../../Guides/features.md#dynamic-pulse-duration)
         in the documentation for further information.
 
+        The minimum accepted duration depends on the QOP version in use. See
+        [Minimum Pulse and Wait Durations](../../Guides/timing_in_qua.md#minimum-pulse-and-wait-durations)
+        in the documentation for details. Using a value smaller than the minimum accepted
+        duration will result in unexpected behavior.
+
     Note:
         When using chirp, it is possible to add a flag "continue_chirp=True" to the play command.
         When this flag is set, the internal oscillator will continue the chirp even after the play command had ended.
@@ -166,23 +249,39 @@ def play(
     truncate_ = to_scalar_pb_expression(truncate) if truncate is not None else None
     timestamp_label = _standardize_timestamp_label(timestamp_stream)
 
-    if isinstance(pulse, inc_qua_pb2.QuaProgram.RampPulse):
-        if amplitude_scale is not None:
-            raise QmQuaException("Amplitude cannot be used with `ramp`.")
-        amp = None
+    if isinstance(element, Element):
+        if isinstance(pulse, Operation):
+            pulse_name = pulse.name
+            pulse_implementation = pulse[element]
+        elif isinstance(pulse, Pulse):
+            pulse_implementation = pulse
+            pulse_name = pulse.name
+        else:
+            raise TypeError(f"Invalid pulse type: {type(pulse)}")
+
+        element_name = element.name
+        scopes_manager.add_element(element)
+        scope_element = scopes_manager.program_scope.get_element(element.name)
+        scope_element.add_pulse(pulse_implementation, pulse_name)
     else:
-        pulse, amp = standardize_pulse_and_amplitude(pulse, amplitude_scale)
+        scopes_manager.set_the_need_for_external_config()
+        element_name = element
 
     loc = _get_loc()
     play_statement = inc_qua_pb2.QuaProgram.PlayStatement(
         loc=loc,
-        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+        qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element_name, loc=loc),
         targetInput=target,
     )
+
     if isinstance(pulse, inc_qua_pb2.QuaProgram.RampPulse):
+        if amplitude_scale is not None:
+            raise QmQuaException("Amplitude cannot be used with `ramp`.")
+        amp = None
         play_statement.rampPulse.CopyFrom(pulse)
     else:
-        play_statement.namedPulse.CopyFrom(inc_qua_pb2.QuaProgram.PulseReference(name=pulse, loc=loc))
+        pulse_name, amp = standardize_pulse_and_amplitude(pulse, amplitude_scale)
+        play_statement.namedPulse.CopyFrom(inc_qua_pb2.QuaProgram.PulseReference(name=pulse_name, loc=loc))
 
     if duration_ is not None:
         play_statement.duration.CopyFrom(duration_)
@@ -219,7 +318,7 @@ def _standardize_chirp(chirp: Optional[ChirpType], continue_chirp: bool) -> Opti
     else:
         raise QmQuaException("chirp must be tuple of 2 or 3 values")
     chirp_times_list = [int(x) for x in chirp_times] if chirp_times is not None else None
-    if isinstance(chirp_var, IterableClass):
+    if isinstance(chirp_var, Iterable):
         chirp_var = [int(x) for x in chirp_var]
         chirp_var = declare(int, value=chirp_var)
 
@@ -265,6 +364,9 @@ def ramp(v: Scalar[NumberT]) -> inc_qua_pb2.QuaProgram.RampPulse:
 
     Args:
         v: The slope in units of `V/ns`
+
+    Returns:
+        A ramp pulse to be used as the ``pulse`` argument of a ``play`` command.
     """
     value = create_qua_scalar_expression(v)
     result = inc_qua_pb2.QuaProgram.RampPulse(value=value.unwrapped)

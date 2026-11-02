@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Optional, Sequence, cast
 
+from qm.config import AnyElement
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException, NoScopeFoundException
 from qm.qua._scope_management._core_scopes import _BaseScope, _ProgramScope, _get_scopes_stack
@@ -40,6 +41,12 @@ class _ScopesStackManager:
 
     def append_output_stream(self, stream: "_OutputStream") -> None:
         self.program_scope.result_analysis_scope.append_output_stream(stream)
+
+    def add_element(self, element: "AnyElement") -> None:
+        self.program_scope.add_element(element)
+
+    def set_the_need_for_external_config(self) -> None:
+        self.program_scope._program_needs_external_config = True
 
     # The function is private since it should only be used by the PortConditionScope, and should not be used by the DSL functions.
     def _set_port_condition(self, condition: inc_qua_pb2.QuaProgram.AnyScalarExpression) -> None:

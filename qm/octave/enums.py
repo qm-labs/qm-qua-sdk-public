@@ -1,5 +1,5 @@
 from qm.octave_sdk.octave import IFMode, ClockInfo
-from qm.utils.deprecation_utils import throw_warning
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning, throw_warning
 from qm.octave_sdk import (
     ClockType,
     OctaveOutput,
@@ -26,5 +26,5 @@ throw_warning(
     "Octave enums should be directly imported from the octave_sdk "
     "(IFMode, and ClockInfo are imported from qm.octave_sdk.octave), this file (qm.octave.enums)"
     "will be removed in the next version",
-    category=DeprecationWarning,
+    category=QmQuaDeprecationWarning,
 )

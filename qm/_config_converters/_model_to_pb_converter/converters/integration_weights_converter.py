@@ -1,6 +1,6 @@
 from collections.abc import Mapping, Collection
 
-from qm.config._pulses import IntegrationWeights
+from qm.config import IntegrationWeights
 from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
 from qm._config_converters._model_to_pb_converter.base_converter import BaseModelToPbConverter
 

@@ -284,6 +284,10 @@ class AdcAcquisition:
 
 @dataclass(frozen=True)
 class Event:
+    """A phase-reset or timestamp-reset event recorded for an element during a simulated job.
+    Collected as part of a [WaveformReport][qm.waveform_report.WaveformReport].
+    """
+
     name: str
     timestamp: int
     controller: str
@@ -316,7 +320,11 @@ class Event:
         )
 
     def to_string(self) -> str:
-        """Prints all fields of the event in the standard readable format."""
+        """Prints all fields of the event in the standard readable format.
+
+        Returns:
+            A readable string representation of the event.
+        """
         indent = " " * len("Event(")
         body = ("\n" + indent).join(f"{f.name}={getattr(self, f.name)}" for f in dataclasses.fields(self))
         return f"Event({body})"
@@ -360,6 +368,12 @@ class _SingleControllerMapping(Dict[int, FemToWaveformMap]):
 
 @dataclass(frozen=True)
 class WaveformReport:
+    """Describes the analog and digital waveforms, ADC acquisitions, and events recorded while
+    simulating a QUA program. Obtained via `QmJob.get_simulated_waveform_report`. Can be converted
+    to a dictionary or a human-readable string, and rendered as an interactive HTML plot alongside
+    the simulated samples.
+    """
+
     job_id: Union[int, str]
     analog_waveforms: List[PlayedAnalogWaveform]
     digital_waveforms: List[PlayedDigitalWaveform]
@@ -424,7 +438,8 @@ class WaveformReport:
         """
         Dumps the report into a (pretty-print) string.
 
-        return: str
+        Returns:
+            A pretty-printed string representation of the full waveform report.
         """
         waveforms_str = [wf.to_string() for wf in self.waveforms]
         adc_string = [adc.to_string() for adc in self.adc_acquisitions]

@@ -3,9 +3,8 @@ from collections.abc import Mapping, Collection
 
 from qm.exceptions import ConfigValidationException
 from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
-from qm.config._waveforms._analog import AnalogWaveform
 from qm.api.models.capabilities import ServerCapabilities
-from qm.config._pulses._pulse import Pulse, DualPulse, SinglePulse, DigitalPulse
+from qm.config import Pulse, SinglePulse, ComplexPulse, DigitalPulse, AnalogWaveform
 from qm._config_converters._model_to_pb_converter.base_converter import BaseModelToPbConverter
 from qm._config_converters._model_to_pb_converter.converters.integration_weights_converter import (
     IntegrationWeightsConverter,
@@ -32,30 +31,31 @@ class PulseConverter(BaseModelToPbConverter[Collection[Pulse], PulsesData]):
         self._digital_waveform_converter = DigitalWaveformConverter(capabilities, init_mode)
 
     def convert(self, input_data: Collection[Pulse]) -> PulsesData:
-        # todo - validate uniqueness of pulses
         integration_weights: dict[str, QuaConfig.IntegrationWeightDec] = {}
         waveforms: dict[str, QuaConfig.WaveformDec] = {}
         digital_waveforms: dict[str, QuaConfig.DigitalWaveformDec] = {}
         pulses: dict[str, QuaConfig.PulseDec] = {}
         for pulse in input_data:
-            temp = QuaConfig.PulseDec(length=pulse.length)
+            pulse_pb = QuaConfig.PulseDec(length=pulse.length)
             if not isinstance(pulse, DigitalPulse):
                 curr_wf_ref_dict, wf_data = self._convert_waveform(pulse)
                 waveforms.update(wf_data)
-                temp.waveforms.update(curr_wf_ref_dict)
+                pulse_pb.waveforms.update(curr_wf_ref_dict)
             if pulse.digital_waveform is not None:
-                temp.digitalMarker.value = pulse.digital_waveform.name
+                pulse_pb.digitalMarker.value = pulse.digital_waveform.name
                 curr_digital_waveforms = self._digital_waveform_converter.convert([pulse.digital_waveform])
                 digital_waveforms.update(curr_digital_waveforms)  # todo - make sure update is fine (no bad overlap)
 
-            temp.integrationWeights.update({k: v.name for k, v in pulse.integration_weights.items()})
+            pulse_pb.integrationWeights.update({k: v.name for k, v in pulse.integration_weights.items()})
             curr_integration_weights = self._integration_weights_converter.convert(pulse.integration_weights.values())
             integration_weights.update(curr_integration_weights)  # todo - make sure update is fine (no bad overlap)
             if pulse.integration_weights:
-                temp.operation = QuaConfig.PulseDec.Operation.MEASUREMENT
+                pulse_pb.operation = QuaConfig.PulseDec.Operation.MEASUREMENT
             else:
-                temp.operation = QuaConfig.PulseDec.Operation.CONTROL
-            pulses[pulse.name] = temp
+                pulse_pb.operation = QuaConfig.PulseDec.Operation.CONTROL
+            if pulse.name in pulses and pulses[pulse.name] != pulse_pb:
+                raise ConfigValidationException(f"Two different pulses are declared with the same name `{pulse.name}`")
+            pulses[pulse.name] = pulse_pb
         return PulsesData(
             integration_weights=integration_weights,
             waveforms=waveforms,
@@ -93,7 +93,7 @@ class PulseConverter(BaseModelToPbConverter[Collection[Pulse], PulsesData]):
                 )
             elif isinstance(waveforms, tuple):
                 pulses += (
-                    DualPulse(
+                    ComplexPulse(
                         name=name,
                         length=length,
                         waveform_i=waveforms[0],
@@ -132,9 +132,9 @@ class PulseConverter(BaseModelToPbConverter[Collection[Pulse], PulsesData]):
         if isinstance(output_data, SinglePulse):
             wf_data = self._waveform_converter.convert([output_data.waveform])
             return self._convert_single_wf(output_data), wf_data
-        elif isinstance(output_data, DualPulse):
+        elif isinstance(output_data, ComplexPulse):
             wf_data = self._waveform_converter.convert([output_data.waveform_i, output_data.waveform_q])
-            return self._convert_dual_wf(output_data), wf_data
+            return self._convert_complex_wf(output_data), wf_data
         else:
             raise ConfigValidationException(f"Invalid waveform type - {type(output_data)}")
 
@@ -143,5 +143,5 @@ class PulseConverter(BaseModelToPbConverter[Collection[Pulse], PulsesData]):
         return {"single": output_data.waveform.name}
 
     @staticmethod
-    def _convert_dual_wf(output_data: DualPulse) -> dict[str, str]:
+    def _convert_complex_wf(output_data: ComplexPulse) -> dict[str, str]:
         return {"I": output_data.waveform_i.name, "Q": output_data.waveform_q.name}

@@ -74,7 +74,15 @@ class JobResultServiceApi(BaseApi[JobResultsServiceStub]):
         )
 
     def get_state_from_header(self, output_name: str, flat_struct: bool) -> JobStreamingState:
-        """This function is for backward compatibility, when we didn't have the get_job_state"""
+        """This function is for backward compatibility, when we didn't have the get_job_state
+
+        Args:
+            output_name: The name of the result stream whose state is queried.
+            flat_struct: Whether to request the result header in the flat (legacy) format.
+
+        Returns:
+            The streaming state of the job (done, closed and data-loss flags).
+        """
         request = job_results_pb2.GetJobNamedResultHeaderRequest(
             jobId=self._id, outputName=output_name, flatFormat=flat_struct
         )

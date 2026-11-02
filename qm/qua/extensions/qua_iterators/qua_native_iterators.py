@@ -6,7 +6,7 @@ backward-compatible shim and will be removed in a future release. Import from
 the new module instead.
 """
 
-from qm.utils.deprecation_utils import throw_warning, deprecation_message
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning, throw_warning, deprecation_message
 from qm.qua.extensions.qua_iterators.qua_python_iterators import (  # noqa: F401
     NativeIterable,
     PythonIterableBase,
@@ -24,7 +24,7 @@ throw_warning(
         "2.0.0",
         "Import from qm.qua.extensions.qua_iterators.qua_python_iterators instead.",
     ),
-    DeprecationWarning,
+    QmQuaDeprecationWarning,
     stacklevel=2,
 )
 

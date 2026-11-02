@@ -1,18 +1,23 @@
 import datetime
-import warnings
 from typing import List, Optional
+from typing_extensions import deprecated
 
 from qm.type_hinting import Value
 from qm.grpc.qm.pb import frontend_pb2
 from qm.exceptions import QmQuaException
-from qm.utils import deprecation_message
 from qm.api.frontend_api import FrontendApi
 from qm.api.job_manager_api import create_job_manager_from_api
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.utils.protobuf_utils import which_one_of, timestamp_to_datetime
 
 
 class QmBaseJob:
+    """Base handle for a job on the OPX+ with QOP2.x, shared by [RunningQmJob][qm.jobs.running_qm_job.RunningQmJob]
+    and [SimulatedJob][qm.jobs.simulated_job.SimulatedJob]. Exposes the job's id and status, and input-stream
+    pushing.
+    """
+
     def __init__(
         self,
         job_id: str,
@@ -77,22 +82,24 @@ class QmBaseJob:
         """
         return self._time_added
 
+    @deprecated(
+        'job.insert_input_stream is deprecated since "1.2.0" and will be removed in "2.0.0". '
+        "This method was renamed to `job.push_to_input_stream`",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def insert_input_stream(
         self,
         name: str,
         data: List[Value],
     ) -> None:
-        """Deprecated - Please use `job.push_to_input_stream`."""
-        warnings.warn(
-            deprecation_message(
-                method="job.insert_input_stream",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method was renamed to `job.push_to_input_stream`.",
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        """Deprecated - Please use `job.push_to_input_stream`.
+
+        Args:
+            name: The input stream name the data is to be inserted to.
+            data: The data to be inserted. The data's size must match
+                the size of the input stream.
+        """
         self.push_to_input_stream(name, data)
 
     def push_to_input_stream(self, name: str, data: List[Value]) -> None:

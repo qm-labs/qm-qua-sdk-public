@@ -14,12 +14,14 @@ from qm.program import load_config
 from qm.utils.protobuf_utils import Node
 from qm import Program, FullQuaConfig, version
 from qm.grpc.qm.pb.inc_qua_pb2 import QuaProgram
+from qm.config import LogicalConfig, FullConfigModel
 from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
 from qm.api.models.capabilities import offline_capabilities
 from qm.serialization.qua_node_visitor import QuaNodeVisitor
 from qm.program._dict_to_pb_converter import DictToQuaConfigConverter
 from qm.utils.list_compression_utils import Chunk, split_list_to_chunks
 from qm.serialization.qua_serializing_visitor import QuaSerializingVisitor
+from qm._config_converters._model_to_pb_converter.converters.element_converter import ElementConverter
 from qm.exceptions import ConfigValidationException, ConfigSerializationException, CapabilitiesNotInitializedError
 
 SERIALIZATION_VALIDATION_ERROR = "SERIALIZATION VALIDATION ERROR"
@@ -31,6 +33,24 @@ CONFIG_ERROR = "CONFIG SERIALIZATION ERROR"
 SERIALIZATION_NOT_COMPLETE = "SERIALIZATION WAS NOT COMPLETE"
 
 logger = logging.getLogger(__name__)
+
+
+def _create_proto_config_from_program(prog: Program) -> QuaConfig:
+    proto_config = ElementConverter(capabilities=offline_capabilities, init_mode=True).convert(
+        FullConfigModel(LogicalConfig(prog.elements))
+    )
+    return proto_config
+
+
+def _deconvert_config(proto_config: QuaConfig) -> FullQuaConfig:
+    converter = DictToQuaConfigConverter(capabilities=offline_capabilities)
+    return converter.deconvert(proto_config)
+
+
+def create_config_from_program(prog: Program) -> FullQuaConfig:
+    """This function will later use the model to dict conversion, now it does the full circle"""
+    proto_config = _create_proto_config_from_program(prog)
+    return _deconvert_config(proto_config)
 
 
 def standardize_program_for_comparison(prog: QuaProgram) -> QuaProgram:
@@ -125,7 +145,10 @@ def generate_qua_script(prog: Program, config: Optional[FullQuaConfig] = None) -
             raise RuntimeError("Can not generate script - bad config") from e
         except CapabilitiesNotInitializedError as e:
             logger.warning(f"Could not generate a loaded config. {e}")
-
+    elif prog.elements:
+        if prog.needs_external_config:
+            logger.warning("Some of the entities in the program are strings, cannot generate config")
+        proto_config = _create_proto_config_from_program(prog)
     proto_prog = prog.qua_program
     return _generate_qua_script_pb(proto_prog, proto_config, config)
 
@@ -150,8 +173,7 @@ def _generate_qua_script_pb(
     pretty_proto_config = None
     if proto_config is not None:
         try:
-            converter = DictToQuaConfigConverter(capabilities=offline_capabilities)
-            normalized_config = converter.deconvert(proto_config)
+            normalized_config = _deconvert_config(proto_config)
             pretty_proto_config = _print_config(normalized_config)
         except Exception as e:
             trace = traceback.format_exception(*sys.exc_info())

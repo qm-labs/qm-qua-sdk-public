@@ -1,5 +1,5 @@
 import abc
-import warnings
+from typing_extensions import deprecated
 from typing import TYPE_CHECKING, Any, Type, Union, Generic, Literal, TypeVar, Optional, Sequence, overload
 
 import numpy as np
@@ -7,8 +7,8 @@ import numpy as np
 from qm._loc import _get_loc
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
-from qm.utils import deprecation_message
 from qm.type_hinting.general import NumberT
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.serialization.expression_serializing_visitor import ExpressionSerializingVisitor
 
 _ScalarExpressionType = inc_qua_pb2.QuaProgram.AnyScalarExpression
@@ -119,68 +119,64 @@ class QuaNumericExpression(Generic[S, NumberT], QuaExpression[S], metaclass=abc.
     def _is_input_stream(self) -> bool:
         return isinstance(self, InputStreamOldInterface)
 
+    @deprecated(
+        'QuaExpression.empty() is deprecated since "1.1.0" and will be removed in "2.0.0". '
+        "This function is going to be removed, as it's not needed",
+        category=QmQuaDeprecationWarning,
+    )
     def empty(self) -> bool:
         """Returns whether the expression is empty.
 
         Deprecated since 1.1.0; will be removed in 2.0.0.
+
+        Returns:
+            ``True`` if the expression is empty, ``False`` otherwise.
         """
-        warnings.warn(
-            deprecation_message(
-                method="QuaExpression.empty()",
-                deprecated_in="1.1.0",
-                removed_in="2.0.0",
-                details="This function is going to be removed, as it's not needed.",
-            ),
-            DeprecationWarning,
-        )
         return self._expression is None
 
+    @deprecated(
+        'QuaVariable.isFixed is deprecated since "1.1.0" and will be removed in "2.0.0". '
+        "use: 'QuaVariable.is_fixed()' instead",
+        category=QmQuaDeprecationWarning,
+    )
     def isFixed(self) -> bool:
         """Returns whether the variable is of ``fixed`` type.
 
         Deprecated since 1.1.0; will be removed in 2.0.0. Use ``is_fixed()`` instead.
+
+        Returns:
+            ``True`` if the variable is of ``fixed`` type, ``False`` otherwise.
         """
-        warnings.warn(
-            deprecation_message(
-                method="QuaVariable.isFixed",
-                deprecated_in="1.1.0",
-                removed_in="2.0.0",
-                details="use: 'QuaVariable.is_fixed()' instead",
-            ),
-            DeprecationWarning,
-        )
         return self.is_fixed()
 
+    @deprecated(
+        'QuaVariable.isInt is deprecated since "1.1.0" and will be removed in "2.0.0". '
+        "use: 'QuaVariable.is_int()' instead",
+        category=QmQuaDeprecationWarning,
+    )
     def isInt(self) -> bool:
         """Returns whether the variable is of ``int`` type.
 
         Deprecated since 1.1.0; will be removed in 2.0.0. Use ``is_int()`` instead.
+
+        Returns:
+            ``True`` if the variable is of ``int`` type, ``False`` otherwise.
         """
-        warnings.warn(
-            deprecation_message(
-                method="QuaVariable.isInt",
-                deprecated_in="1.1.0",
-                removed_in="2.0.0",
-                details="use: 'QuaVariable.is_int()' instead",
-            ),
-            DeprecationWarning,
-        )
         return self.is_int()
 
+    @deprecated(
+        'QuaVariable.isBool is deprecated since "1.1.0" and will be removed in "2.0.0". '
+        "use: 'QuaVariable.is_bool()' instead",
+        category=QmQuaDeprecationWarning,
+    )
     def isBool(self) -> bool:
         """Returns whether the variable is of ``bool`` type.
 
         Deprecated since 1.1.0; will be removed in 2.0.0. Use ``is_bool()`` instead.
+
+        Returns:
+            ``True`` if the variable is of ``bool`` type, ``False`` otherwise.
         """
-        warnings.warn(
-            deprecation_message(
-                method="QuaVariable.isBool",
-                deprecated_in="1.1.0",
-                removed_in="2.0.0",
-                details="use: 'QuaVariable.is_bool()' instead",
-            ),
-            DeprecationWarning,
-        )
         return self.is_bool()
 
     def is_fixed(self) -> bool:
@@ -370,10 +366,17 @@ class QuaArrayVariable(QuaNumericExpression[inc_qua_pb2.QuaProgram.ArrayVarRefEx
         return QuaArrayCell(item_scalar_expression, self.dtype)
 
     def length(self) -> "QuaArrayLength[int]":
+        # This function in the future may return a value that changes with the iterations,
+        # so we keep it returning a Qua integer. `self.creation_length` returns a Pythonic integer.
         unwrapped_element = self.unwrapped
         array_exp = inc_qua_pb2.QuaProgram.ArrayLengthExpression(array=unwrapped_element)
         result = inc_qua_pb2.QuaProgram.AnyScalarExpression(arrayLength=array_exp)
         return QuaArrayLength(result, int)
+
+    @property
+    def creation_length(self) -> int:
+        """Returns the length of the array as it was declared"""
+        return self._size
 
     def __eq__(self, other: Any) -> bool:
         raise NotAllowedOperationArrayComparison()

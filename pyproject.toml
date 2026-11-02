@@ -56,11 +56,11 @@ multidict = "^6.7.0"
 poethepoet = "^0.16.0"
 pytest-asyncio = "^0.20.3"
 pytest-benchmark = { extras = ["aspect"], version = "^4.0.0" }
-pytest = "^7.0.0"
+pytest = "^9.0.3"
 pytest-cov = "^4.0.0"
 pytest-order = "^1.0.0"
 pytest-xdist = "^3.8"
-poetry ="<=2.1.3"
+poetry = ">=2.3.4,<3.0.0"
 coverage = "^7.0.1"
 black = "^26"
 flake8 = "^7"
@@ -70,10 +70,15 @@ apispec = "^5.1.1"
 poetry-dynamic-versioning = { extras = ["plugin"], version = "^1.0.0" }
 mypy = "^1.14"
 isort = "^8"
-qm-saas = "^1.1.8"
+qm-saas = "^1.2.0"
 cryptography = "*"  # used by tests/test_api/test_tls_credentials.py to generate test certs
-python-dev-scripts = "0.1.0.dev20260507131531+6d6aa2a"
 
+# `poetry install --with grpc-gen`. Only ever published on the internal qm-pypi index.
+[tool.poetry.group.grpc-gen]
+optional = true
+
+[tool.poetry.group.grpc-gen.dependencies]
+python-dev-scripts = { version = "0.1.0.dev20260507131531+6d6aa2a", source = "qm-pypi" }
 
 [[tool.poetry.source]]
 name = "qm-pypi"

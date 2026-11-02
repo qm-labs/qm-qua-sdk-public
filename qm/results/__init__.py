@@ -1,5 +1,6 @@
 import warnings
 
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.simulate import SimulatorSamples, SimulatorControllerSamples
 
 from ..utils import deprecation_message
@@ -19,7 +20,7 @@ warnings.warn(
         "2.0.0",
         "If you need anything from this module, import it directly from `qm` or from `qm.simulate` for simulator-related functionality.",
     ),
-    DeprecationWarning,
+    QmQuaDeprecationWarning,
 )
 
 

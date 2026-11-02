@@ -29,6 +29,13 @@ class _PortsWaveformsContainer(Dict[str, Sequence[float]]):
 
 
 class SimulatorControllerSamples:
+    """Per-controller analog and digital output samples from a simulated job, obtained via
+    `QmJob.get_simulated_samples`. `analog` and `digital` map port labels (e.g. `"1-1"` for FEM 1, port 1)
+    to their sampled values, and `analog_sampling_rate` gives each analog port's sampling rate in Hz,
+    defaulting to `1e9` for any port not supplied. Can also be rendered as a plot for a chosen set of
+    ports.
+    """
+
     def __init__(
         self,
         analog: Mapping[str, Sequence[Union[float, complex]]],

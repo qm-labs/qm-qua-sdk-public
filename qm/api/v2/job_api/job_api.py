@@ -1,7 +1,7 @@
 import logging
-import warnings
 from dataclasses import dataclass
 from collections import defaultdict
+from typing_extensions import deprecated
 from typing import (
     Dict,
     List,
@@ -21,7 +21,6 @@ from typing import (
 import numpy as np
 
 from qm.qua import fixed
-from qm.utils import deprecation_message
 from qm.api.v2.job_result_api import JobResultApi
 from qm._report import ExecutionError, ExecutionReport
 from qm.type_hinting import Value, NumpySupportedValue
@@ -32,6 +31,7 @@ from qm.api.models.server_details import ConnectionDetails
 from qm.api.v2.job_api.job_elements_db import JobElementsDB
 from qm.utils.general_utils import create_input_stream_name
 from qm.grpc.qm.pb import job_manager_pb2, inc_qua_config_pb2
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.grpc.qm.grpc.v2 import qm_api_pb2, job_api_pb2, qmm_api_pb2, common_types_pb2
 from qm.api.v2.job_api.element_input_api import MwInputApi, MixInputsApi, SingleInputApi
@@ -144,6 +144,10 @@ class JobData:
 
 
 class JobApi(JobGenericApi):
+    """Handle for a job on the OPX1000 with QOP 3.x. Provides job control, result handles,
+    input-stream pushing, IO1/IO2 values, and per-element runtime updates.
+    """
+
     def __init__(self, connection_details: ConnectionDetails, job_id: str, capabilities: ServerCapabilities) -> None:
         super().__init__(connection_details, job_id)
         self._elements: Optional[JobElementsDB] = None
@@ -897,6 +901,12 @@ class JobApi(JobGenericApi):
         element_instance = self.elements[element]
         element_instance.digital_inputs[digital_input].set_buffer(buffer)
 
+    @deprecated(
+        'job.update_oscillator_frequency is deprecated since "1.2.2" and will be removed in "2.0.0". '
+        "Use job.set_converter_frequency",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def update_oscillator_frequency(
         self,
         element: str,
@@ -912,12 +922,6 @@ class JobApi(JobGenericApi):
 
         Deprecated since 1.2.2; will be removed in 2.0.0. Use ``job.set_converter_frequency()`` instead.
         """
-        deprecation_message(
-            method="job.update_oscillator_frequency",
-            deprecated_in="1.2.2",
-            removed_in="2.0.0",
-            details="Use job.set_converter_frequency.",
-        )
         self.set_converter_frequency(element, frequency_hz, update_component)
 
     def set_converter_frequency(
@@ -955,6 +959,11 @@ class JobApi(JobGenericApi):
 
 
 class JobApiWithDeprecations(JobApi):
+    """[JobApi][qm.api.v2.job_api.job_api.JobApi] variant returned by the deprecated OPX1000 job API
+    (`qm.api.v2.qm_api_old`), keeping the pre-3.x method names and status strings working under the
+    QOP 3.x job handle.
+    """
+
     @property
     def status(self) -> str:
         """Returns the status of the job, one of the following strings:
@@ -979,22 +988,24 @@ class JobApiWithDeprecations(JobApi):
     def time_added(self) -> None:
         return None
 
+    @deprecated(
+        'job.insert_input_stream is deprecated since "1.2.0" and will be removed in "2.0.0". '
+        "This method was renamed to `job.push_to_input_stream()`",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def insert_input_stream(
         self,
         name: str,
         data: List[Value],
     ) -> None:
-        """Deprecated - Please use `job.push_to_input_stream`."""
-        warnings.warn(
-            deprecation_message(
-                method="job.insert_input_stream",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method was renamed to `job.push_to_input_stream()`.",
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        """Deprecated - Please use `job.push_to_input_stream`.
+
+        Args:
+            name: The input stream name the data is to be pushed to.
+            data: The data to be pushed. The data's size & type must match
+                the size & type of the input stream.
+        """
         self.push_to_input_stream(name, data)
 
     def push_to_input_stream(self, name: str, data: List[Value]) -> None:
@@ -1021,24 +1032,29 @@ class JobApiWithDeprecations(JobApi):
             data = [data]
         super().push_to_input_stream(name, data)
 
+    @deprecated(
+        'job.halt is deprecated since "1.2.0" and will be removed in "2.0.0". '
+        "This method was renamed to `job.cancel`",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def halt(self) -> bool:
         """Halts the job on the opx.
 
         Deprecated since 1.2.0; will be removed in 2.0.0. Renamed to ``job.cancel()``.
+
+        Returns:
+            ``True`` once the job has been halted.
         """
-        warnings.warn(
-            deprecation_message(
-                method="job.halt",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This method was renamed to `job.cancel`.",
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
         self.cancel()
         return True
 
+    @deprecated(
+        'job.wait_for_execution is deprecated since "1.2.0" and will be removed in "2.0.0". '
+        'This method is going to be removed, please use `job.wait_until("Running")`',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def wait_for_execution(self, timeout: Optional[float] = None) -> "JobApi":
         """Deprecated - This method is going to be removed, please use `job.wait_until("Running")`.
 
@@ -1051,17 +1067,6 @@ class JobApiWithDeprecations(JobApi):
         Returns:
              The running job
         """
-        warnings.warn(
-            deprecation_message(
-                method="job.wait_for_execution",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details='This method is going to be removed, please use `job.wait_until("Running")`.',
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
         if timeout is None:
             timeout = 60 * 60 * 24 * 365  # 1 year
 

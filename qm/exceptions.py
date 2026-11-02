@@ -312,6 +312,10 @@ class ElementInputConnectionAmbiguity(ConfigValidationException):
     pass
 
 
+class ContradictingPorts(ConfigValidationException):
+    pass
+
+
 class StreamProcessingDataLossError(QmQuaException):
     pass
 
@@ -389,3 +393,11 @@ class QopResponseError(Exception, Generic[ErrorType]):
         details = getattr(self._error, "details", "")
         to_return = f"Error from QOP, details:\n{details}." if details else f"Error from QOP: {self._error}"
         return to_return
+
+
+class ContradictingElements(QmQuaException):
+    pass
+
+
+class ElementNameAlreadyExists(QmQuaException):
+    pass

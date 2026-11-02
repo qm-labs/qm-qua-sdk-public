@@ -13,6 +13,7 @@ from qm.config._ports._port_base import (
     Opx1000,
     OpxPlus,
     Direction,
+    LFLN08Fem,
     SignalType,
     StandardPort,
     PortReference,
@@ -32,7 +33,7 @@ class AnalogInputPort(Port, ABC):
         return "input"
 
 
-class AnalogInputPortLf(AnalogInputPort, ABC):
+class AnalogInputPortLfBase(AnalogInputPort, ABC):
     """Base class for analog input ports on low-frequency hardware (OPX+ and LF-FEM)."""
 
     def __init__(
@@ -59,7 +60,7 @@ class AnalogInputPortLf(AnalogInputPort, ABC):
         self.sampling_rate = create_value(sampling_rate, 1e9)
 
 
-class AnalogInputPortOpx(AnalogInputPortLf):
+class AnalogInputPortOpx(AnalogInputPortLfBase):
     """Analog input port of an OPX+ controller. Sampling rate is fixed at 1 GS/s."""
 
     def __init__(
@@ -78,6 +79,8 @@ class AnalogInputPortOpx(AnalogInputPortLf):
             offset: DC offset to the input.
             gain_db: Gain of the pre-ADC amplifier, in dB. Accepts integers.
             shareable: Whether the port is shareable with other QM instances.
+            sampling_rate: Not needed for OPX+; kept only for backward compatibility. A warning
+                is emitted if a value is provided.
         """
         super().__init__(
             fem=OpxPlusMockFem(controller),
@@ -91,7 +94,7 @@ class AnalogInputPortOpx(AnalogInputPortLf):
             warnings.warn("You don't need to state sampling rate in OPX+")
 
 
-class AnalogInputPortOctoDac(AnalogInputPortLf):
+class AnalogInputPortLf(AnalogInputPortLfBase):
     """Analog input port of an LF-FEM (OPX1000)."""
 
     def __init__(
@@ -122,23 +125,54 @@ class AnalogInputPortOctoDac(AnalogInputPortLf):
         )
 
 
-def standardize_lf_input_port(data: tuple[str, int] | StandardPort | AnalogInputPortLf) -> AnalogInputPortLf:
-    if isinstance(data, (AnalogInputPortLf, PortReference)):
+class AnalogInputPortLFLN08(AnalogInputPortLfBase):
+    """Analog input port of an LF-LN08 FEM (OPX1000)."""
+
+    def __init__(
+        self,
+        fem: LFLN08Fem,
+        index: int,
+        offset: ConfigOptional[Number] = NOT_SET,
+        gain_db: ConfigOptional[int] = NOT_SET,
+        shareable: ConfigOptional[bool] = NOT_SET,
+        sampling_rate: ConfigOptional[float] = NOT_SET,
+    ):
+        """
+        Args:
+            fem: The LF-LN08 the port belongs to.
+            index: The 1-based port index on the FEM.
+            offset: DC offset to the input.
+            gain_db: Gain of the pre-ADC amplifier, in dB. Accepts integers.
+            shareable: Whether the port is shareable with other QM instances.
+            sampling_rate: Sampling rate for this port. Default 1 GS/s.
+        """
+        super().__init__(
+            fem=fem,
+            index=index,
+            offset=create_value(offset, 0),
+            shareable=create_value(shareable, False),
+            gain_db=create_value(gain_db, 0),
+            sampling_rate=create_value(sampling_rate, 1e9),
+        )
+
+
+def standardize_lf_input_port(data: tuple[str, int] | StandardPort | AnalogInputPortLfBase) -> AnalogInputPortLfBase:
+    if isinstance(data, (AnalogInputPortLfBase, PortReference)):
         return data
     if isinstance(data, (tuple, list)):
         if len(data) == 2:
             return AnalogInputPortOpx(controller=OpxPlus(data[0]), index=data[1])
         elif len(data) == 3:
-            return AnalogInputPortOctoDac(fem=LfFem(controller=Opx1000(data[0]), index=data[1]), index=data[2])
+            return AnalogInputPortLf(fem=LfFem(controller=Opx1000(data[0]), index=data[1]), index=data[2])
         else:
-            raise NotImplementedError
-    raise NotImplementedError
+            raise TypeError(f"Unknown data type - {data}")
+    raise TypeError(f"Unknown data type - {data}")
 
 
 LoMode = Literal["auto", "always_on"]
 
 
-class AnalogInputPortMicrowave(AnalogInputPort):
+class AnalogInputPortMw(AnalogInputPort):
     """Analog input port of an MW-FEM (OPX1000 microwave front-end module)."""
 
     def __init__(
@@ -172,7 +206,7 @@ class AnalogInputPortMicrowave(AnalogInputPort):
         self.lo_mode: ConfigValue[LoMode] = create_value(lo_mode, "auto")
 
 
-def standardize_mw_input_port(data: StandardPort | AnalogInputPortMicrowave) -> AnalogInputPortMicrowave:
-    if isinstance(data, (AnalogInputPortMicrowave, PortReference)):
+def standardize_mw_input_port(data: StandardPort | AnalogInputPortMw) -> AnalogInputPortMw:
+    if isinstance(data, (AnalogInputPortMw, PortReference)):
         return data
-    return AnalogInputPortMicrowave(fem=MwFem(Opx1000(data[0]), index=data[1]), index=data[2])
+    return AnalogInputPortMw(fem=MwFem(Opx1000(data[0]), index=data[1]), index=data[2])

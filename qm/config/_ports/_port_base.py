@@ -82,6 +82,10 @@ class MwFem(Fem):
     """Represents a microwave FEM"""
 
 
+class LFLN08Fem(Fem):
+    """Represents a LF-LN08 FEM"""
+
+
 class OpxPlusMockFem(FemBase):
     """A mock for OPX+, to make it look like a FEM"""
 

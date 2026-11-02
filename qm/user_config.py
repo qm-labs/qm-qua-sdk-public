@@ -1,11 +1,12 @@
 import os
 import json
 import uuid
-import warnings
+from typing_extensions import deprecated
 from dataclasses import field, asdict, dataclass
 from typing import Any, Dict, Union, Optional, TypedDict, cast
 
 from qm.type_hinting.general import PathLike
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".qm", "config.json")
 
@@ -86,8 +87,10 @@ class UserConfig:
         return "%(asctime)s - qm - %(levelname)-8s - %(message)s"
 
     @property
+    @deprecated(
+        "This property is deprecated, and will be removed in the next version", category=QmQuaDeprecationWarning
+    )
     def datadog_handler_config(self) -> Dict[str, Any]:
-        warnings.warn("This property is deprecated, and will be removed in the next version", DeprecationWarning)
         return self._datadog_handler_config
 
     @property
@@ -102,8 +105,10 @@ class UserConfig:
         }
 
     @property
+    @deprecated(
+        "This property is deprecated, and will be removed in the next version", category=QmQuaDeprecationWarning
+    )
     def logging_config_dict(self) -> Dict[str, Any]:
-        warnings.warn("This property is deprecated, and will be removed in the next version", DeprecationWarning)
         default_formatter = "default"
         formatters = {default_formatter: {"format": self.default_logging_format}}
         handlers = {}

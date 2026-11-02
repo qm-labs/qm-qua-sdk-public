@@ -5,6 +5,7 @@ from collections.abc import Sequence
 
 from qm.type_hinting import Number
 from qm.exceptions import ConfigValidationException
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.config._primitives import (
     NOT_SET,
     ConfigValue,
@@ -23,6 +24,7 @@ from qm.config._ports._port_base import (
     Opx1000,
     OpxPlus,
     Direction,
+    LFLN08Fem,
     SignalType,
     PortReference,
     OpxPlusMockFem,
@@ -128,7 +130,7 @@ class AnalogOutputPort(Port, ABC):
         return "output"
 
 
-class AnalogOutputPortLf(AnalogOutputPort, ABC):
+class AnalogOutputPortLfBase(AnalogOutputPort, ABC):
     """Base class for analog output ports on low-frequency hardware (OPX+ and LF-FEM)."""
 
     def __init__(
@@ -160,7 +162,7 @@ class AnalogOutputPortLf(AnalogOutputPort, ABC):
         self.filter_feedforward = create_value(filter_feedforward, tuple())
 
 
-class AnalogOutputPortOpx(AnalogOutputPortLf):
+class AnalogOutputPortOpx(AnalogOutputPortLfBase):
     """Analog output port of an OPX+ controller."""
 
     def __init__(
@@ -186,6 +188,8 @@ class AnalogOutputPortOpx(AnalogOutputPortLf):
             filter_feedforward: Feedforward taps for the analog output filter.
             filter_feedback: Feedback taps for the analog output filter (sequence of
                 floats). IIR filtering approach prior to QOP 3.3.
+            sampling_rate: Not needed for OPX+; kept only for backward compatibility. A warning
+                is emitted if a value is provided.
         """
         super().__init__(
             fem=OpxPlusMockFem(controller),
@@ -207,7 +211,21 @@ UpsamplingMode = Literal["mw", "pulse"]
 OutputMode = Literal["direct", "amplified"]
 
 
-class AnalogOutputPortOctoDac(AnalogOutputPortLf):
+def _validate_upsampling_mode(sampling_rate: ConfigValue[float], upsampling_mode: ConfigValue[UpsamplingMode]) -> None:
+    if upsampling_mode.is_set and sampling_rate.get_value() != 1e9:
+        raise ConfigValidationException("'upsampling_mode' is only relevant for 'sampling_rate' of 1GHz.")
+
+
+def _create_feedback_filter(
+    filter_feedback: ConfigOptional[AnalogOutputFeedbackExponential] | Sequence[float],
+) -> tuple[Sequence[float] | None, ConfigValue[AnalogOutputFeedbackExponential]]:
+    if isinstance(filter_feedback, (AnalogOutputFeedbackExponential, ConfigValue, _NotSet)):
+        return None, create_value(filter_feedback, AnalogOutputFeedbackExponential())
+    warnings.warn("The feedback filter changed its API, please use the new format", QmQuaDeprecationWarning)
+    return filter_feedback, create_value(NOT_SET, AnalogOutputFeedbackExponential())
+
+
+class AnalogOutputPortLf(AnalogOutputPortLfBase):
     """Analog output port of an LF-FEM (OPX1000)."""
 
     def __init__(
@@ -255,25 +273,72 @@ class AnalogOutputPortOctoDac(AnalogOutputPortLf):
         )
         _upsampling_mode: ConfigValue[UpsamplingMode] = create_value(upsampling_mode, "mw")
         _sampling_rate = create_value(sampling_rate, 1e9)
-        if _upsampling_mode.is_set and _sampling_rate.get_value() != 1e9:
-            raise ConfigValidationException("'upsampling_mode' is only relevant for 'sampling_rate' of 1GHz.")
+        _validate_upsampling_mode(_sampling_rate, _upsampling_mode)
 
         self.sampling_rate = _sampling_rate
         self.upsampling_mode = _upsampling_mode
         self.output_mode = cast(ConfigValue[OutputMode], create_value(output_mode, "direct"))
         self.min_voltage_limit = create_value(min_voltage_limit, None)
         self.max_voltage_limit = create_value(max_voltage_limit, None)
-
-        if isinstance(filter_feedback, (AnalogOutputFeedbackExponential, ConfigValue, _NotSet)):
-            self.filter_feedback_seq: Sequence[float] | None = None
-            self.filter_feedback_inst = create_value(filter_feedback, AnalogOutputFeedbackExponential())
-        else:
-            warnings.warn("The feedback filter changed its API, please use the new format", DeprecationWarning)
-            self.filter_feedback_seq = filter_feedback
-            self.filter_feedback_inst = create_value(NOT_SET, AnalogOutputFeedbackExponential())
+        self.filter_feedback_seq, self.filter_feedback_inst = _create_feedback_filter(filter_feedback)
 
 
-class AnalogOutputPortMicrowave(AnalogOutputPort):
+class AnalogOutputPortLFLN08(AnalogOutputPortLfBase):
+    """Analog output port of an LF-LN08 FEM (OPX1000)."""
+
+    def __init__(
+        self,
+        fem: LFLN08Fem,
+        index: int,
+        offset: ConfigOptional[Number] = NOT_SET,
+        delay: ConfigOptional[int] = NOT_SET,
+        crosstalk: ConfigOptional[dict[int, float]] = NOT_SET,
+        shareable: ConfigOptional[bool] = NOT_SET,
+        filter_feedforward: ConfigOptional[Sequence[float]] = NOT_SET,
+        filter_feedback: ConfigOptional[AnalogOutputFeedbackExponential] = NOT_SET,
+        sampling_rate: ConfigOptional[float] = NOT_SET,
+        upsampling_mode: ConfigOptional[UpsamplingMode] = NOT_SET,
+        min_voltage_limit: ConfigOptional[Number | None] = NOT_SET,
+        max_voltage_limit: ConfigOptional[Number | None] = NOT_SET,
+    ):
+        """
+        Args:
+            fem: The LF-LN08 the port belongs to.
+            index: The 1-based port index on the FEM.
+            offset: DC offset to the output. Applied while the quantum machine is open.
+            delay: Output's delay, in units of ns. Must be non-negative.
+            crosstalk: Crosstalk coefficients keyed by destination port index.
+            shareable: Whether the port is shareable with other QM instances.
+            filter_feedforward: Feedforward taps for the analog output filter.
+            filter_feedback: An ``AnalogOutputFeedbackExponential`` describing the IIR filter.
+            sampling_rate: Sampling rate of the port. Default 1 GS/s.
+            upsampling_mode: ``"mw"`` (default) or ``"pulse"``. Only valid when
+                ``sampling_rate`` is 1 GHz.
+            min_voltage_limit: Minimum voltage limit for the output port.
+            max_voltage_limit: Maximum voltage limit for the output port.
+        """
+        super().__init__(
+            fem=fem,
+            index=index,
+            delay=delay,
+            shareable=shareable,
+            crosstalk=crosstalk,
+            offset=offset,
+            filter_feedforward=filter_feedforward,
+        )
+        _upsampling_mode: ConfigValue[UpsamplingMode] = create_value(upsampling_mode, "mw")
+        _sampling_rate = create_value(sampling_rate, 1e9)
+        _validate_upsampling_mode(_sampling_rate, _upsampling_mode)
+
+        self.sampling_rate = _sampling_rate
+        self.upsampling_mode = _upsampling_mode
+        self.min_voltage_limit = create_value(min_voltage_limit, None)
+        self.max_voltage_limit = create_value(max_voltage_limit, None)
+        self.filter_feedback_seq = None
+        self.filter_feedback_inst = create_value(filter_feedback, AnalogOutputFeedbackExponential())
+
+
+class AnalogOutputPortMw(AnalogOutputPort):
     """Analog output port of an MW-FEM (OPX1000 microwave front-end module)."""
 
     def __init__(
@@ -309,14 +374,14 @@ class AnalogOutputPortMicrowave(AnalogOutputPort):
         self.upconverter2_frequency = create_value(upconverter2_frequency, NOT_SET)
 
 
-ElementPortType = PortReferenceType | AnalogOutputPortLf
+ElementPortType = PortReferenceType | AnalogOutputPortLfBase
 
 
-def standardize_lf_port(port: ElementPortType) -> AnalogOutputPortLf:
-    if isinstance(port, (AnalogOutputPortLf, PortReference)):
+def standardize_lf_port(port: ElementPortType) -> AnalogOutputPortLfBase:
+    if isinstance(port, (AnalogOutputPortLfBase, PortReference)):
         return port
     if len(port) == 3:
         cont, fem, idx = port
-        return AnalogOutputPortOctoDac(fem=LfFem(controller=Opx1000(cont), index=fem), index=idx)
+        return AnalogOutputPortLf(fem=LfFem(controller=Opx1000(cont), index=fem), index=idx)
     cont, idx = port
     return AnalogOutputPortOpx(controller=OpxPlus(cont), index=idx)

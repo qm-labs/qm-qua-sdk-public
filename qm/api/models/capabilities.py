@@ -3,6 +3,7 @@ import dataclasses
 from typing import Set, Optional, FrozenSet, Collection
 
 from qm.api.models.info import QuaMachineInfo
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.exceptions import UnsupportedCapabilitiesError, CapabilitiesNotInitializedError
 
 
@@ -61,6 +62,8 @@ class QopCaps:
     port_voltage_limits = Capability("qm.port_voltage_limits", "3.7")
     lo_mode = Capability("qm.lo_mode", "3.7")
     device_metrics = Capability("qm.device_metrics", "3.8")
+    persistent_elements = Capability("qm.persistent_elements", "3.9")
+    lf_ln08_fem = Capability("qm.lf_ln08_fem", "3.9", name_in_exception="LF-LN08")
 
     @staticmethod
     def get_all() -> Set[Capability]:
@@ -85,6 +88,7 @@ class ServerCapabilities:
     # usage was retained.
     supports_double_frequency = property(lambda self: self.supports(QopCaps.double_frequency))
     supports_sticky_elements = property(lambda self: self.supports(QopCaps.sticky_elements))
+    supports_persistent_elements = property(lambda self: self.supports(QopCaps.persistent_elements))
 
     @property
     def supported_capabilities(self) -> FrozenSet[Capability]:
@@ -102,12 +106,15 @@ class ServerCapabilities:
         """
         Validates if the capabilities passed are supported by the server.
         Raises an UnsupportedCapabilityError for the capabilities which are not supported.
+
+        Args:
+            capabilities: The capabilities required by the program/config to validate against the server.
         """
         if self.supports(QopCaps.fast_frame_rotation_deprecated) and QopCaps.fast_frame_rotation in capabilities:
             warnings.warn(
                 "The fast_frame_rotation is deprecated as it is no longer faster than frame_rotation_2pi "
                 "(and in fact, it is less efficient). It will be removed in future versions",
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
             )
 
         unsupported_capabilities = set(capabilities) - self._supported_capabilities
@@ -150,7 +157,12 @@ class _OfflineCapabilities(ServerCapabilities):
         self._is_set = True
 
     def set_from_implementation(self, implementation: Optional[QuaMachineInfo] = None) -> None:
-        """Since we want to keep a single instance of this class, we don't want to use the build function that returns a new instance"""
+        """Since we want to keep a single instance of this class, we don't want to use the build function that returns a new instance
+
+        Args:
+            implementation: The machine info whose capabilities are used to populate this instance.
+                If ``None``, no capabilities are set.
+        """
         tmp = ServerCapabilities.build(implementation)
         self.set(tmp.supported_capabilities)
 

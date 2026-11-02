@@ -1,12 +1,12 @@
-import warnings
 from enum import Enum
+from typing_extensions import deprecated
 from typing import Union, Literal, overload
 
 from qm._loc import _get_loc
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.exceptions import QmQuaException
-from qm.utils import deprecation_message
 from qm.api.models.capabilities import QopCaps
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.qua._scope_management.scopes_manager import scopes_manager
 from qm.qua._expressions import StructT, QuaExternalIncomingStream, QuaExternalOutgoingStream
 
@@ -28,6 +28,12 @@ def declare_external_stream(
 ) -> QuaExternalOutgoingStream[StructT]: ...
 
 
+@deprecated(
+    'declare_external_stream is deprecated since "1.2.4" and will be removed in "2.0.0". '
+    "Please use declare_input_stream() / declare_output_stream() instead",
+    category=QmQuaDeprecationWarning,
+    stacklevel=1,
+)
 def declare_external_stream(
     struct_type: type[StructT], stream_id: int, direction: QuaStreamDirection
 ) -> Union[QuaExternalIncomingStream[StructT], QuaExternalOutgoingStream[StructT]]:
@@ -45,6 +51,9 @@ def declare_external_stream(
             the external compute resource.
         direction: The direction of the stream, either QuaStreamDirection.INCOMING or QuaStreamDirection.OUTGOING.
 
+    Returns:
+        An incoming or outgoing external stream object, according to the requested direction.
+
     Example:
         ```python
         struct = declare_struct(StructType)
@@ -52,16 +61,6 @@ def declare_external_stream(
         ```
 
     """
-    warnings.warn(
-        deprecation_message(
-            "declare_external_stream",
-            deprecated_in="1.2.4",
-            removed_in="2.0.0",
-            details="Please use declare_input_stream() / declare_output_stream() instead.",
-        ),
-        DeprecationWarning,
-        stacklevel=2,
-    )
     return _declare_opnic_stream(struct_type, stream_id, direction)
 
 
@@ -99,6 +98,12 @@ def _declare_opnic_stream(
     return stream
 
 
+@deprecated(
+    'send_to_external_stream is deprecated since "1.2.4" and will be removed in "2.0.0". '
+    "Please use send_to_stream() instead",
+    category=QmQuaDeprecationWarning,
+    stacklevel=1,
+)
 def send_to_external_stream(stream: QuaExternalOutgoingStream[StructT], struct: StructT) -> None:
     """
     Send data to an external compute resource.
@@ -109,16 +114,6 @@ def send_to_external_stream(stream: QuaExternalOutgoingStream[StructT], struct: 
         stream: The outgoing stream to send data to.
         struct: The struct containing the data to send.
     """
-    warnings.warn(
-        deprecation_message(
-            "send_to_external_stream",
-            deprecated_in="1.2.4",
-            removed_in="2.0.0",
-            details="Please use send_to_stream() instead.",
-        ),
-        DeprecationWarning,
-        stacklevel=2,
-    )
     _send_to_opnic_stream(stream, struct)
 
 
@@ -136,6 +131,12 @@ def _send_to_opnic_stream(stream: QuaExternalOutgoingStream[StructT], struct: St
     scopes_manager.append_statement(statement)
 
 
+@deprecated(
+    'receive_from_external_stream is deprecated since "1.2.4" and will be removed in "2.0.0". '
+    "Please use receive_from_stream() instead",
+    category=QmQuaDeprecationWarning,
+    stacklevel=1,
+)
 def receive_from_external_stream(stream: QuaExternalIncomingStream[StructT], struct: StructT) -> None:
     """
     Receive data from an external compute resource.
@@ -146,16 +147,6 @@ def receive_from_external_stream(stream: QuaExternalIncomingStream[StructT], str
         stream: The incoming stream to receive data from.
         struct: The struct to store the received data in.
     """
-    warnings.warn(
-        deprecation_message(
-            "receive_from_external_stream",
-            deprecated_in="1.2.4",
-            removed_in="2.0.0",
-            details="Please use receive_from_stream() instead.",
-        ),
-        DeprecationWarning,
-        stacklevel=2,
-    )
     _receive_from_opnic_stream(stream, struct)
 
 

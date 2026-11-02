@@ -1,13 +1,13 @@
-from typing import Union
-
 from qm._loc import _get_loc
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.api.models.capabilities import QopCaps
+from qm.qua._dsl._type_hints import ElementRef
+from qm.qua._dsl._utils import _add_elements_to_program
 from qm.qua._expressions import Scalar, to_scalar_pb_expression
 from qm.qua._scope_management.scopes_manager import scopes_manager
 
 
-def frame_rotation(angle: Union[Scalar[float]], *elements: str) -> None:
+def frame_rotation(angle: Scalar[float], *elements: ElementRef) -> None:
     r"""Shift the phase of the oscillator associated with an element by the given angle.
 
     This is typically used for virtual z-rotations.
@@ -35,7 +35,7 @@ def frame_rotation(angle: Union[Scalar[float]], *elements: str) -> None:
     frame_rotation_2pi(angle * 0.15915494309189535, *elements)
 
 
-def frame_rotation_2pi(angle: Scalar[float], *elements: str) -> None:
+def frame_rotation_2pi(angle: Scalar[float], *elements: ElementRef) -> None:
     r"""Shift the phase of the oscillator associated with an element by the given angle in units of 2pi radians.
 
     This is typically used for virtual z-rotations.
@@ -57,18 +57,19 @@ def frame_rotation_2pi(angle: Scalar[float], *elements: str) -> None:
 
     """
     loc = _get_loc()
-    for element in elements:
+    elements_names = _add_elements_to_program(*elements)
+    for name in elements_names:
         statement = inc_qua_pb2.QuaProgram.AnyStatement(
             zRotation=inc_qua_pb2.QuaProgram.ZRotationStatement(
                 loc=loc,
                 value=to_scalar_pb_expression(angle),
-                qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+                qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=name, loc=loc),
             )
         )
         scopes_manager.append_statement(statement)
 
 
-def reset_frame(*elements: str) -> None:
+def reset_frame(*elements: ElementRef) -> None:
     """Resets the frame of the oscillator associated with an element to 0.
 
     Used to reset all the frame updated made up to this statement.
@@ -80,17 +81,18 @@ def reset_frame(*elements: str) -> None:
 
     """
     loc = _get_loc()
-    for element in elements:
+    names = _add_elements_to_program(*elements)
+    for name in names:
         statement = inc_qua_pb2.QuaProgram.AnyStatement(
             resetFrame=inc_qua_pb2.QuaProgram.ResetFrameStatement(
                 loc=loc,
-                qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+                qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=name, loc=loc),
             )
         )
         scopes_manager.append_statement(statement)
 
 
-def fast_frame_rotation(cosine: Scalar[float], sine: Scalar[float], *elements: str) -> None:
+def fast_frame_rotation(cosine: Scalar[float], sine: Scalar[float], *elements: ElementRef) -> None:
     r"""Shift the phase of the oscillator associated with an element by applying the
     rotation matrix [[cosine, -sine],[sin, cosine]].
 
@@ -113,15 +115,16 @@ def fast_frame_rotation(cosine: Scalar[float], sine: Scalar[float], *elements: s
             be shifted. multiple elements can be given, in which case
             all of their oscillators' phases will be shifted
     """
+    names = _add_elements_to_program(*elements)
     scopes_manager.program_scope.add_used_capability(QopCaps.fast_frame_rotation)
     loc = _get_loc()
-    for element in elements:
+    for name in names:
         statement = inc_qua_pb2.QuaProgram.AnyStatement(
             fastFrameRotation=inc_qua_pb2.QuaProgram.FastFrameRotationStatement(
                 loc=loc,
                 cosine=to_scalar_pb_expression(cosine),
                 sine=to_scalar_pb_expression(sine),
-                qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc),
+                qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=name, loc=loc),
             )
         )
         scopes_manager.append_statement(statement)

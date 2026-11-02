@@ -9,7 +9,11 @@ from qm.qua._dsl.stream_processing.stream_processing import ResultStreamSource
 class DirectStreamSourceInterface(QuaVariable[NumberT], ABC):
     @abstractmethod
     def get_stream(self) -> ResultStreamSource:
-        """Get or create the stream associated with DirectStreamSource for current scope."""
+        """Get or create the stream associated with DirectStreamSource for current scope.
+
+        Returns:
+            The result stream source associated with the current scope.
+        """
         pass
 
     @abstractmethod
@@ -17,6 +21,9 @@ class DirectStreamSourceInterface(QuaVariable[NumberT], ABC):
         """Process and save the stream associated with DirectStreamSource.
 
         Mutates current_processed_streams in place, adding the names of streams processed.
+
+        Args:
+            current_processed_streams: Set of stream names already processed in the current context.
         """
         pass
 
@@ -33,5 +40,9 @@ class DirectStreamSourceInterface(QuaVariable[NumberT], ABC):
 
     @abstractmethod
     def get_save_statement(self) -> inc_qua_pb2.QuaProgram.AnyStatement:
-        """Get the save statement for the stream associated with DirectStreamSource."""
+        """Get the save statement for the stream associated with DirectStreamSource.
+
+        Returns:
+            The QUA save statement that saves the variable to its associated stream.
+        """
         pass

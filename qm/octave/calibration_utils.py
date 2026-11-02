@@ -5,9 +5,17 @@ import numpy as np
 Correction = Tuple[float, float, float, float]
 
 
+# Internal API: not part of the public interface (no leading underscore, but kept for internal reuse).
 def convert_to_correction(gain: float, phase: float) -> Correction:
     """
     Convert gain and phase to a correction matrix.
+
+    Args:
+        gain: The gain imbalance to correct for.
+        phase: The phase imbalance to correct for, in radians.
+
+    Returns:
+        The 2x2 mixer correction matrix as a (c00, c01, c10, c11) tuple.
     """
     s = phase
     c = np.polyval([-3.125, 1.5, 1], s**2)

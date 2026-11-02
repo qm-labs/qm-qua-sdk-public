@@ -1,5 +1,5 @@
 import logging
-import warnings
+from typing_extensions import deprecated
 from typing import (
     Dict,
     Tuple,
@@ -17,11 +17,11 @@ from typing import (
     overload,
 )
 
-from qm.utils import deprecation_message
 from qm.api.v2.job_result_api import JobResultApi
 from qm.api.job_result_api import JobResultServiceApi
 from qm.utils.general_utils import run_until_with_timeout
 from qm.type_hinting.general import NumpyArray, NumpyNumber
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.exceptions import JobFailedError, QmQuaException, QMTimeoutError
 from qm._stream_results._multiple_streams_fetcher import MultipleStreamsFetcher
@@ -118,23 +118,19 @@ class StreamsManager(Mapping[str, Optional[AnySingleStreamFetcher]]):
             )
         return self.get(item)
 
+    @deprecated(
+        'streaming_result_fetcher.__iter__ is deprecated since "1.2.0" and will be removed in "2.0.0". '
+        "This function is going to change its API to be similar to this of a dictionary, "
+        "Use `iterate_results` for the old API",
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def __iter__(self) -> Generator[Tuple[str, Optional[AnySingleStreamFetcher]], None, None]:  # type: ignore[override]
         """Iterates over the results.
 
         Deprecated since 1.2.0; will be removed in 2.0.0. The iteration API will change to be
         dictionary-like; use ``iterate_results()`` for the current behavior.
         """
-        warnings.warn(
-            deprecation_message(
-                method="streaming_result_fetcher.__iter__",
-                deprecated_in="1.2.0",
-                removed_in="2.0.0",
-                details="This function is going to change its API to be similar to this of a dictionary, "
-                "Use `iterate_results` for the old API.",
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return self.iterate_results()
 
     def iterate_results(self) -> Generator[Tuple[str, Optional[AnySingleStreamFetcher]], None, None]:
@@ -143,19 +139,22 @@ class StreamsManager(Mapping[str, Optional[AnySingleStreamFetcher]]):
 
     def keys(self) -> KeysView[str]:
         """
-        Returns a view of the names of the results
+        Returns:
+            A view of the names of the results
         """
         return self._single_stream_fetchers.keys()
 
     def items(self) -> ItemsView[str, AnySingleStreamFetcher]:
         """
-        Returns a view, in which the first item is the name of the result and the second is the result
+        Returns:
+            A view of (name, result) pairs, where the first item is the name of the result and the second is the result
         """
         return self._single_stream_fetchers.items()
 
     def values(self) -> ValuesView[AnySingleStreamFetcher]:
         """
-        Returns a view of the results
+        Returns:
+            A view of the results
         """
         return self._single_stream_fetchers.values()
 

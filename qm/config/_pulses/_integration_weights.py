@@ -5,14 +5,16 @@ from qm.config._primitives import NamedObject
 from qm.exceptions import ConfigValidationException
 from qm.utils.list_compression_utils import split_list_to_chunks
 
+IwInputType = list[tuple[float, int]] | list[float] | tuple[float, int]
+
 
 class IntegrationWeights(NamedObject):
     """The specification of measurement integration weights."""
 
     def __init__(
         self,
-        cosine: list[tuple[float, int]] | list[float],
-        sine: list[tuple[float, int]] | list[float],
+        cosine: IwInputType,
+        sine: IwInputType,
         name: str = "",
     ):
         """
@@ -31,7 +33,7 @@ class IntegrationWeights(NamedObject):
         self.sine = self._standardize_iw_data(sine)
 
     @staticmethod
-    def _standardize_iw_data(data: list[tuple[float, int]] | list[float]) -> list[tuple[float, int]]:
+    def _standardize_iw_data(data: IwInputType) -> list[tuple[float, int]]:
         if len(data) == 0 or isinstance(data[0], (tuple, list)):
             to_return = []
             for x in data:
@@ -40,8 +42,10 @@ class IntegrationWeights(NamedObject):
             return to_return
 
         if isinstance(data[0], numbers.Number):
-            if len(data) == 2:
-                d0, d1 = cast(tuple[float, int], data)
+            if isinstance(data, tuple):
+                if len(data) != 2:
+                    raise ConfigValidationException(f"Invalid IW data, data must be 2-tuples, got {data}.")
+                d0, d1 = data
                 return [(float(d0), int(d1))]
 
             data = cast(list[float], data)

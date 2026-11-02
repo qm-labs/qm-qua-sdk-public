@@ -1,19 +1,24 @@
 import abc
+import copy
+import logging
 import threading
 from collections import deque
 from abc import abstractmethod
 from types import TracebackType
 from typing import TYPE_CHECKING, Set, Dict, List, Type, Deque, Tuple, Literal, Optional, cast
 
+from qm.config import AnyElement
 from qm.grpc.qm.pb import inc_qua_pb2
 from qm.program.program import Program
-from qm.exceptions import QmQuaException
 from qm.api.models.capabilities import Capability
+from qm.exceptions import QmQuaException, ContradictingElements
 
 if TYPE_CHECKING:
     from qm.qua._dsl.streams.external_streams import QuaStreamDirection
     from qm.qua._dsl.stream_processing.stream_processing import ResultStreamSource, _OutputStream
     from qm.qua._dsl.stream_processing.direct_stream_processing_interface import DirectStreamSourceInterface
+
+logger = logging.getLogger(__name__)
 
 # The root level scopes stack. Intended for use exclusively by _get_scopes_stack().
 # It is a thread-local stack - each thread gets its own stack, so it is safe for multi-threaded use.
@@ -78,12 +83,15 @@ class _ProgramScope(_BaseScope):
         self._declared_streams: Dict[str, "ResultStreamSource"] = {}
         self._auto_processing_streams: List["DirectStreamSourceInterface"] = []  # type: ignore[type-arg]
         self._declared_input_streams: Set[str] = set()
+        self._elements: Dict[str, "AnyElement"] = {}
         self._declared_external_streams: Dict[
             Tuple[int, "QuaStreamDirection"], inc_qua_pb2.QuaProgram.ExternalStreamDeclaration
         ] = {}
 
         self._used_capabilities: Set[Capability] = set()
         self._result_analysis_scope = _ResultAnalysisScope()
+
+        self._program_needs_external_config = False
 
     def __enter__(self) -> Program:  # type: ignore[override]
         super().__enter__()
@@ -94,10 +102,33 @@ class _ProgramScope(_BaseScope):
         self, exc_type: Optional[Type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[TracebackType]
     ) -> Literal[False]:
         self.auto_stream_processing()
-        self._program._set_and_exit(self._generate_pb_qua_program(), self._used_capabilities)
+        if self._program_needs_external_config:
+            self._program.needs_external_config = True
+            if self._elements:
+                logger.info(
+                    "Some of the entities (elements, operations) in this program were provided as strings, "
+                    "make sure a logical config is present before running"
+                )
+        self._program._set_and_exit(
+            self._generate_pb_qua_program(), self._used_capabilities, list(self._elements.values())
+        )
         scopes_stack = _get_scopes_stack()
         scopes_stack.clear()
         return False
+
+    def add_element(self, element: "AnyElement") -> None:
+        if element.name in self._elements:
+            if not element.is_similar(self._elements[element.name]):
+                raise ContradictingElements(
+                    f"You have two elements named `{element.name}` but have different properties."
+                )
+            return
+        self._elements[element.name] = copy.deepcopy(
+            element
+        )  # the element is modified (added pulses and outputs), and we don't want to edit the user's element.
+
+    def get_element(self, name: str) -> "AnyElement":
+        return self._elements[name]
 
     @property
     def declared_streams(self) -> Dict[str, "ResultStreamSource"]:

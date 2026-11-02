@@ -161,6 +161,36 @@ def create_arbitrary_waveform(
     sampling_rate: float | None = None,
     name: str = "",
 ) -> ArbitraryWaveform:
+    """Create an arbitrary waveform from a list of samples.
+
+    Args:
+        samples: List of sample values for the arbitrary waveform.
+        is_overridable: If ``True``, creates a waveform that can be overridden
+            after compilation. Cannot be combined with ``max_allowed_error`` or
+            ``sampling_rate``.
+        max_allowed_error: Maximum allowed error for automatic compression.
+            Cannot be combined with ``sampling_rate``. If neither
+            ``max_allowed_error`` nor ``sampling_rate`` is given, defaults to
+            ``1e-4``.
+        sampling_rate: Sampling rate, in S/s (samples per second), to use for
+            this waveform instead of the default. Cannot be combined with
+            ``max_allowed_error``.
+        name: Name used to reference this waveform from pulses. Auto-generated
+            if empty.
+
+    Returns:
+        An [OverridableArbitraryWaveform][qm.config.OverridableArbitraryWaveform]
+        if ``is_overridable`` is ``True``, an
+        [ArbitraryWaveformWithSamplingRate][qm.config.ArbitraryWaveformWithSamplingRate]
+        if ``sampling_rate`` is given, or an
+        [ArbitraryWaveformWithMaxError][qm.config.ArbitraryWaveformWithMaxError]
+        otherwise.
+
+    Raises:
+        WaveformValidationError: If ``is_overridable`` is combined with
+            ``max_allowed_error`` or ``sampling_rate``, or if both
+            ``max_allowed_error`` and ``sampling_rate`` are given together.
+    """
     if is_overridable:
         if max_allowed_error is not None:
             raise WaveformValidationError("Overridable waveforms cannot have property 'max_allowed_error'")

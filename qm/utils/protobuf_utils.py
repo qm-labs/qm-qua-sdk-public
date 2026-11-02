@@ -36,7 +36,15 @@ def list_fields(node: Message) -> dict[str, Node]:
 
 
 def which_one_of(message: Message, oneof_group: str) -> tuple[str, Union[Any, None]]:
-    """Return the name of the field set in the oneof group, or None if none is set."""
+    """Return the name of the field set in the oneof group, or None if none is set.
+
+    Args:
+        message: The protobuf message to inspect.
+        oneof_group: The name of the oneof group to query.
+
+    Returns:
+        A tuple of the set field's name and its value, or ``("None", None)`` if no field in the group is set.
+    """
     oneof_name = message.WhichOneof(oneof_group)
     if oneof_name is None:
         return "None", None
@@ -48,7 +56,12 @@ V = TypeVar("V")
 
 
 def update_map(map_container: MutableMapping[K, V], data: dict[K, V]) -> None:
-    """Update the map with new values."""
+    """Update the map with new values.
+
+    Args:
+        map_container: The protobuf map field to update.
+        data: The new values to write into the map. Keys with falsy values are deleted from the map.
+    """
     for key, value in data.items():
         if value:
             if isinstance(value, PROTOBUF_SCALAR_TYPES):
@@ -71,7 +84,12 @@ def proto_map_to_dict(map_container: MutableMapping[K, V]) -> dict[K, V]:
 
 
 def assign_map(map_container: MutableMapping[K, V], data: dict[K, V]) -> None:
-    """Assign a mapping to a map field in the protobuf message."""
+    """Assign a mapping to a map field in the protobuf message.
+
+    Args:
+        map_container: The protobuf map field to overwrite.
+        data: The mapping to assign; the map is cleared first and then populated from this data.
+    """
     if hasattr(map_container, "clear"):
         map_container.clear()
     else:
@@ -88,7 +106,12 @@ def proto_repeated_to_list(repeated_container: MutableSequence[T]) -> list[T]:
 
 
 def assign_repeated(repeated_container: MutableSequence[T], items: Iterable[T]) -> None:
-    """Assign a sequence to a repeated field in the protobuf message."""
+    """Assign a sequence to a repeated field in the protobuf message.
+
+    Args:
+        repeated_container: The protobuf repeated field to overwrite.
+        items: The items to assign; the field is cleared first and then extended with these items.
+    """
     if hasattr(repeated_container, "clear"):
         repeated_container.clear()
     else:
@@ -112,7 +135,14 @@ def assign_to_proto(msg: Message, field_name: str, value: Any) -> None:
 
 
 def serialized_on_wire(message: Message) -> bool:
-    """Check if message would be serialized (has non-default content)"""
+    """Check if message would be serialized (has non-default content)
+
+    Args:
+        message: The protobuf message to check.
+
+    Returns:
+        ``True`` if the message has non-default content (serializes to a non-empty byte string), ``False`` otherwise.
+    """
     serialized = message.SerializeToString()
     return len(serialized) > 0
 

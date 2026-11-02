@@ -3,6 +3,7 @@ from typing import List, Optional
 from dataclasses import field, dataclass
 
 from qm.grpc.qm.pb import inc_qua_pb2
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 
 
 @dataclass
@@ -36,7 +37,7 @@ def standardize_compiler_params(
         warnings.warn(
             "Using **kwargs for the compiler arguments is deprecated, and will be removed in 2.0.0. "
             "Please set the options inside the object 'CompilerOptionArguments'",
-            DeprecationWarning,
+            QmQuaDeprecationWarning,
             stacklevel=2,
         )
         return CompilerOptionArguments(strict=strict, flags=flags or [])

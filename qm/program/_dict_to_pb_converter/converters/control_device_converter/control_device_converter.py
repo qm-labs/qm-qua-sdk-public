@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from typing import Dict, Type, Union, Literal, TypeVar, MutableMapping, cast
+from typing import Any, Dict, Type, Union, Literal, TypeVar, MutableMapping, cast
 
 from google.protobuf.wrappers_pb2 import Int32Value
 
@@ -18,6 +18,7 @@ from qm.type_hinting.config_types import (
     Upconverter,
     LfFemConfigType,
     MwFemConfigType,
+    LFLN08FemConfigType,
     ControllerConfigType,
     MwUpconverterConfigType,
     AnalogInputPortConfigType,
@@ -27,6 +28,7 @@ from qm.type_hinting.config_types import (
     OPX1000ControllerConfigType,
     MwFemAnalogInputPortConfigType,
     MwFemAnalogOutputPortConfigType,
+    AnalogOutputPortConfigTypeLFLN08,
     AnalogOutputPortConfigTypeOctoDac,
 )
 
@@ -34,12 +36,22 @@ AnalogOutputType = TypeVar(
     "AnalogOutputType",
     inc_qua_config_pb2.QuaConfig.AnalogOutputPortDec,
     inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec,
+    inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec,
+)
+# Narrower than AnalogOutputType: only the two FEM variants that actually have sampling-rate/upsampling-mode enums
+# (plain AnalogOutputPortDec, used for OPX+, doesn't), scoped locally to avoid mypy checking update_sampling_rate_enum
+# against a class that lacks those enums.
+FemAnalogOutputType = TypeVar(
+    "FemAnalogOutputType",
+    inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec,
+    inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec,
 )
 ControllerConfigTypeVar = TypeVar(
     "ControllerConfigTypeVar",
     inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
     inc_qua_config_pb2.QuaConfig.ControllerDec,
     inc_qua_config_pb2.QuaConfig.MicrowaveFemDec,
+    inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
 )
 
 
@@ -72,6 +84,8 @@ class ControlDeviceConverter(
             for k, v in data["fems"].items():
                 if v.get("type") == "MW":
                     fems[int(k)] = self._mw_fem_to_pb(cast(MwFemConfigType, v))
+                elif v.get("type") == "LF-LN08":
+                    fems[int(k)] = self._lf_ln08_fem_to_pb(cast(LFLN08FemConfigType, v))
                 else:
                     fems[int(k)] = self._fem_to_pb(cast(LfFemConfigType, v))
 
@@ -97,10 +111,16 @@ class ControlDeviceConverter(
         cont = self._set_ports_in_config(cont, data)
         return inc_qua_config_pb2.QuaConfig.FEMTypes(microwave=cont)
 
+    def _lf_ln08_fem_to_pb(self, data: LFLN08FemConfigType) -> inc_qua_config_pb2.QuaConfig.FEMTypes:
+        self._capabilities.validate([QopCaps.lf_ln08_fem])
+        cont = inc_qua_config_pb2.QuaConfig.LFLN08FemDec()
+        cont = self._set_ports_in_config(cont, data)
+        return inc_qua_config_pb2.QuaConfig.FEMTypes(lf_ln08_fem=cont)
+
     def _set_ports_in_config(
         self,
         config: ControllerConfigTypeVar,
-        data: Union[ControllerConfigType, LfFemConfigType, MwFemConfigType],
+        data: Union[ControllerConfigType, LfFemConfigType, MwFemConfigType, LFLN08FemConfigType],
     ) -> ControllerConfigTypeVar:
         if "analog_outputs" in data:
             for analog_output_idx, analog_output_data in data["analog_outputs"].items():
@@ -119,12 +139,20 @@ class ControlDeviceConverter(
                 elif isinstance(config, inc_qua_config_pb2.QuaConfig.MicrowaveFemDec):
                     analog_output_data = cast(MwFemAnalogOutputPortConfigType, analog_output_data)
                     config.analogOutputs[int_k].CopyFrom(self.mw_fem_analog_output_to_pb(analog_output_data))
+                elif isinstance(config, inc_qua_config_pb2.QuaConfig.LFLN08FemDec):
+                    analog_output_data = cast(AnalogOutputPortConfigTypeLFLN08, analog_output_data)
+                    config.analogOutputs[int_k].CopyFrom(self.lf_ln08_analog_output_port_to_pb(analog_output_data))
                 else:
                     raise ValueError(f"Unknown config type {type(config)}")
 
         if "analog_inputs" in data:
             if isinstance(
-                config, (inc_qua_config_pb2.QuaConfig.ControllerDec, inc_qua_config_pb2.QuaConfig.OctoDacFemDec)
+                config,
+                (
+                    inc_qua_config_pb2.QuaConfig.ControllerDec,
+                    inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
+                    inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
+                ),
             ):
                 for analog_input_idx, analog_input_data in data["analog_inputs"].items():
                     analog_input_data = cast(AnalogInputPortConfigType, analog_input_data)
@@ -222,7 +250,9 @@ class ControlDeviceConverter(
 
         return analog_input
 
-    def _validate_invalid_sampling_rate_and_upsampling_mode(self, data: AnalogOutputPortConfigTypeOctoDac) -> None:
+    def _validate_invalid_sampling_rate_and_upsampling_mode(
+        self, data: Union[AnalogOutputPortConfigTypeOctoDac, AnalogOutputPortConfigTypeLFLN08]
+    ) -> None:
         # We check that a user explicitly tried to put upsampling mode (not the default value) with a non-compatible sampling rate
         if "upsampling_mode" in data and "sampling_rate" in data and data["sampling_rate"] != 1e9:
             raise ConfigValidationException("'upsampling_mode' is only relevant for 'sampling_rate' of 1GHz.")
@@ -268,7 +298,9 @@ class ControlDeviceConverter(
             analog_output.filter.CopyFrom(self._filters_converter.convert(data_with_defaults["filter"]))
 
         if "crosstalk" in data_with_defaults:
-            if self._capabilities.supports(QopCaps.config_v2) and isinstance(
+            if isinstance(analog_output, inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec):
+                crosstalk_in_pb = analog_output.crosstalk_v2.value
+            elif self._capabilities.supports(QopCaps.config_v2) and isinstance(
                 analog_output, inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec
             ):
                 crosstalk_in_pb = analog_output.crosstalk_v2.value
@@ -304,61 +336,83 @@ class ControlDeviceConverter(
                 inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec.OutputMode, cast(str, output_mode)
             )
 
-        if self._capabilities.supports(QopCaps.port_voltage_limits):
-            data_with_defaults = self._apply_defaults(  # type: ignore[assignment]
-                data_with_defaults,
-                default_schema={"min_voltage_limit": None, "max_voltage_limit": None},
-            )
+        self._apply_voltage_limits(item, data_with_defaults)
 
-            if "min_voltage_limit" in data_with_defaults:
-                min_voltage_limit = data_with_defaults.get("min_voltage_limit")
-                item.min_voltage_limit.CopyFrom(
-                    inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec.VoltageLimitContainer(
-                        value=min_voltage_limit
-                    )
-                )
+        return item
 
-            if "max_voltage_limit" in data_with_defaults:
-                max_voltage_limit = data_with_defaults.get("max_voltage_limit")
-                item.max_voltage_limit.CopyFrom(
-                    inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec.VoltageLimitContainer(
-                        value=max_voltage_limit
-                    )
-                )
+    def lf_ln08_analog_output_port_to_pb(
+        self,
+        data: AnalogOutputPortConfigTypeLFLN08,
+    ) -> inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec:
+        item = self.analog_output_port_to_pb(data, output_type=inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec)
+        self._validate_invalid_sampling_rate_and_upsampling_mode(data)
 
-        else:
-            self._validate_unsupported_params(
-                data_with_defaults.keys(),
-                unsupported_params=["min_voltage_limit", "max_voltage_limit"],
-                supported_from=QopCaps.port_voltage_limits.from_qop_version,
-            )
+        default_schema: AnalogOutputPortConfigTypeLFLN08 = {
+            "sampling_rate": 1e9,
+            "upsampling_mode": "mw",
+        }
+        data_with_defaults = self._apply_defaults(data, default_schema)
+
+        self.update_sampling_rate_enum(item, data_with_defaults)
+
+        self._apply_voltage_limits(item, data_with_defaults)
 
         return item
 
     @staticmethod
     def update_sampling_rate_enum(
-        item: inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec,
-        data_with_defaults: AnalogOutputPortConfigTypeOctoDac,
+        item: FemAnalogOutputType,
+        data_with_defaults: Union[AnalogOutputPortConfigTypeOctoDac, AnalogOutputPortConfigTypeLFLN08],
     ) -> None:
-        """Also update the upsampling mode, as its value is tightly correlated to the sampling rate."""
+        """Also update the upsampling mode, as its value is tightly correlated to the sampling rate.
+
+        Args:
+            item: The protobuf analog output port to set the sampling rate (and upsampling mode) on.
+            data_with_defaults: The port config (with defaults filled in) holding the ``sampling_rate`` and ``upsampling_mode``.
+        """
+        pb_cls = type(item)
         sampling_rate = data_with_defaults.get("sampling_rate")
         if sampling_rate is None:
             item.ClearField("sampling_rate")
             item.ClearField("upsampling_mode")
         else:
             if sampling_rate == 1e9:
-                item.sampling_rate = inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec.SamplingRate.GSPS1
-                item.upsampling_mode = getattr(
-                    inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec.SamplingRateMode,
-                    data_with_defaults["upsampling_mode"],
-                )
+                item.sampling_rate = pb_cls.SamplingRate.GSPS1
+                item.upsampling_mode = getattr(pb_cls.SamplingRateMode, data_with_defaults["upsampling_mode"])
 
             elif sampling_rate == 2e9:
-                item.sampling_rate = inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec.SamplingRate.GSPS2
-                item.upsampling_mode = inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec.SamplingRateMode.unset
+                item.sampling_rate = pb_cls.SamplingRate.GSPS2
+                item.upsampling_mode = pb_cls.SamplingRateMode.unset
 
             else:
                 raise ValueError("Sampling rate should be either 1e9 or 2e9")
+
+    def _apply_voltage_limits(
+        self,
+        item: FemAnalogOutputType,
+        data_with_defaults: Union[AnalogOutputPortConfigTypeOctoDac, AnalogOutputPortConfigTypeLFLN08],
+    ) -> None:
+        if not self._capabilities.supports(QopCaps.port_voltage_limits):
+            self._validate_unsupported_params(
+                data_with_defaults.keys(),
+                unsupported_params=["min_voltage_limit", "max_voltage_limit"],
+                supported_from=QopCaps.port_voltage_limits.from_qop_version,
+            )
+            return
+
+        data_with_defaults = self._apply_defaults(  # type: ignore[assignment]
+            data_with_defaults,
+            default_schema={"min_voltage_limit": None, "max_voltage_limit": None},
+        )
+        pb_cls = type(item)
+        if "min_voltage_limit" in data_with_defaults:
+            item.min_voltage_limit.CopyFrom(
+                pb_cls.VoltageLimitContainer(value=data_with_defaults.get("min_voltage_limit"))
+            )
+        if "max_voltage_limit" in data_with_defaults:
+            item.max_voltage_limit.CopyFrom(
+                pb_cls.VoltageLimitContainer(value=data_with_defaults.get("max_voltage_limit"))
+            )
 
     def get_upconverters(
         self, data: MwFemAnalogOutputPortConfigType, data_with_defaults: MwFemAnalogOutputPortConfigType
@@ -494,12 +548,16 @@ class ControlDeviceConverter(
             "digital_inputs": _deconvert_controller_digital_inputs(data.digitalInputs),
         }
 
-    def _deconvert_fem(self, data: inc_qua_config_pb2.QuaConfig.FEMTypes) -> Union[LfFemConfigType, MwFemConfigType]:
+    def _deconvert_fem(
+        self, data: inc_qua_config_pb2.QuaConfig.FEMTypes
+    ) -> Union[LfFemConfigType, MwFemConfigType, LFLN08FemConfigType]:
         _, fem_config = which_one_of(data, "fem_type_one_of")
         if isinstance(fem_config, inc_qua_config_pb2.QuaConfig.OctoDacFemDec):
             return self._deconvert_octo_dac(fem_config)
         elif isinstance(fem_config, inc_qua_config_pb2.QuaConfig.MicrowaveFemDec):
             return self._deconvert_mw_fem(fem_config)
+        elif isinstance(fem_config, inc_qua_config_pb2.QuaConfig.LFLN08FemDec):
+            return self._deconvert_lf_ln08(fem_config)
         else:
             raise ValueError(f"Unknown FEM type - {fem_config}")
 
@@ -582,34 +640,24 @@ class ControlDeviceConverter(
             ret["digital_inputs"] = _deconvert_controller_digital_inputs(data.digitalInputs)
         return ret
 
-    def _deconvert_single_octo_dac_fem_analog_output(
-        self,
-        data: inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec,
-    ) -> AnalogOutputPortConfigTypeOctoDac:
-        ret = cast(
-            AnalogOutputPortConfigTypeOctoDac,
-            {
-                "offset": data.offset,
-                "delay": data.delay,
-                "shareable": data.shareable,
-                "filter": self._filters_converter.deconvert(data.filter),
-                "crosstalk": (
-                    data.crosstalk_v2.value if self._capabilities.supports(QopCaps.config_v2) else data.crosstalk
-                ),
-            },
-        )
+    def _deconvert_analog_output_common_fields(self, data: FemAnalogOutputType) -> Dict[str, Any]:
+        pb_cls = type(data)
+        ret: Dict[str, Any] = {
+            "offset": data.offset,
+            "delay": data.delay,
+            "shareable": data.shareable,
+            "filter": self._filters_converter.deconvert(data.filter),
+            "crosstalk": (
+                data.crosstalk_v2.value
+                if isinstance(data, inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec)
+                or self._capabilities.supports(QopCaps.config_v2)
+                else data.crosstalk
+            ),
+        }
         if data.sampling_rate:
             ret["sampling_rate"] = {1: 1e9, 2: 2e9}[data.sampling_rate]
         if data.upsampling_mode:
-            ret["upsampling_mode"] = cast(
-                Literal["mw", "pulse"],
-                inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec.SamplingRateMode.Name(data.upsampling_mode),
-            )
-        if data.output_mode is not None:  # We check for "is not None" because the 0 value is valid
-            ret["output_mode"] = cast(
-                Literal["direct", "amplified"],
-                inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec.OutputMode.Name(data.output_mode),
-            )
+            ret["upsampling_mode"] = pb_cls.SamplingRateMode.Name(data.upsampling_mode)
         if self._capabilities.supports(QopCaps.port_voltage_limits):
             ret["min_voltage_limit"] = (
                 data.min_voltage_limit.value
@@ -621,8 +669,18 @@ class ControlDeviceConverter(
                 if data.HasField("max_voltage_limit") and data.max_voltage_limit.HasField("value")
                 else None
             )
-
         return ret
+
+    def _deconvert_single_octo_dac_fem_analog_output(
+        self,
+        data: inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec,
+    ) -> AnalogOutputPortConfigTypeOctoDac:
+        ret = self._deconvert_analog_output_common_fields(data)
+        if data.output_mode is not None:
+            ret["output_mode"] = inc_qua_config_pb2.QuaConfig.OctoDacAnalogOutputPortDec.OutputMode.Name(
+                data.output_mode
+            )
+        return cast(AnalogOutputPortConfigTypeOctoDac, ret)
 
     def _deconvert_octo_dac_fem_analog_outputs(
         self,
@@ -632,6 +690,33 @@ class ControlDeviceConverter(
             int(name): self._deconvert_single_octo_dac_fem_analog_output(data) for name, data in outputs.items()
         }
         return ret
+
+    def _deconvert_lf_ln08(self, data: inc_qua_config_pb2.QuaConfig.LFLN08FemDec) -> LFLN08FemConfigType:
+        ret: LFLN08FemConfigType = {"type": "LF-LN08"}
+        if data.analogOutputs:
+            ret["analog_outputs"] = self._deconvert_lf_ln08_fem_analog_outputs(data.analogOutputs)
+        if data.analogInputs:
+            ret["analog_inputs"] = _deconvert_controller_analog_inputs(data.analogInputs)
+        if data.digitalOutputs:
+            ret["digital_outputs"] = _deconvert_controller_digital_outputs(data.digitalOutputs)
+        if data.digitalInputs:
+            ret["digital_inputs"] = _deconvert_controller_digital_inputs(data.digitalInputs)
+        return ret
+
+    def _deconvert_lf_ln08_fem_analog_outputs(
+        self,
+        outputs: MutableMapping[int, inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec],
+    ) -> Mapping[Union[int, str], AnalogOutputPortConfigTypeLFLN08]:
+        ret: Mapping[Union[int, str], AnalogOutputPortConfigTypeLFLN08] = {
+            int(name): self._deconvert_single_lf_ln08_fem_analog_output(data) for name, data in outputs.items()
+        }
+        return ret
+
+    def _deconvert_single_lf_ln08_fem_analog_output(
+        self,
+        data: inc_qua_config_pb2.QuaConfig.LFLN08AnalogOutputPortDec,
+    ) -> AnalogOutputPortConfigTypeLFLN08:
+        return cast(AnalogOutputPortConfigTypeLFLN08, self._deconvert_analog_output_common_fields(data))
 
     def _deconvert_single_mw_analog_output(
         self, data: inc_qua_config_pb2.QuaConfig.MicrowaveAnalogOutputPortDec

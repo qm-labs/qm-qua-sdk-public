@@ -12,6 +12,7 @@ from qm.api.v2.qm_api_old import QmApiWithDeprecations
 from qm.type_hinting.config_types import FullQuaConfig
 from qm.api.models.server_details import ConnectionDetails
 from qm.grpc.qm.grpc.v2.qmm_api_pb2_grpc import QmmServiceStub
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.api.v2.job_api.simulated_job_api import SimulatedJobApi
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.grpc.qm.pb import inc_qua_pb2, frontend_pb2, inc_qua_config_pb2
@@ -29,8 +30,8 @@ class VersionResponse:
 
 
 ControllerTypes = Literal["OPX", "OPX1000"]
-FemTypes = Literal["LF", "MW"]
-FEM_TYPES_MAPPING: Dict[int, FemTypes] = {1: "LF", 2: "MW"}
+FemTypes = Literal["LF", "MW", "LF-LN08"]
+FEM_TYPES_MAPPING: Dict[int, FemTypes] = {1: "LF", 2: "MW", 3: "LF-LN08"}
 
 
 @dataclass(frozen=True)
@@ -166,7 +167,7 @@ class QmmApi(BaseApiV2[QmmServiceStub]):
         if close_other_machines is None:
             warnings.warn(
                 "close_other_machines is not set, as from 2.0.0 default will be False, now setting to True. Please set it explicitly to remove this message and keep the wanted behavior in future versions",
-                DeprecationWarning,
+                QmQuaDeprecationWarning,
             )
             close_other_machines = True
         request = qmm_api_pb2.OpenQuantumMachineRequest(

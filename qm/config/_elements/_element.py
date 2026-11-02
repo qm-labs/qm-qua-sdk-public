@@ -1,26 +1,30 @@
 import copy
 import warnings
-from typing import Generic, Literal, TypeVar
+from typing_extensions import TypeVar
 from collections.abc import Mapping, Collection
+from typing import Generic, Literal, cast, overload
 
 from qm.utils import deprecation_message
 from qm.config._pulses._pulse import Pulse
 from qm.config._octave import OctaveRfInput
 from qm.config._ports._port_base import Port
 from qm.config._ports import AnalogOutputPort
-from qm.exceptions import ConfigValidationException
 from qm.config._ports._analog_input import AnalogInputPort
 from qm.config._ports._digital_input import DigitalInputPort
 from qm.config._ports._digital_output import DigitalOutputPort
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
+from qm.exceptions import QmQuaException, ConfigValidationException
 from qm.config._primitives import Frequency, NamedObject, ConfigObject
-from qm.config._elements._analog_inputs import Mixer, MixInput, ElementInput
+from qm.config._elements._analog_inputs import Mixer, MixedInput, ElementInput
 from qm.config._elements._digital import ElementDigitalInput, ElementDigitalOutput
-from qm.config._elements._analog_outputs import OutputOptions, ElementOutputLf, ElementOutputMw, standardize_output
+from qm.config._elements._analog_outputs import ElementOutput, MixedLfOutput, SingleLfOutput
 
-ElementInputT = TypeVar("ElementInputT", bound=ElementInput)
+ElementInputT = TypeVar("ElementInputT", bound=ElementInput, covariant=True)
+ElementOutputT = TypeVar("ElementOutputT", bound=ElementOutput | None, default=None, covariant=True)
 
 
 Polarity = Literal["ABOVE", "BELOW"]
+PolarityDeprecated = Literal["ASCENDING", "DESCENDING"]
 
 
 class StickyParams(ConfigObject):
@@ -60,18 +64,18 @@ class HoldOffset(StickyParams):
 def _standardize_polarity(polarity: str) -> Polarity:
     # Direct equality comparisons (instead of `in (...)`) so mypy can narrow the str
     # to the Literal members declared on `Polarity`.
-    polarity = polarity.upper()
-    if polarity == "ABOVE":
-        return "ABOVE"
-    if polarity == "BELOW":
-        return "BELOW"
-    if polarity == "ASCENDING":
-        warnings.warn(deprecation_message("ASCENDING", "1.2.2", "2.0.0", "Use 'ABOVE' instead"), DeprecationWarning)
-        return "ABOVE"
-    if polarity == "DESCENDING":
-        warnings.warn(deprecation_message("DESCENDING", "1.2.2", "2.0.0", "Use 'BELOW' instead"), DeprecationWarning)
-        return "BELOW"
-    raise ConfigValidationException(f"Invalid signal polarity: {polarity}")
+    polarity_upper = polarity.upper()
+    mapper: Mapping[PolarityDeprecated, Polarity] = {"ASCENDING": "ABOVE", "DESCENDING": "BELOW"}
+    allowed_polarities: Collection[Polarity] = set(mapper.values())
+    if polarity_upper in allowed_polarities:
+        return cast(Polarity, polarity_upper)
+    if polarity_upper in mapper:
+        output = mapper[cast(PolarityDeprecated, polarity_upper)]
+        warnings.warn(
+            deprecation_message(polarity, "1.2.2", "2.0.0", f"Use '{output}' instead"), QmQuaDeprecationWarning
+        )
+        return output
+    raise ConfigValidationException(f"Invalid signal polarity: {polarity}. Must be one of {allowed_polarities}")
 
 
 class TimeTaggingParams(ConfigObject):
@@ -117,25 +121,88 @@ class Oscillator(NamedObject):
         self.mixer = mixer
 
 
-class Element(Generic[ElementInputT], NamedObject):
+class Element(Generic[ElementInputT, ElementOutputT], NamedObject):
     """The specifications, parameters and connections of a single element.
 
     An element represents and describes a controlled entity which is connected to the
     ports of the controller.
     """
 
+    @overload
     def __init__(
         self,
         input_: ElementInputT,
-        intermediate_freq_or_oscillator: float | Oscillator | None,
+        *,
+        intermediate_frequency: float,
+        oscillator: None = None,
         time_of_flight: int | None = None,
         smearing: int | None = None,
-        outputs: Collection[OutputOptions | OctaveRfInput] = (),
+        output_: ElementOutputT | OctaveRfInput | None = None,
         digital_inputs: Collection[ElementDigitalInput] = (),
         digital_outputs: Collection[ElementDigitalOutput] = (),
         time_tagging_parameters: TimeTaggingParams | None = None,
         sticky: StickyParams | None = None,
         core: str = "",
+        persistent: bool = False,
+        name: str = "",
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        input_: ElementInputT,
+        *,
+        oscillator: Oscillator,
+        intermediate_frequency: None = None,
+        time_of_flight: int | None = None,
+        smearing: int | None = None,
+        output_: ElementOutputT | OctaveRfInput | None = None,
+        digital_inputs: Collection[ElementDigitalInput] = (),
+        digital_outputs: Collection[ElementDigitalOutput] = (),
+        time_tagging_parameters: TimeTaggingParams | None = None,
+        sticky: StickyParams | None = None,
+        core: str = "",
+        persistent: bool = False,
+        name: str = "",
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        input_: ElementInputT,
+        *,
+        intermediate_frequency: None = None,
+        oscillator: None = None,
+        time_of_flight: int | None = None,
+        smearing: int | None = None,
+        output_: ElementOutputT | OctaveRfInput | None = None,
+        digital_inputs: Collection[ElementDigitalInput] = (),
+        digital_outputs: Collection[ElementDigitalOutput] = (),
+        time_tagging_parameters: TimeTaggingParams | None = None,
+        sticky: StickyParams | None = None,
+        core: str = "",
+        persistent: bool = False,
+        name: str = "",
+    ) -> None:
+        # Neither `intermediate_frequency` nor `oscillator` supplied: a rare case, but legal -
+        # it preserves the "not set" distinction so the pb emits the `noOscillator` oneof arm.
+        ...
+
+    def __init__(
+        self,
+        input_: ElementInputT,
+        *,
+        intermediate_frequency: float | None = None,
+        oscillator: Oscillator | None = None,
+        time_of_flight: int | None = None,
+        smearing: int | None = None,
+        output_: ElementOutputT | OctaveRfInput | None = None,
+        digital_inputs: Collection[ElementDigitalInput] = (),
+        digital_outputs: Collection[ElementDigitalOutput] = (),
+        time_tagging_parameters: TimeTaggingParams | None = None,
+        sticky: StickyParams | None = None,
+        core: str = "",
+        persistent: bool = False,
         name: str = "",
     ) -> None:
         """
@@ -143,10 +210,10 @@ class Element(Generic[ElementInputT], NamedObject):
             input_: The input of the element. An instance of ``ElementInput`` such as
                 ``SingleInput``, ``MixInput``, ``MicrowaveInput``, ``UpconvertedRfInput``,
                 ``SingleInputCollection``, ``MultipleInputs``, or ``NoInput``.
-            intermediate_freq_or_oscillator: Either the frequency [Hz] at which the
-                controller modulates the output to this element, an ``Oscillator``
-                instance to share modulation across elements, or ``None`` to leave
-                modulation unset.
+            intermediate_frequency: The frequency [Hz] at which the controller modulates
+                the output to this element. Mutually exclusive with ``oscillator``.
+            oscillator: An ``Oscillator`` instance to share modulation across elements.
+                Mutually exclusive with ``intermediate_frequency``.
             time_of_flight: The delay, in ns, from the start of a measurement pulse
                 until it reaches back into the controller. Must be calibrated by
                 looking at the raw ADC data.
@@ -161,73 +228,110 @@ class Element(Generic[ElementInputT], NamedObject):
             sticky: When defined, makes the element sticky. Pass either a
                 ``StickyParams`` (preferred) or a legacy ``HoldOffset``.
             core: Element core (replaces the deprecated ``thread`` field).
+            persistent: When True, the element lives across jobs (until the QM is
+                closed) rather than being reset per job. Requires QOP 3.9+.
             name: Element name. Auto-generated if empty.
         """
+        if intermediate_frequency is not None and oscillator is not None:
+            raise ConfigValidationException(
+                "An element can be driven by either `intermediate_frequency` or `oscillator`, not both."
+            )
         super().__init__(name)
         self.input: ElementInputT = input_
-        if isinstance(intermediate_freq_or_oscillator, Oscillator):
+        if oscillator is not None:
             self.intermediate_frequency: Frequency | None = None
-            self.oscillator: Oscillator | None = intermediate_freq_or_oscillator
-        elif intermediate_freq_or_oscillator is None:
-            # Neither `intermediate_frequency` nor `oscillator` supplied in the source config.
-            # Preserve this "not set" distinction so the pb emits the `noOscillator` oneof arm.
+            self.oscillator: Oscillator | None = oscillator
+        elif intermediate_frequency is None:
             self.intermediate_frequency = None
             self.oscillator = None
         else:
             self.oscillator = None
-            self.intermediate_frequency = Frequency(intermediate_freq_or_oscillator)
+            self.intermediate_frequency = Frequency(intermediate_frequency)
 
-        if isinstance(input_, MixInput) and self.intermediate_frequency is not None:
+        if isinstance(input_, MixedInput) and self.intermediate_frequency is not None:
             # Seed the mixer with an identity correction for (lo, if) if the user
             # didn't already declare one. Uses setdefault (non-overwriting).
             input_.add_identity_correction_to_mixer(self.intermediate_frequency.as_float)
 
-        self.microwave_output: ElementOutputMw | None = None
-        self.outputs: list[ElementOutputLf] = []
-        self.outputs_connected_to_octave: list[OctaveRfInput] = []
-        for output in outputs:
-            self.add_output(output)
+        self.output_connected_to_octave = output_ if isinstance(output_, OctaveRfInput) else None
+        self.output = self._standardize_output(output_)
 
         self.digital_inputs = digital_inputs
         self.digital_outputs = digital_outputs
         self._pulses: dict[str, Pulse] = {}
 
+        _has_any_output = (self.output is not None) or bool(self.digital_outputs)
+
+        if _has_any_output and time_of_flight is None:
+            raise ConfigValidationException("An element with an output must have time_of_flight defined")
+        if not _has_any_output:
+            if time_of_flight is not None:
+                raise ConfigValidationException("time_of_flight should be used only with elements that have outputs")
+            if smearing is not None:
+                raise ConfigValidationException("smearing should be used only with elements that have outputs")
         self.time_of_flight = int(time_of_flight) if time_of_flight is not None else None
         # Match the dict-to-pb path: any kind of output (analog, MW, digital) implies a default
         # smearing of 0. Without this, elements like `digitalout_element` (which only declare
         # `digitalOutputs`) would lose `smearing { }` when round-tripped through the model.
-        if smearing is None and (self.has_outputs or bool(self.digital_outputs)):
+        if smearing is None and _has_any_output:
             smearing = 0
         self.smearing = int(smearing) if smearing is not None else None
 
         self.time_tagging_parameters = time_tagging_parameters
         self.sticky = sticky
         self.core = core
+        self.persistent = persistent
 
-    @property
-    def has_outputs(self) -> bool:
-        return bool(self.outputs) or bool(self.microwave_output)
+    def is_similar(self, other: "AnyElement") -> bool:
+        """Whether two elements are structurally interchangeable.
 
-    def add_output(self, output: OutputOptions | OctaveRfInput) -> None:
+        Compares only the properties that are fixed when the element is defined and that
+        cannot be modified afterwards: the input wiring, digital inputs/outputs,
+        time-of-flight, smearing, sticky, time-tagging parameters and core.
+
+        Properties that the DSL appends to an element while building a program are
+        intentionally ignored: pulses / operations
+        (``add_pulse``). These grow as the program references the element, so they say
+        nothing about whether two same-named elements are fundamentally the same.
+
+        Runtime-adjustable modulation parameters - the intermediate frequency / oscillator
+        and mixer corrections - are ignored for the same reason (e.g. the frequency can be
+        set at runtime). The element ``name`` is ignored as well, because this check exists
+        precisely to decide whether two same-named elements are compatible.
+
+        This guards against registering two elements under the same name that are
+        fundamentally different.
+        """
+        if not isinstance(other, Element):
+            return False
+        return (
+            self.input == other.input
+            and self.output == other.output
+            and list(self.digital_inputs) == list(other.digital_inputs)
+            and list(self.digital_outputs) == list(other.digital_outputs)
+            and self.time_of_flight == other.time_of_flight
+            and self.smearing == other.smearing
+            and self.sticky == other.sticky
+            and self.time_tagging_parameters == other.time_tagging_parameters
+            and self.core == other.core
+        )
+
+    @staticmethod
+    def _standardize_output(output: ElementOutputT | OctaveRfInput | None) -> ElementOutputT:
+        if output is None:
+            return cast("ElementOutputT", None)
         if isinstance(output, OctaveRfInput):
-            self.outputs_connected_to_octave.append(output)
-            for i, port in output.outputs.items():
-                curr_standardized = ElementOutputLf(port, name=f"out{i}")
-                if curr_standardized not in self.outputs:
-                    self.outputs.append(curr_standardized)
-            return
-
-        standardized = standardize_output(output)
-        if isinstance(standardized, ElementOutputLf):
-            if standardized not in self.outputs:
-                self.outputs.append(standardized)
-                return
-        elif isinstance(standardized, ElementOutputMw):
-            if self.microwave_output is not None:
-                if standardized.port != self.microwave_output.port:
-                    raise ValueError("Microwave output already set")
-                return
-            self.microwave_output = standardized
+            keys = sorted(output.outputs)
+            if len(keys) == 1:
+                return cast("ElementOutputT", SingleLfOutput(output.outputs[keys[0]]))
+            if len(output.outputs) == 2:
+                return cast("ElementOutputT", MixedLfOutput(output.outputs[keys[0]], output.outputs[keys[1]]))
+            raise QmQuaException(
+                "Non-standard number of connections, octave can be connected to either 1 or 2 input ports."
+            )
+        if isinstance(output, ElementOutput):
+            return output
+        raise TypeError(f"Unknown output type: {type(output)}")
 
     def add_pulse(self, pulse: Pulse, name: str = "") -> None:
         # todo - check pulse compatibility with the input
@@ -248,10 +352,7 @@ class Element(Generic[ElementInputT], NamedObject):
 
     @property
     def analog_output_ports(self) -> Collection[AnalogInputPort]:
-        to_return: tuple[AnalogInputPort, ...] = tuple(x.port for x in self.outputs)
-        if self.microwave_output is not None:
-            to_return += (self.microwave_output.port,)
-        return to_return
+        return self.output.ports if self.output is not None else ()
 
     @property
     def digital_input_ports(self) -> Collection[DigitalOutputPort]:
@@ -269,3 +370,6 @@ class Element(Generic[ElementInputT], NamedObject):
             + tuple(self.digital_input_ports)
             + tuple(self.digital_output_ports)
         )
+
+
+AnyElement = Element[ElementInput, ElementOutput | None]

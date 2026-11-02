@@ -1,5 +1,4 @@
 import logging
-import warnings
 import contextlib
 import dataclasses
 from enum import Enum
@@ -7,6 +6,7 @@ from time import perf_counter
 from abc import abstractmethod
 from functools import lru_cache
 from collections import defaultdict
+from typing_extensions import deprecated
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -34,6 +34,7 @@ from qm.type_hinting.config_types import StandardPort
 from qm.octave._calibration_config import _prep_config
 from qm.api.models.server_details import ConnectionDetails
 from qm.program._dict_to_pb_converter import build_iw_sample
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.api.models.capabilities import QopCaps, ServerCapabilities
 from qm.utils.protobuf_utils import update_map, serialized_on_wire
 from qm.octave._calibration_names import COMMON_OCTAVE_PREFIX, CalibrationElementsNames
@@ -109,7 +110,9 @@ class ControllerPorts(Generic[_PortType]):
     def _get_relevant_ports(
         self,
         controller_config: Union[
-            inc_qua_config_pb2.QuaConfig.ControllerDec, inc_qua_config_pb2.QuaConfig.OctoDacFemDec
+            inc_qua_config_pb2.QuaConfig.ControllerDec,
+            inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
+            inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
         ],
     ) -> Set[int]:
         pass
@@ -119,7 +122,9 @@ class _ControllerDACPorts(ControllerPorts[inc_qua_config_pb2.QuaConfig.DacPortRe
     def _get_relevant_ports(
         self,
         controller_config: Union[
-            inc_qua_config_pb2.QuaConfig.ControllerDec, inc_qua_config_pb2.QuaConfig.OctoDacFemDec
+            inc_qua_config_pb2.QuaConfig.ControllerDec,
+            inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
+            inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
         ],
     ) -> Set[int]:
         return set(controller_config.analogOutputs)
@@ -129,7 +134,9 @@ class _ControllerADCPorts(ControllerPorts[inc_qua_config_pb2.QuaConfig.AdcPortRe
     def _get_relevant_ports(
         self,
         controller_config: Union[
-            inc_qua_config_pb2.QuaConfig.ControllerDec, inc_qua_config_pb2.QuaConfig.OctoDacFemDec
+            inc_qua_config_pb2.QuaConfig.ControllerDec,
+            inc_qua_config_pb2.QuaConfig.OctoDacFemDec,
+            inc_qua_config_pb2.QuaConfig.LFLN08FemDec,
         ],
     ) -> Set[int]:
         return set(controller_config.analogInputs)
@@ -178,16 +185,16 @@ class OctaveManager:
             fan=self._octave_config.fan,
         )
 
+    @deprecated(
+        'get_output_port is deprecated since "1.1.6" and will be removed in "1.2.0"',
+        category=QmQuaDeprecationWarning,
+        stacklevel=1,
+    )
     def get_output_port(
         self,
         opx_i_port: StandardPort,
         opx_q_port: StandardPort,
     ) -> Optional[Tuple[str, int]]:
-        warnings.warn(
-            "This function is deprecated since 1.1.6 and will be removed in 1.2.0",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return self._octave_config.get_octave_input_port(opx_i_port, opx_q_port)
 
     def _get_client_from_port(self, octave_port: Tuple[str, int]) -> Octave:
@@ -429,16 +436,24 @@ class OctaveManager:
         """calibrates IQ mixer associated with element
 
         Args:
-            close_open_quantum_machines: Boolean, if true (default) all
-                running QMs
-            octave_output_port
+            octave_output_port: The Octave output port to calibrate, as an
+                (octave_name, port_index) tuple.
             lo_if_frequencies_tuple_list: A list of LO/IF frequencies
                 for which the calibration is to be performed [(LO1,
                 IF1), (LO2, IF2), ...]
-            save_to_db
-            optimizer_parameters
-        will be closed for the calibration. Otherwise,
-        calibration might fail if there are not enough resources for the calibration
+            save_to_db: If true (default), the calibration parameters will
+                be saved to the calibration database.
+            close_open_quantum_machines: If true (default), all running
+                quantum machines will be closed for the calibration.
+                Otherwise, calibration might fail if there are not enough
+                resources for the calibration.
+            optimizer_parameters: Optional advanced parameters passed to the
+                calibration optimizer.
+            offset_frequency: The IF offset frequency, in Hz, used during the
+                calibration. Defaults to 7e6.
+
+        Returns:
+            A mapping from each (LO, IF) pair to its calibration result.
         """
         # warnings.warn(
         #     "This function is deprecated, please use the 'calibrate_element' in the QuantumMachine instance",

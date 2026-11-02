@@ -40,6 +40,9 @@ def and_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaFunctionOut
     Args:
         *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
             logical AND operation. Each input can be a single boolean, a QUA boolean or a QUA array of booleans.
+
+    Returns:
+        A QUA boolean expression with the result of the logical AND operation.
     """
     function_expression = inc_qua_pb2.QuaProgram.FunctionExpression(loc=_get_loc())
     getattr(function_expression, "and").CopyFrom(
@@ -54,6 +57,9 @@ def or_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaFunctionOutp
     Args:
         *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
             logical OR operation. Each input can be a single boolean, a QUA boolean or a QUA array of booleans.
+
+    Returns:
+        A QUA boolean expression with the result of the logical OR operation.
     """
     function_expression = inc_qua_pb2.QuaProgram.FunctionExpression(loc=_get_loc())
     getattr(function_expression, "or").CopyFrom(
@@ -68,6 +74,9 @@ def xor_(*values: Union[Scalar[bool], QuaArrayVariable[bool]]) -> QuaFunctionOut
     Args:
         *values (boolean, QUA boolean, Qua array of type boolean): The input values to be combined using a
             logical XOR operation. Each input can be a single boolean, a QUA boolean, or a QUA array of booleans.
+
+    Returns:
+        A QUA boolean expression with the result of the logical XOR operation.
     """
     function_expression = inc_qua_pb2.QuaProgram.FunctionExpression(
         xor=inc_qua_pb2.QuaProgram.FunctionExpression.XorFunction(values=_standardize_args(*values)),

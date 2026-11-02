@@ -10,16 +10,16 @@ from qm.config._ports import (
     StandardPort,
     ElementPortType,
     AnalogOutputPort,
-    AnalogOutputPortMicrowave,
+    AnalogOutputPortMw,
     standardize_lf_port,
 )
 
 
-def _standardize_mw_port(port: StandardPort | AnalogOutputPortMicrowave) -> AnalogOutputPortMicrowave:
-    if isinstance(port, AnalogOutputPortMicrowave):
+def _standardize_mw_port(port: StandardPort | AnalogOutputPortMw) -> AnalogOutputPortMw:
+    if isinstance(port, AnalogOutputPortMw):
         return port
     cont, fem, idx = port
-    return AnalogOutputPortMicrowave(fem=MwFem(controller=Opx1000(cont), index=fem), index=idx)
+    return AnalogOutputPortMw(fem=MwFem(controller=Opx1000(cont), index=fem), index=idx)
 
 
 class ElementInput(ConfigObject, ABC):
@@ -103,7 +103,11 @@ class Mixer(NamedObject):
         return to_return
 
 
-class MixInput(ElementInput):
+class ComplexInput(ElementInput, ABC):
+    """Represents all the inputs that require a complex pulse (I/Q)"""
+
+
+class MixedInput(ComplexInput):
     """The specification of the input of an element which is driven by an IQ mixer."""
 
     def __init__(
@@ -123,7 +127,7 @@ class MixInput(ElementInput):
         self.i_port = standardize_lf_port(i_port)
         self.q_port = standardize_lf_port(q_port)
         # Keep `None` when the user didn't declare a mixer. Auto-creating an empty `Mixer({})` here
-        # would let `NamedObject.__init__` assign a hash-based name like `mixer_22fd`, which the pb
+        # would let `NamedObject.__init__` assign a generated name like `mixer_1`, which the pb
         # then references but the mixer-collection step skips (no corrections), producing a dangling
         # reference the server rejects. The dict-to-pb path only synthesises a mixer when the
         # element has an intermediate frequency — see `add_identity_correction_to_mixer` below.
@@ -177,10 +181,10 @@ class MultipleInputs(InputCollection):
     """Defines a set of single inputs which are all played at once."""
 
 
-class MicrowaveInput(ElementInput):
+class MwInput(ComplexInput):
     """The specification of the MW input of an element."""
 
-    def __init__(self, port: AnalogOutputPortMicrowave | StandardPort, upconverter_idx: int = 1) -> None:
+    def __init__(self, port: AnalogOutputPortMw | StandardPort, upconverter_idx: int = 1) -> None:
         """
         Args:
             port: The MW analog output port driving this element. Either an
@@ -195,7 +199,7 @@ class MicrowaveInput(ElementInput):
         return (self.port,)
 
 
-class UpconvertedRfInput(MixInput):
+class UpconvertedRfInput(MixedInput):
     """A ``MixInput`` whose I/Q ports and LO frequency come from an Octave RF output."""
 
     def __init__(self, port: OctaveRfOutput, mixer: Mixer | None = None, name: str = "") -> None:
@@ -205,6 +209,7 @@ class UpconvertedRfInput(MixInput):
                 LO frequency.
             mixer: Optional mixer correction. If ``None``, an empty ``Mixer`` is
                 created.
+            name: Name used to reference this input. Defaults to ``"in1"`` when not provided.
         """
         super().__init__(
             i_port=port.i_connection,

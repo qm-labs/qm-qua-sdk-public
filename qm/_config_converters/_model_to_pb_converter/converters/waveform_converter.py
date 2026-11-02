@@ -4,11 +4,13 @@ from qm.api.models.capabilities import QopCaps
 from qm.utils.protobuf_utils import which_one_of
 from qm.exceptions import ConfigValidationException
 from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
-from qm.config._waveforms import AnalogWaveform, DigitalWaveform, ArbitraryWaveform
 from qm._config_converters._model_to_pb_converter.base_converter import BaseModelToPbConverter
-from qm.config._waveforms._analog import (
+from qm.config import (
     WaveformArray,
+    AnalogWaveform,
+    DigitalWaveform,
     ConstantWaveform,
+    ArbitraryWaveform,
     OverridableArbitraryWaveform,
     ArbitraryWaveformWithMaxError,
     ArbitraryWaveformWithSamplingRate,

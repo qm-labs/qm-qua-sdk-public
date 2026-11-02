@@ -72,9 +72,9 @@ __all__ = [
 warnings.filterwarnings("default", category=DeprecationWarning, module="qm")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="qm.grpc")
 
-config = UserConfig.create_from_file()
-config_loggers(config)
+_logger_config = UserConfig.create_from_file()
+config_loggers(_logger_config)
 
 
 logger = logging.getLogger(__name__)
-logger.info(f"Starting session: {config.SESSION_ID}")
+logger.info(f"Starting session: {_logger_config.SESSION_ID}")

@@ -1,30 +1,30 @@
-import warnings
+from typing_extensions import deprecated
 
 from qm._loc import _get_loc
 from qm.grpc.qm.pb import inc_qua_pb2
-from qm.utils import deprecation_message
+from qm.qua._dsl._type_hints import ElementRef
+from qm.qua._dsl._utils import _add_element_to_program
+from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.qua._scope_management.scopes_manager import scopes_manager
 
 
-def reset_phase(element: str) -> None:
+@deprecated(
+    'reset_phase is deprecated since "1.2.2" and will be removed in "2.0.0". reset_if_phase instead',
+    category=QmQuaDeprecationWarning,
+    stacklevel=1,
+)
+def reset_phase(element: ElementRef) -> None:
     """Resets the intermediate frequency phase of the oscillator associated with ``element``.
 
     Deprecated since 1.2.2; will be removed in 2.0.0. Use ``reset_if_phase()`` instead.
+
+    Args:
+        element: the element whose oscillator phase is reset.
     """
-    warnings.warn(
-        deprecation_message(
-            method="reset_phase",
-            deprecated_in="1.2.2",
-            removed_in="2.0.0",
-            details="reset_if_phase instead.",
-        ),
-        DeprecationWarning,
-        stacklevel=2,
-    )
     reset_if_phase(element)
 
 
-def reset_if_phase(element: str) -> None:
+def reset_if_phase(element: ElementRef) -> None:
     r"""
     Resets the intermediate frequency phase of the oscillator associated with `element`,
     setting the phase of the next pulse to absolute zero.
@@ -42,8 +42,9 @@ def reset_if_phase(element: str) -> None:
     """
 
     loc = _get_loc()
+    name = _add_element_to_program(element)
     statement = inc_qua_pb2.QuaProgram.ResetPhaseStatement(
-        loc=loc, qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=element, loc=loc)
+        loc=loc, qe=inc_qua_pb2.QuaProgram.QuantumElementReference(name=name, loc=loc)
     )
     scopes_manager.append_statement(inc_qua_pb2.QuaProgram.AnyStatement(resetPhase=statement))
 

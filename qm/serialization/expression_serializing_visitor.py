@@ -4,6 +4,7 @@ from qm.exceptions import QmQuaException
 from qm.grpc.qm.pb.inc_qua_pb2 import QuaProgram
 from qm.utils.protobuf_utils import Node, which_one_of
 from qm.serialization.qua_node_visitor import QuaNodeVisitor
+from qm.config._elements._analog_outputs import DEFAULT_OUT1, DEFAULT_OUT2
 
 if TYPE_CHECKING:
     from qm.serialization.qua_serializing_visitor import QuaSerializingVisitor
@@ -218,9 +219,9 @@ class ExpressionSerializingVisitor(QuaNodeVisitor):
         output1 = node.elementOutput1
         output2 = node.elementOutput2
         target_name, target_value = which_one_of(node.target, "processTarget")
-        if output1 == "out1" and output2 == "out2":
+        if output1 == DEFAULT_OUT1 and output2 == DEFAULT_OUT2:
             common_args = f'"{name1}", "{name2}"'
-        elif output1 == "out2" and output2 == "out1":
+        elif output1 == DEFAULT_OUT2 and output2 == DEFAULT_OUT1:
             common_args = f'"{name2}", "{name1}"'
         else:
             common_args = f'"{name1}", "{output1}", "{name2}", "{output2}"'

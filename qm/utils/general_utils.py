@@ -13,6 +13,7 @@ def create_input_stream_name(name: str) -> str:
     return f"input_stream_{name}"
 
 
+# Internal API: not part of the public interface (no leading underscore, but kept for internal reuse).
 def run_until_with_timeout(
     on_iteration_callback: Callable[[], bool],
     # The type ignore can be removed in 3.12 with `T = TypeVar("T", default=None)`
@@ -36,6 +37,9 @@ def run_until_with_timeout(
         loop_interval: The interval (in seconds) between each loop execution.
 
         timeout_message: The message of the TimeoutError exception.
+
+    Returns:
+        The return value of ``on_complete_callback``.
     """
     if timeout < 0:
         raise ValueError("timeout cannot be smaller than 0")

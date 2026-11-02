@@ -1,9 +1,10 @@
 from typing import Mapping
 
+from qm.config._primitives import NOT_SET
 from qm.exceptions import ConfigValidationException
 from qm.grpc.qm.pb.inc_qua_config_pb2 import QuaConfig
 from qm._config_converters.split_ports_by_fems import FemDataOpx
-from qm.config._ports import OpxPlus, AnalogInputPortOpx, AnalogOutputPortOpx, DigitalInputPortOpx, DigitalOutputPortOpx
+from qm.config import OpxPlus, AnalogInputPortOpx, AnalogOutputPortOpx, DigitalInputPortOpx, DigitalOutputPortOpx
 from qm._config_converters._model_to_pb_converter.converters.fem_converters.fem_to_pb_converter_base import (
     FemToPbConverter,
 )
@@ -47,6 +48,13 @@ class OpxToPbConverter(FemToPbConverter[FemDataOpx, QuaConfig.ControllerDec]):
         """
         The deconvert function breaks liskov substitution ot simplify the interface,
         together with enjoying the goodies of the methods of the base converter
+
+        Args:
+            output_data: The protobuf controller declaration to convert back into a model.
+            controller: The OPX+ controller that the deconverted ports belong to.
+
+        Returns:
+            The OPX FEM data model (analog/digital inputs and outputs) reconstructed from the protobuf.
         """
         return FemDataOpx(
             analog_outputs=self._deconvert_opx_analog_outputs(output_data.analogOutputs, controller),
@@ -74,8 +82,8 @@ class OpxToPbConverter(FemToPbConverter[FemDataOpx, QuaConfig.ControllerDec]):
             delay=data.delay,
             shareable=data.shareable,
             crosstalk=dict(data.crosstalk),
-            filter_feedforward=self._deconvert_feedforward_filter(data.filter),
-            filter_feedback=data.filter.feedback,
+            filter_feedforward=self._deconvert_feedforward_filter(data.filter) if data.HasField("filter") else NOT_SET,
+            filter_feedback=data.filter.feedback if data.HasField("filter") else NOT_SET,
         )
 
     def _deconvert_digital_inputs(
