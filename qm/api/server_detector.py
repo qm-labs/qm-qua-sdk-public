@@ -107,6 +107,7 @@ def _redirect(
         timeout=connection_details.timeout,
         async_follow_redirects=async_follow_redirects,
         async_trust_env=async_trust_env,
+        ssl_context=connection_details.ssl_context,
     )
     octaves = {}
     if response_details.host != connection_details.host or response_details.port != connection_details.port:

@@ -678,7 +678,9 @@ class QuaExternalIncomingStream(QuaExternalStream[StructT], InputStreamInterface
         # Importing `_receive_from_opnic_stream` here to avoid circular imports
         from qm.qua._dsl.streams.external_streams import _receive_from_opnic_stream
 
-        _receive_from_opnic_stream(self, struct)
+        # This alternative API doesn't expose non-blocking receive, so is_valid/duration
+        # are always None here (blocking receive only).
+        _receive_from_opnic_stream(self, struct, is_valid=None, duration=None)
 
 
 class QuaExternalOutgoingStream(QuaExternalStream[StructT], OutputStreamInterface):

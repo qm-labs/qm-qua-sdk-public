@@ -14,7 +14,6 @@ from typing import (
     Optional,
     Sequence,
     Collection,
-    cast,
     overload,
 )
 
@@ -801,7 +800,7 @@ class JobApi(JobGenericApi):
                     raise FunctionInputError(f"Input names should be 'I' or 'Q', got {input}")
                 if not isinstance(offset, (int, float)):
                     raise FunctionInputError(f"Input should be int or float, got {type(offset)}")
-                channel_to_offset = {cast(Literal["I", "Q"], input): offset}
+                channel_to_offset = {input: offset}
             else:
                 raise ValueError(f"Invalid input - {input}")
             input_instance.set_dc_offsets(i_offset=channel_to_offset.get("I"), q_offset=channel_to_offset.get("Q"))

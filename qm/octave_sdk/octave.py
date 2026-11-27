@@ -12,7 +12,6 @@ from qm.grpc.octave.v1 import api_pb2
 from qm.octave_sdk.batch import BatchSingleton
 from qm.octave_sdk._errors import InvalidLoSource
 from qm.octave_sdk.health_monitor import HealthMonitor
-from qm.octave_sdk.conflict_manager import SynthConflicts
 from qm.octave_sdk.octave_module_com import _get_synth_state
 from qm.octave_sdk._octave_client import OctaveClient, ExploreResult
 from qm.octave_sdk._default_identity import default_identify_response
@@ -23,13 +22,11 @@ from qm.octave_sdk.connectivity.connectivity_util import (
     octave_module_to_module_name_mapping,
 )
 from qm.octave_sdk.connectivity.connectivity import (
-    UpOrDownId,
     Connectivity,
     OctaveOutput,
     AnalyzerIndex,
     OctaveLOSource,
     RFInputLOSource,
-    SynthOutputDeviceInfo,
     ModulesSlotsFromIdentity,
     _LoSourceInfo,
     _SynthLOInput,
@@ -548,7 +545,6 @@ class RFInput:
         frequency: Optional[float] = None,
         select: Optional[bool] = None,
         ignore_shared_errors: bool = False,
-        check_conflict: bool = False,
     ) -> None:
         octave_lo_source, synth_index = convert_rf_in_enum_to_octave_lo_input(
             name,
@@ -593,19 +589,6 @@ class RFInput:
         other_synth_index, other_synth_output = self._context.connectivity.get_synth_index_of_rf_in_lo(
             self._index, other
         )
-
-        if select is not None and check_conflict:
-            conflict_result = SynthConflicts(
-                synth_index,
-                synth_output,
-                octave_lo_source,
-                self._context.connectivity,
-                self._context.client,
-                request_up_or_down=SynthOutputDeviceInfo(index=self._index, up_or_down=UpOrDownId.DownConv),
-                ignore_shared_errors=ignore_shared_errors,
-            )
-            if conflict_result.is_conflict:
-                conflict_result.print_error()
 
         if octave_lo_source == OctaveLOSource.Internal:
             if frequency is not None:
@@ -1063,19 +1046,6 @@ class RFOutput:
             )
 
         synth_index, synth_output = self._context.connectivity.get_synth_index_of_rf_out_lo(self._index)
-
-        if select is not None and check_conflict:
-            conflict_result = SynthConflicts(
-                synth_index,
-                synth_output,
-                name,
-                self._context.connectivity,
-                self._context.client,
-                request_up_or_down=SynthOutputDeviceInfo(index=self._index, up_or_down=UpOrDownId.UpConv),
-                ignore_shared_errors=ignore_shared_errors,
-            )
-            if conflict_result.is_conflict:
-                conflict_result.print_error()
 
         if name == OctaveLOSource.Internal:
             # use the synth_index and synth_output_port to set internal mode

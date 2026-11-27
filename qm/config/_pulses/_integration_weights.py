@@ -48,7 +48,6 @@ class IntegrationWeights(NamedObject):
                 d0, d1 = data
                 return [(float(d0), int(d1))]
 
-            data = cast(list[float], data)
             chunks = split_list_to_chunks([round(2**-15 * round(s * 2**15), 20) for s in data])
             new_data: list[tuple[float, int]] = []
             for chunk in chunks:

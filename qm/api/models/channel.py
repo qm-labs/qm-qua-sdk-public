@@ -80,8 +80,8 @@ def create_channel(
     options = [
         ("grpc.http2.initial_connection_window_size", max_message_size),
         ("grpc.http2.initial_stream_window_size", max_message_size),
-        ("grpc.max_receive_message_length", max_message_size),
-        ("grpc.max_send_message_length", max_message_size),
+        ("grpc.max_receive_message_length", -1),
+        ("grpc.max_send_message_length", -1),
     ]
 
     # ---- TLS channel ----

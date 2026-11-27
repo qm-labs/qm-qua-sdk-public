@@ -44,7 +44,7 @@ numpy = [
   { version = "<3,>=2.4.4", python = ">=3.14" }
 ]
 tinydb = "^4.6.1"
-certifi = { version = "*", optional = true }
+certifi = { version = ">=2026.10.19", optional = true }
 datadog-api-client = "^2.6.0"
 typing-extensions = "^4.5"
 
@@ -54,11 +54,11 @@ multidict = "^6.7.0"
 
 [tool.poetry.group.dev.dependencies]
 poethepoet = "^0.16.0"
-pytest-asyncio = "^0.20.3"
 pytest-benchmark = { extras = ["aspect"], version = "^4.0.0" }
 pytest = "^9.0.3"
 pytest-cov = "^4.0.0"
 pytest-order = "^1.0.0"
+pytest-rerunfailures = "^16.0"
 pytest-xdist = "^3.8"
 poetry = ">=2.3.4,<3.0.0"
 coverage = "^7.0.1"
@@ -66,9 +66,9 @@ black = "^26"
 flake8 = "^7"
 flake8-bugbear = "*"
 
-apispec = "^5.1.1"
+apispec = "^6.10.0"
 poetry-dynamic-versioning = { extras = ["plugin"], version = "^1.0.0" }
-mypy = "^1.14"
+mypy = "^2.4"
 isort = "^8"
 qm-saas = "^1.2.0"
 cryptography = "*"  # used by tests/test_api/test_tls_credentials.py to generate test certs

@@ -1,6 +1,6 @@
 from enum import Enum
 from typing_extensions import deprecated
-from typing import Union, Literal, overload
+from typing import Union, Literal, Optional, overload
 
 from qm._loc import _get_loc
 from qm.grpc.qm.pb import inc_qua_pb2
@@ -8,7 +8,7 @@ from qm.exceptions import QmQuaException
 from qm.api.models.capabilities import QopCaps
 from qm.utils.deprecation_utils import QmQuaDeprecationWarning
 from qm.qua._scope_management.scopes_manager import scopes_manager
-from qm.qua._expressions import StructT, QuaExternalIncomingStream, QuaExternalOutgoingStream
+from qm.qua._expressions import StructT, QuaVariable, QuaExternalIncomingStream, QuaExternalOutgoingStream
 
 
 class QuaStreamDirection(Enum):
@@ -147,10 +147,15 @@ def receive_from_external_stream(stream: QuaExternalIncomingStream[StructT], str
         stream: The incoming stream to receive data from.
         struct: The struct to store the received data in.
     """
-    _receive_from_opnic_stream(stream, struct)
+    _receive_from_opnic_stream(stream, struct, is_valid=None, duration=None)
 
 
-def _receive_from_opnic_stream(stream: QuaExternalIncomingStream[StructT], struct: StructT) -> None:
+def _receive_from_opnic_stream(
+    stream: QuaExternalIncomingStream[StructT],
+    struct: StructT,
+    is_valid: Optional[QuaVariable[bool]],
+    duration: Optional[int],
+) -> None:
     try:
         _ = struct.struct_reference
     except AttributeError:
@@ -158,9 +163,34 @@ def _receive_from_opnic_stream(stream: QuaExternalIncomingStream[StructT], struc
             f"Data received from an opnic stream must be saved into a struct instance. got {type(struct).__name__} instead."
         )
 
-    statement = inc_qua_pb2.QuaProgram.AnyStatement(
-        receiveFromExternalStream=inc_qua_pb2.QuaProgram.ReceiveFromExternalStreamStatement(
-            loc=_get_loc(), stream=stream.unwrapped, struct=struct.struct_reference.unwrapped
-        )
+    _validate_non_blocking_args(is_valid, duration)
+
+    receive_statement = inc_qua_pb2.QuaProgram.ReceiveFromExternalStreamStatement(
+        loc=_get_loc(), stream=stream.unwrapped, struct=struct.struct_reference.unwrapped
     )
+    if is_valid is not None and duration is not None:
+        scopes_manager.program_scope.add_used_capability(QopCaps.external_stream_blocking_duration)
+        receive_statement.is_valid.CopyFrom(is_valid.unwrapped_scalar)
+        receive_statement.duration = duration
+
+    statement = inc_qua_pb2.QuaProgram.AnyStatement(receiveFromExternalStream=receive_statement)
     scopes_manager.append_statement(statement)
+
+
+def _validate_non_blocking_args(is_valid: Optional[QuaVariable[bool]], duration: Optional[int]) -> None:
+    if is_valid is None and duration is None:
+        return
+
+    if is_valid is None or duration is None:
+        raise QmQuaException(
+            "'is_valid' and 'duration' must be provided together to enable a non-blocking receive, "
+            "or both omitted for the default blocking behavior."
+        )
+
+    if not isinstance(is_valid, QuaVariable) or not issubclass(is_valid.dtype, bool):
+        raise QmQuaException("'is_valid' must be a QUA boolean variable declared with declare(bool).")
+
+    if not isinstance(duration, int) or isinstance(duration, bool):
+        raise QmQuaException(
+            "'duration' must be a plain integer number of clock cycles; QUA variables are not supported."
+        )

@@ -79,7 +79,7 @@ class StructDeclaration:
         self._variables[name] = (_var_type_dec[var_type], size)
 
     def get_struct_declaration(self) -> str:
-        return f"    {self.variable_name} = declare_struct({self._name})"
+        return f"{self.variable_name} = declare_struct({self._name})"
 
     def __str__(self) -> str:
         output = f"@qua_struct\nclass {self._name}:\n"
@@ -118,13 +118,12 @@ from qm.qua import *
     def out(self) -> str:
         output = self._format_imports()
 
-        struct_declarations = []
         for struct in self.structs:
             output += str(struct)
-            if struct.variable_name:
-                struct_declarations.append(struct.get_struct_declaration())
 
-        self._lines = self._lines[0:1] + struct_declarations + self._stream_declarations + self._lines[1:]
+        program_scope = self._lines.index("with program() as prog:") + 1
+        self._lines[program_scope:program_scope] = self._stream_declarations
+
         output += "\n".join(self._lines)
         return output
 
@@ -252,6 +251,7 @@ from qm.qua import *
         if struct is None:
             struct = StructDeclaration(f"Struct{node.structMember.name}", node.structMember.name)
             self.structs.append(struct)
+            self._line(struct.get_struct_declaration())
 
         struct.add_variable(node.name, node.type, node.size)
         return True
@@ -601,6 +601,11 @@ def _receive_from_external_stream(
 ) -> str:
     name = f"si{node.stream.stream_id}"  # receive is only to incoming streams
     args = [name, f"target_variable={_safe_identifier(node.struct.name)}"]
+
+    if node.HasField("is_valid"):
+        args.append(f"is_valid={_safe_identifier(node.is_valid.name)}")
+    if node.HasField("duration"):
+        args.append(f"duration={node.duration}")
 
     return f"receive_from_stream({', '.join(args)})"
 

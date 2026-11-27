@@ -118,8 +118,9 @@ class FemToPbConverter(BaseModelToPbConverter[FemDataT, FemPbT], ABC):
 
     @staticmethod
     def _get_polarity(data: QuaConfig.DigitalInputPortDec) -> ConfigOptional[Literal["RISING", "FALLING"]]:
-        if data.polarity == QuaConfig.DigitalInputPortDec.Polarity.RISING:
-            return "RISING"
-        if data.polarity == QuaConfig.DigitalInputPortDec.Polarity.FALLING:
-            return "FALLING"
+        if data.HasField("polarity"):
+            if data.polarity == QuaConfig.DigitalInputPortDec.Polarity.RISING:
+                return "RISING"
+            if data.polarity == QuaConfig.DigitalInputPortDec.Polarity.FALLING:
+                return "FALLING"
         return NOT_SET

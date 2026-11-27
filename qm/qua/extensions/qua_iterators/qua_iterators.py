@@ -147,14 +147,14 @@ class QuaIterableRange(QuaIterableBase[T]):
             self._start = int(self._start)
             self._stop = int(self._stop)
             self._step = int(self._step)
-            super().__init__(name, int, metadata)  # type: ignore[arg-type]
+            super().__init__(name, int, metadata)
 
     @property
     def values(self) -> QuaIterableArrayType[T]:
         """
         Return the Python values represented by this iterable.
         """
-        return np.arange(self._start, self._stop, self._step).tolist()
+        return cast(QuaIterableArrayType[T], np.arange(self._start, self._stop, self._step).tolist())
 
     def __iter__(self) -> QuaIteratorType[T]:
         var = self.declare_var()
@@ -233,7 +233,7 @@ class QuaIterable(QuaIterableBase[T]):
             super().__init__(name, float, metadata)  # type: ignore[arg-type]
         else:
             self._array = cast(QuaIterableArrayType[T], [int(v) for v in raw_array])
-            super().__init__(name, int, metadata)  # type: ignore[arg-type]
+            super().__init__(name, int, metadata)
 
         self._qua_range_itr: Optional[QuaIterableRange[T]] = None
         # according to dtype set the minimum step that can be done

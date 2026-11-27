@@ -45,7 +45,7 @@ def frame_rotation_2pi(angle: Scalar[float], *elements: ElementRef) -> None:
 
     Note:
         The phase is accumulated with a resolution of 16 bit.
-        Therefore, *N* changes to the phase can result in a phase inaccuracy of about :math:`N \cdot 2^{-16}`.
+        Therefore, *N* changes to the phase can result in a phase (and amplitude) inaccuracy of about :math:`N \cdot 2^{-16}`.
         To null out this accumulated error, it is recommended to use `reset_frame(el)` from time to time.
 
     Args:

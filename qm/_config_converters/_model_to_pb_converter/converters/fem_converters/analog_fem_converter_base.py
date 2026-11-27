@@ -73,7 +73,7 @@ class AnalogFemToPbConverter(FemToPbConverter[FemDataT, FemPbT]):
             QopCaps.port_voltage_limits
         ):
             raise ConfigValidationException(
-                "['min_voltage_limit', 'max_voltage_limit'] are supported only from QOP 3.7 and later"
+                "['min_voltage_limit', 'max_voltage_limit'] are supported only from QOP 3.10 and later"
             )
 
         filters = self._build_output_filters(data)

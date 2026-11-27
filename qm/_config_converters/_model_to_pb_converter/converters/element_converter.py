@@ -484,14 +484,11 @@ class ElementConverter(BaseModelToPbConverter[FullConfigModel, QuaConfig]):
         input_ = _deconvert_element_input(pb, mixer_map, port_lookup)
         output = _deconvert_element_output(pb, port_lookup)
 
+        time_of_flight = pb.timeOfFlight.value if serialized_on_wire(pb.timeOfFlight) else None
+        smearing = pb.smearing.value if serialized_on_wire(pb.smearing) else None
+
         digital_inputs = _deconvert_digital_inputs(pb.digitalInputs, port_lookup)
         digital_outputs = _deconvert_digital_outputs(pb.digitalOutputs, port_lookup)
-
-        # The server may report these on elements without outputs (e.g. octave calibration elements), but the
-        # model only allows them on elements that have outputs.
-        has_any_output = output is not None or bool(digital_outputs)
-        time_of_flight = pb.timeOfFlight.value if has_any_output and serialized_on_wire(pb.timeOfFlight) else None
-        smearing = pb.smearing.value if has_any_output and serialized_on_wire(pb.smearing) else None
 
         sticky = None
         if serialized_on_wire(pb.sticky):

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 
+## [1.6.0] - 2026-11-27
+
+- Requires Python >=3.10, <3.15
+- Tested against QOP 3.10.x, 3.9.x, 3.8.x, 3.7.x, 2.6.x
+
+### Added
+- QOP 3.10 — Added support for non-blocking receives from OPNIC streams: `receive_from_stream` now accepts the `is_valid` and `duration` arguments, to receive a packet within a fixed, deterministic number of cycles instead of blocking indefinitely.
+- QOP 3.10 — Added support for limiting the output voltage of LF-FEM analog output ports with the `min_voltage_limit` and `max_voltage_limit` keys.
+
+### Changed
+- Changed the location (`loc`) attached to each QUA program statement: source lines longer than 200 characters are now truncated with an ellipsis.
+
+### Fixed
+- Fixed the gateway redirection check, which always used plain HTTP even when `credentials` were given to `QuantumMachinesManager`, so connecting to a TLS-only gateway failed unless `follow_gateway_redirections=False` was set.
+- Fixed sending messages larger than 100 MiB (for example, a large program or configuration), which failed on the client side with `RESOURCE_EXHAUSTED`. The SDK no longer limits the gRPC message size; only the server's limit applies.
+- Fixed the error raised when the `metrics` property of `ControllerOPX1000` (returned by `qmm.get_devices()`) is used with a QOP version that does not support it: the message now says it is supported from QOP 3.9, instead of QOP 3.8.
+- Fixed the error raised when the `min_voltage_limit` and `max_voltage_limit` keys of LF-FEM analog output ports are used with a QOP version that does not support them: the message now says they are supported from QOP 3.10, instead of QOP 3.7.
+- Fixed `generate_qua_script()` for programs with compiler options, which placed struct and stream declarations before `with program()`, so the generated script could not run.
+
+### Removed
+- Removed `qm.octave_sdk.octave_async_thread.ConnectionDetails`, an unused public dataclass.
+
+
 ## [1.5.0] - 2026-11-01
 
 - Requires Python >=3.10, <3.15

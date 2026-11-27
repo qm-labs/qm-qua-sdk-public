@@ -1,6 +1,7 @@
 import re
+import ssl
 import logging
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Union, Optional
 
 import httpx
 from httpx import Response
@@ -36,11 +37,23 @@ def parse_octaves(raw_response: str) -> Dict[str, Tuple[str, int]]:
 
 
 def send_redirection_check(
-    host: str, port: int, headers: Dict[str, str], timeout: float, async_follow_redirects: bool, async_trust_env: bool
+    host: str,
+    port: int,
+    headers: Dict[str, str],
+    timeout: float,
+    async_follow_redirects: bool,
+    async_trust_env: bool,
+    ssl_context: Optional[ssl.SSLContext] = None,
 ) -> ResponseConnectionDetails:
     extended_headers = {"content-type": "application/grpc", "te": "trailers", **headers}
+    scheme = "https" if ssl_context is not None else "http"
     response = _get_httpx_response(
-        f"http://{host}:{port}", extended_headers, timeout, async_follow_redirects, async_trust_env
+        f"{scheme}://{host}:{port}",
+        extended_headers,
+        timeout,
+        async_follow_redirects,
+        async_trust_env,
+        verify=ssl_context if ssl_context is not None else True,
     )
     if response.status_code == 400:
         if headers.get("any_cluster", "false") == "false":
@@ -58,10 +71,20 @@ def send_redirection_check(
 
 
 def _get_httpx_response(
-    url: str, headers: Dict[str, str], timeout: float, follow_redirects: bool, trust_env: bool
+    url: str,
+    headers: Dict[str, str],
+    timeout: float,
+    follow_redirects: bool,
+    trust_env: bool,
+    verify: Union[ssl.SSLContext, bool] = True,
 ) -> Response:
     with httpx.Client(
-        http2=True, follow_redirects=follow_redirects, http1=False, timeout=timeout, trust_env=trust_env
+        http2=True,
+        follow_redirects=follow_redirects,
+        http1=False,
+        timeout=timeout,
+        trust_env=trust_env,
+        verify=verify,
     ) as client:
         response = client.post(url, headers=headers, content=Empty().SerializeToString())
     return response

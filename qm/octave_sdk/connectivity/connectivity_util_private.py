@@ -83,14 +83,14 @@ def get_rf_source_from_synth_panel_output(rf_source: api_pb2.RFSource) -> api_pb
         raise RfSourceTypeException("rf source is not supported")
 
 
-identity_object_to_module_ref_type_mapping: Mapping[  # type: ignore[name-defined]
+identity_object_to_module_ref_type_mapping: Mapping[
     Union[
         type[api_pb2.RFUpConvIdentity],
         type[api_pb2.RFDownConvIdentity],
         type[api_pb2.IFDownConvIdentity],
         type[api_pb2.SynthIdentity],
     ],
-    api_pb2.OctaveModule.ValueType,
+    api_pb2.OctaveModule.ValueType,  # type: ignore[name-defined]
 ] = {
     api_pb2.RFUpConvIdentity: api_pb2.OctaveModule.OCTAVE_MODULE_RF_UPCONVERTER,
     api_pb2.RFDownConvIdentity: api_pb2.OctaveModule.OCTAVE_MODULE_RF_DOWNCONVERTER,

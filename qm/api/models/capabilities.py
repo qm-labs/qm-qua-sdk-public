@@ -59,11 +59,14 @@ class QopCaps:
     multiple_streams_fetching = Capability("qm.multiple_streams_fetching", "3.5")
     external_stream = Capability("qm.external_stream", "3.5", name_in_exception="declaring an external stream")
     device_temperatures = Capability("qm.device_temperatures", "3.6")
-    port_voltage_limits = Capability("qm.port_voltage_limits", "3.7")
+    port_voltage_limits = Capability("qm.port_voltage_limits", "3.10")
     lo_mode = Capability("qm.lo_mode", "3.7")
-    device_metrics = Capability("qm.device_metrics", "3.8")
+    device_metrics = Capability("qm.device_metrics", "3.9")
     persistent_elements = Capability("qm.persistent_elements", "3.9")
     lf_ln08_fem = Capability("qm.lf_ln08_fem", "3.9", name_in_exception="LF-LN08")
+    external_stream_blocking_duration = Capability(
+        "qm.external_stream_blocking_duration", "3.10", name_in_exception="non-blocking opnic receive"
+    )
 
     @staticmethod
     def get_all() -> Set[Capability]:

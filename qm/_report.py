@@ -36,9 +36,9 @@ class ExecutionError:
 
     @staticmethod
     def _parse_severity(
-        error_severity: Union[  # type: ignore[name-defined]
-            job_results_pb2.GetJobErrorsResponse.ExecutionErrorSeverity.ValueType,
-            job_api_pb2.GetJobErrorsResponse.GetJobErrorsResponseSuccess.ExecutionErrorSeverity.ValueType,
+        error_severity: Union[
+            job_results_pb2.GetJobErrorsResponse.ExecutionErrorSeverity.ValueType,  # type: ignore[name-defined]
+            job_api_pb2.GetJobErrorsResponse.GetJobErrorsResponseSuccess.ExecutionErrorSeverity.ValueType,  # type: ignore[name-defined]
         ],
     ) -> ExecutionErrorSeverity:
         if error_severity in {

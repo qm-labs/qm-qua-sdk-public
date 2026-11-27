@@ -51,7 +51,6 @@ def _standardize_iw_data(data: Union[List[Tuple[float, int]], List[float]]) -> L
             d0, d1 = cast(Tuple[float, int], data)
             return [(float(d0), int(d1))]
 
-        data = cast(List[float], data)
         chunks = split_list_to_chunks([round(2**-15 * round(s * 2**15), 20) for s in data])
         new_data: List[Tuple[float, int]] = []
         for chunk in chunks:
